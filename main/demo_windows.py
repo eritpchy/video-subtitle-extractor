@@ -17,6 +17,7 @@ import glob
 from PIL import Image
 from cnocr import CnOcr
 from fuzzywuzzy import fuzz
+from tqdm import tqdm
 
 sys.path.append(os.getcwd())
 
@@ -63,7 +64,7 @@ def video_to_frames(path):
     # 逐帧扫描
     # loop_times = int(total_framesX)
 
-    for i in range(loop_times):
+    for i in tqdm(range(loop_times), ncols=75):
         sucess, frame = videoCap.read()
         if frame is None:
             # print('video: %s finish at %d frame.' % (video_filename, current_frame))
@@ -76,6 +77,7 @@ def video_to_frames(path):
         for j in range(int(fps)):  #跳过剩下的帧，因为字幕持续时间往往1s以上
             sucess, frame = videoCap.read()
             current_frame += 1
+        pass
     return fps
 
 def get_images():
@@ -250,7 +252,10 @@ def to_textImg():
         os.mkdir(output_folder)
 
     for i in range(len(images)):
-        img, (rh, rw) =  resize_image(cv2.imread(images[i]))
+        img = cv2.imread(images[i])
+        if img is None:
+            continue
+        img, (rh, rw) =  resize_image(img)
         tr = text_range(txts[i])
         if tr == []:
             continue
@@ -331,14 +336,20 @@ def text_detect():
             saver.restore(sess, model_path)
 
             im_fn_list = get_images()
-            for im_fn in im_fn_list:
-                print('===============')
-                print(im_fn)
+            bar = tqdm(im_fn_list, ncols=75)
+            for im_fn in bar:
+                bar.set_description(im_fn)
                 start = time.time()
                 try:
                     im = cv2.imread(im_fn)[:, :, ::-1]
                 except:
                     print("Error reading image {}!".format(im_fn))
+                    pass
+                    continue
+
+                if im is None:
+                    print("Error reading image {}!".format(im_fn))
+                    pass
                     continue
 
                 img, (rh, rw) = resize_image(im)
@@ -357,7 +368,6 @@ def text_detect():
                 boxes = np.array(boxes, dtype=np.int)
 
                 cost_time = (time.time() - start)
-                print("cost time: {:.2f}s".format(cost_time))
 
                 for i, box in enumerate(boxes):
                     cv2.polylines(img, [box[:8].astype(np.int32).reshape((-1, 1, 2))], True, color=(0, 255, 0),
@@ -371,6 +381,7 @@ def text_detect():
                         line = ",".join(str(box[k]) for k in range(8))
                         line += "," + str(scores[i]) + "\n"
                         f.writelines(line)
+                pass
 
 def frames_to_timecode(framerate,frames):
     """
