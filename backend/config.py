@@ -105,7 +105,7 @@ DET_MODEL_BASE = os.path.join(BASE_DIR, 'models')
 # 设置文本识别模型 + 字典
 REC_MODEL_BASE = os.path.join(BASE_DIR, 'models')
 # 默认字典路径为中文
-DICT_BASE = os.path.join(BASE_DIR, 'ppocr', 'utils', 'dict')
+DICT_BASE = os.path.join(BASE_DIR, 'dict')
 # V3, V4模型默认图形识别的shape为3, 48, 320
 REC_IMAGE_SHAPE = '3,48,320'
 REC_MODEL_PATH = os.path.join(REC_MODEL_BASE, MODEL_VERSION, f'{REC_CHAR_TYPE}_rec')
