@@ -13,4 +13,4 @@ numpy==1.26.4
 shapely==2.0.7
 six==1.17.0
 setuptools==75.8.0
-paddleocr==2.9.1
+git+https://github.com/PaddlePaddle/PaddleOCR@e8399f267bf9d55e0d3fe20443aa2c1410331cf2
