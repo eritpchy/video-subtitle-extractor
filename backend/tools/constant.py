@@ -10,7 +10,7 @@ class SubtitleArea(Enum):
     # 不知道字幕区域可能出现的位置
     UNKNOWN = 2
     # 明确知道字幕区域出现的位置
-    CUSTOM = 3
+    # CUSTOM = 3
 
 
 class BackgroundColor(Enum):

@@ -70,7 +70,6 @@ jobs:
         python backend/tools/makedist.py --cuda=10.2 && \
         mv ../vse_out ./vse_out && \
         git checkout requirements.txt && \
-        pip download -d ./vse_out/Debug/opt/packages/ paddlepaddle-gpu==2.5.2.post102 -f https://www.paddlepaddle.org.cn/whl/windows/mkl/avx/stable.html && \
         pip download -d ./vse_out/Debug/opt/packages/ -r requirements.txt && \
         cp -rfv ./vse_out/Debug/opt/packages/* ./vse_out/Release/opt/packages/ && \
         rm -fv ./vse_out/*/opt/packages/numpy-2* && \
