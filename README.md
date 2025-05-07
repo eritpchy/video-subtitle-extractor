@@ -15,7 +15,6 @@ Video-subtitle-extractor (VSE) 是一款将视频中的硬字幕提取为外挂�
 - 过滤非字幕区域的文本
 - [去除水印、台标文本、原视频硬字幕，可配合：video-subtitle-remover (VSR) ](https://github.com/YaoFANGUK/video-subtitle-remover/tree/main)
 - 去除重复字幕行，生成srt字幕文件/txt文本文件
-> 若需要生成txt文本，可以在backend/config.py中设置```GENERATE_TXT=True```
 - 支持视频字幕**批量提取**
 - 多语言：支持**简体中文（中英双语）**、**繁体中文**、**英文**、**日语**、**韩语**、**越南语**、**阿拉伯语**、**法语**、**德语**、**俄语**、**西班牙语**、**葡萄牙语**、**意大利语**等**87种**语言的字幕提取
 - 多模式：
@@ -91,11 +90,11 @@ Video-subtitle-extractor (VSE) 是一款将视频中的硬字幕提取为外挂�
 **预构建包对比说明**：
 |       预构建包名          | Python  | Paddle | 环境                          | 支持的计算能力范围|
 |---------------|------------|--------------|-----------------------------|----------|
-| `vse-windows-cpu.7z`  | 3.12       | 3.0rc1       | 无 GPU，CPU 运行             | 通用 |
-| `vse-windows-directml.7z`  | 3.12       | 3.0rc1       | Windows 非Nvidia显卡             | 通用 |
+| `vse-windows-cpu.7z`  | 3.12       | 3.0.0       | 无 GPU，CPU 运行             | 通用 |
+| `vse-windows-directml.7z`  | 3.12       | 3.0.0       | Windows 非Nvidia显卡             | 通用 |
 | `vse-windows-nvidia-cuda-10.2.7z` | 3.11       | 2.5.2        | CUDA 10.2   | 3.0 – 7.5 |
-| `vse-windows-nvidia-cuda-11.8.7z` | 3.12       | 3.0rc1       | CUDA 11.8   | 3.5 – 8.9 |
-| `vse-windows-nvidia-cuda-12.3.7z` | 3.12       | 3.0rc1       | CUDA 12.3   | 5.0 – 9.0 |
+| `vse-windows-nvidia-cuda-11.8.7z` | 3.12       | 3.0.0       | CUDA 11.8   | 3.5 – 8.9 |
+| `vse-windows-nvidia-cuda-12.6.7z` | 3.12       | 3.0.0       | CUDA 12.6   | 5.0 – 9.0 |
 
 > NVIDIA官方提供了各GPU型号的计算能力列表，您可以参考链接: [CUDA GPUs](https://developer.nvidia.com/cuda-gpus) 查看你的GPU适合哪个CUDA版本
 
@@ -199,7 +198,7 @@ cd <源码所在目录>
 
 - 安装 PaddlePaddle GPU 版本（CUDA 11.8）：
   ```shell
-  pip install paddlepaddle-gpu==3.0.0rc1 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/
+  pip install paddlepaddle-gpu==3.0.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/
   pip install -r requirements.txt
   ```
 
@@ -208,7 +207,7 @@ cd <源码所在目录>
 - 适用于 Windows 设备的 AMD/NVIDIA/Intel GPU。
 - 安装 ONNX Runtime DirectML 版本：
   ```shell
-  pip install paddlepaddle==3.0.0rc1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+  pip install paddlepaddle==3.0.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
   pip install -r requirements.txt
   pip install -r requirements_directml.txt
   ```
@@ -219,7 +218,7 @@ cd <源码所在目录>
 - 适用于 Linux 或 macOS 设备的 AMD/Metal GPU/Apple Silicon GPU。
 - 安装 ONNX Runtime DirectML 版本：
   ```shell
-  pip install paddlepaddle==3.0.0rc1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+  pip install paddlepaddle==3.0.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
   pip install -r requirements.txt
 
   # 阅读文档 https://onnxruntime.ai/docs/execution-providers/
@@ -239,7 +238,7 @@ cd <源码所在目录>
 - 适用于没有 GPU 或不希望使用 GPU 的情况。
 - 直接安装 CPU 版本 PaddlePaddle：
   ```shell
-  pip install paddlepaddle==3.0.0rc1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+  pip install paddlepaddle==3.0.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
   pip install -r requirements.txt
   ```
 

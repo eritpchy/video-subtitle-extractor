@@ -16,7 +16,7 @@ import numpy as np
 from collections import namedtuple
 
 
-def extract_subtitles(data, text_recogniser, img, raw_subtitle_file,
+def extract_subtitles(data, text_recogniser, img, raw_subtitles,
                       sub_area, options, dt_box_arg, rec_res_arg, ocr_loss_debug_path):
     """
     提取视频帧中的字幕信息
@@ -60,12 +60,12 @@ def extract_subtitles(data, text_recogniser, img, raw_subtitle_file,
                     # 保留该帧
                     selected = True
                     line += f'{str(data["i"]).zfill(8)}\t{coordinate}\t{text}\n'
-                    raw_subtitle_file.write(f'{str(data["i"]).zfill(8)}\t{coordinate}\t{text}\n')
+                    raw_subtitles.append(f'{str(data["i"]).zfill(8)}\t{coordinate}\t{text}\n')
             # 保存丢掉的识别结果
             loss_info = namedtuple('loss_info', 'text prob overflow_area_rate coordinate selected')
             loss_list.append(loss_info(text, prob, overflow_area_rate, coordinate, selected))
         else:
-            raw_subtitle_file.write(f'{str(data["i"]).zfill(8)}\t{coordinate}\t{text}\n')
+            raw_subtitles.append(f'{str(data["i"]).zfill(8)}\t{coordinate}\t{text}\n')
     # 输出调试信息
     dump_debug_info(options, line, img, loss_list, ocr_loss_debug_path, sub_area, data)
 
@@ -129,24 +129,30 @@ def ocr_task_consumer(ocr_queue, raw_subtitle_path, sub_area, video_path, option
     data = {'i': 1}
     # 初始化文本识别对象
     text_recogniser = OcrRecogniser()
+    text_recogniser.hardware_accelerator = options.HARDWARD_ACCELERATOR
     # 丢失字幕的存储路径
     ocr_loss_debug_path = os.path.join(os.path.abspath(os.path.splitext(video_path)[0]), 'loss')
     # 删除之前的缓存垃圾
     if os.path.exists(ocr_loss_debug_path):
         shutil.rmtree(ocr_loss_debug_path, True)
 
-    with open(raw_subtitle_path, mode='w+', encoding='utf-8') as raw_subtitle_file:
+    raw_subtitles = []
+    try:
         while True:
             try:
                 frame_no, frame, dt_box, rec_res = ocr_queue.get(block=True)
                 if frame_no == -1:
                     return
                 data['i'] = frame_no
-                extract_subtitles(data, text_recogniser, frame, raw_subtitle_file, sub_area, options, dt_box,
-                                  rec_res, ocr_loss_debug_path)
+                extract_subtitles(data, text_recogniser, frame, raw_subtitles, sub_area, options, dt_box,
+                                    rec_res, ocr_loss_debug_path)
             except Exception as e:
                 print(e)
                 break
+    finally:
+        with open(raw_subtitle_path, mode='w+', encoding='utf-8') as raw_subtitle_file:
+            for line in raw_subtitles:
+                raw_subtitle_file.write(line)
 
 
 def ocr_task_producer(ocr_queue, task_queue, progress_queue, video_path, raw_subtitle_path):
@@ -188,6 +194,7 @@ def ocr_task_producer(ocr_queue, task_queue, progress_queue, video_path, raw_sub
                 # 根据默认字幕位置，则对视频帧进行裁剪，裁剪后处理
                 if default_subtitle_area is not None:
                     frame = frame_preprocess(default_subtitle_area, frame)
+                # print(f"current_frame_no: {current_frame_no}")
                 ocr_queue.put((current_frame_no, frame, dt_box, rec_res))
         except Exception as e:
             print(e)
@@ -234,11 +241,13 @@ def async_start(video_path, raw_subtitle_path, sub_area, options):
     options.DROP_SCORE
     options.SUB_AREA_DEVIATION_RATE
     options.DEBUG_OCR_LOSS
+    options.HARDWARD_ACCELERATOR
     """
     assert 'REC_CHAR_TYPE' in options, "options缺少参数：REC_CHAR_TYPE"
     assert 'DROP_SCORE' in options, "options缺少参数: DROP_SCORE'"
     assert 'SUB_AREA_DEVIATION_RATE' in options, "options缺少参数: SUB_AREA_DEVIATION_RATE"
     assert 'DEBUG_OCR_LOSS' in options, "options缺少参数: DEBUG_OCR_LOSS"
+    assert 'HARDWARD_ACCELERATOR' in options, "options缺少参数: HARDWARD_ACCELERATOR"
     # 创建一个任务队列
     # 任务格式为：(total_frame_count总帧数, current_frame_no当前帧, dt_box检测框, rec_res识别结果, subtitle_area字幕区域)
     task_queue = Queue()
