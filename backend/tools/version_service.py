@@ -6,7 +6,7 @@ import requests
 
 from PySide6.QtCore import QVersionNumber
 
-from backend.config import VERSION, PROJECT_UPDATE_URLS
+from backend.config import VERSION, PROJECT_UPDATE_URLS, tr
 
 
 class VersionService:
@@ -43,10 +43,10 @@ class VersionService:
                     continue  # 如果版本格式不匹配，尝试下一个API
 
                 self.lastest_version = match.group(1)
-                print(f"当前版本: {VERSION} 最新版本: {self.lastest_version}")
+                print(tr['VersionService']['VersionInfo'].format(VERSION, self.lastest_version))
                 return self.lastest_version
             except Exception as e:
-                print(f"尝试访问 {url} 失败: {str(e)}")
+                print(tr['VersionService']['RequestError'].format(url, str(e)))
                 continue  # 出错时尝试下一个API
         
         # 所有API都失败时返回当前版本

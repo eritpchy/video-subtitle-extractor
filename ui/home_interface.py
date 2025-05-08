@@ -4,14 +4,16 @@ import threading
 import atexit
 import multiprocessing
 import time
+import traceback
 from multiprocessing import managers
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QFileDialog
 from PySide6.QtCore import Qt, Slot, QTimer, QRect, QRectF, Signal
 from PySide6 import QtCore, QtWidgets, QtGui
 from qfluentwidgets import (qconfig, PushButton, CardWidget, SubtitleLabel, PlainTextEdit,
                            FluentIcon, HollowHandleStyle)
 from ui.setting_interface import SettingInterface
 from ui.component.video_display_component import VideoDisplayComponent
+from ui.component.task_list_component import TaskListComponent, TaskStatus
 from backend.config import config, tr
 from backend.tools.process_manager import ProcessManager
 from backend.tools.subtitle_extractor_remote_call import SubtitleExtractorRemoteCall
@@ -40,6 +42,9 @@ class HomeInterface(QWidget):
 
         # 添加自动滚动控制标志
         self.auto_scroll = True
+        
+        # 当前正在处理的任务索引
+        self.current_processing_task_index = -1
 
         # 获取屏幕大小
         screen = QtWidgets.QApplication.primaryScreen().size()
@@ -57,7 +62,6 @@ class HomeInterface(QWidget):
         self.progress_signal.connect(self.update_progress)
         self.append_log_signal.connect(self.append_log)
         print(tr['Main']['AcceleratorWarning'])
-        
 
     def __initWidget(self):
         """创建主页面"""
@@ -71,7 +75,6 @@ class HomeInterface(QWidget):
         
         # 创建视频显示组件
         self.video_display_component = VideoDisplayComponent(self)
-        self.video_display_component.selection_changed.connect(self.on_selection_changed)
         left_layout.addWidget(self.video_display_component)
         
         # 获取视频显示和滑块的引用
@@ -98,18 +101,24 @@ class HomeInterface(QWidget):
 
         # 右侧设置区域
         right_layout = QVBoxLayout()
-        right_layout.setSpacing(20)
+        right_layout.setSpacing(10)
 
         # 设置容器
         settings_container = CardWidget(self)
         settings_container.setLayout(SettingInterface(settings_container))
         right_layout.addWidget(settings_container)
         
-        right_layout.addStretch()
-        
-        # 操作标题
-        operation_title = SubtitleLabel('')
-        right_layout.addWidget(operation_title)
+        # 添加任务列表容器
+        task_list_container = CardWidget(self)
+        task_list_layout = QHBoxLayout()
+        task_list_layout.setContentsMargins(0, 0, 0, 0)
+        task_list_layout.setSpacing(0)
+        self.task_list_component = TaskListComponent(self)
+        self.task_list_component.task_selected.connect(self.on_task_selected)
+        self.task_list_component.task_deleted.connect(self.on_task_deleted)
+        task_list_layout.addWidget(self.task_list_component)
+        task_list_container.setLayout(task_list_layout)
+        right_layout.addWidget(task_list_container, 1)  # 占满剩余空间
         
         # 操作按钮容器
         button_container = CardWidget(self)
@@ -143,10 +152,6 @@ class HomeInterface(QWidget):
         elif self.auto_scroll and value < scrollbar.maximum():
             self.auto_scroll = False
 
-    def on_selection_changed(self, rect):
-        """处理选择框变化"""
-        self.selection_rect = rect
-        self.update_subtitle_area()
     
     def slider_changed(self, value):
         if self.video_cap is not None and self.video_cap.isOpened():
@@ -157,6 +162,35 @@ class HomeInterface(QWidget):
                 # 更新预览图像
                 self.update_preview(frame)
         
+    def on_task_selected(self, index, file_path):
+        """处理任务被选中事件
+        
+        Args:
+            index: 任务索引
+            file_path: 文件路径
+        """
+        # 加载选中的视频进行预览
+        self.load_video(file_path)
+    
+    def on_task_deleted(self, index):
+        """处理任务被删除事件
+        
+        Args:
+            index: 任务索引
+        """
+        # 如果删除的是正在处理的任务，则需要更新状态
+        if index == self.current_processing_task_index:
+            self.current_processing_task_index = -1
+        
+        # 如果删除的是待处理队列中的任务，则需要从队列中移除
+        if index < len(self.video_paths):
+            self.video_paths.pop(index)
+        
+        if len(self.video_paths) > 0:
+            # 如果还有任务，选中第一个
+            self.load_video(self.video_paths[0])
+            self.task_list_component.select_task(0)
+
     def update_preview(self, frame):
         # 先缩放图像
         resized_frame = self._img_resize(frame)
@@ -227,75 +261,70 @@ class HomeInterface(QWidget):
         return padded
 
     def run_button_clicked(self):
-        if self.video_cap is None or not self.video_paths:
+        if not self.task_list_component.get_pending_tasks():
             self.append_output(tr['SubtitleExtractorGUI']['OpenVideoFirst'])
-        else:
-            # 禁用部分按钮
+            return
+            
+        try:
             self.run_button.setEnabled(False)
             self.file_button.setEnabled(False)
             
-            # 获取字幕区域坐标（使用选择框的坐标并进行缩放）
-            if hasattr(self, 'scaled_width') and hasattr(self, 'scaled_height'):
-                # 调整选择框坐标，考虑黑边偏移
-                x_adjusted = max(0, self.selection_rect.x() - self.border_left)
-                y_adjusted = max(0, self.selection_rect.y() - self.border_top)
-                
-                # 如果选择框超出了实际视频区域，需要调整宽度和高度
-                w_adjusted = min(self.selection_rect.width(), self.scaled_width - x_adjusted)
-                h_adjusted = min(self.selection_rect.height(), self.scaled_height - y_adjusted)
-                
-                # 转换为原始视频坐标
-                scale_x = self.frame_width / self.scaled_width
-                scale_y = self.frame_height / self.scaled_height
-                
-                self.xmin = int(x_adjusted * scale_x)
-                self.xmax = int((x_adjusted + w_adjusted) * scale_x)
-                self.ymin = int(y_adjusted * scale_y)
-                self.ymax = int((y_adjusted + h_adjusted) * scale_y)
-            else:
-                # 横屏视频，直接使用原来的计算方式
-                scale_x = self.frame_width / self.video_preview_width
-                scale_y = self.frame_height / self.video_preview_height
-                
-                self.xmin = int(self.selection_rect.x() * scale_x)
-                self.xmax = int((self.selection_rect.x() + self.selection_rect.width()) * scale_x)
-                self.ymin = int(self.selection_rect.y() * scale_y)
-                self.ymax = int((self.selection_rect.y() + self.selection_rect.height()) * scale_y)
+            # 获取字幕区域坐标（直接从视频显示组件获取）
+            subtitle_area = self.video_display_component.get_original_coordinates()
+            self.ymin, self.ymax, self.xmin, self.xmax = subtitle_area
             
-            # 确保坐标在有效范围内
-            self.xmin = max(0, min(self.xmin, self.frame_width))
-            self.xmax = max(0, min(self.xmax, self.frame_width))
-            self.ymin = max(0, min(self.ymin, self.frame_height))
-            self.ymax = max(0, min(self.ymax, self.frame_height))
-                
             self.append_output(f"{tr['SubtitleExtractorGUI']['SubtitleArea']}：({self.ymin},{self.ymax},{self.xmin},{self.xmax})")
-            
-            # 保存字幕区域配置（保存相对比例而非绝对像素值）
-            config.subtitleSelectionAreaY.value = self.ymin / self.frame_height
-            config.subtitleSelectionAreaH.value = (self.ymax - self.ymin) / self.frame_height
-            config.subtitleSelectionAreaX.value = self.xmin / self.frame_width
-            config.subtitleSelectionAreaW.value = (self.xmax - self.xmin) / self.frame_width
-            
-            qconfig.save()
             
             # 当前视频的字幕区域
             current_subtitle_area = (self.ymin, self.ymax, self.xmin, self.xmax)
-                
+            
+            # 获取所有待执行的任务
+            pending_tasks = self.task_list_component.get_pending_tasks()
+            if not pending_tasks:
+                # 没有待执行的任务，恢复按钮状态
+                self.run_button.setEnabled(True)
+                self.file_button.setEnabled(True)
+                return
+            # 更新视频路径列表，只包含待执行的任务
+            self.video_paths = [path for _, path in pending_tasks]
+            
             # 开启后台线程处理视频
             def task():
+                task_index = 0
                 while self.video_paths:
                     try:
                         video_path = self.video_paths.pop(0)
                         
-                        if not self.video_cap:
-                            self.load_video(video_path)
+                        # 更新当前处理的任务索引
+                        self.current_processing_task_index = pending_tasks[task_index][0]
+                        
+                        # 更新任务状态为运行中
+                        self.task_list_component.update_task_progress(self.current_processing_task_index, 1)
+                        
+                        # 选中当前任务
+                        self.task_list_component.select_task(self.current_processing_task_index)
+                        
+                        if self.video_cap:
+                            self.video_cap.release()
+                            self.video_cap = None
+                        self.load_video(video_path)
                         
                         # 为每个视频重新计算字幕区域
                         subtitle_area = self.calculate_subtitle_area_for_video(current_subtitle_area)
                         process = self.run_subtitle_extractor_process(video_path, subtitle_area)
+                        
+                        # 更新任务状态为已完成
+                        self.task_list_component.update_task_progress(self.current_processing_task_index, 100, True)
+                        
+                        task_index += 1
                     except Exception as e:
                         print(e)
                         self.append_output(f"Error: {e}")
+                        
+                        # 更新任务状态为失败
+                        if self.current_processing_task_index >= 0:
+                            self.task_list_component.update_task_status(self.current_processing_task_index, TaskStatus.FAILED)
+                        
                         self.video_paths.append(video_path)
                         break
                     finally:
@@ -306,6 +335,13 @@ class HomeInterface(QWidget):
                             self.video_cap = None
 
             threading.Thread(target=task, daemon=True).start()
+        except Exception as e:
+            print(traceback.format_exc())
+            self.append_output(f"Error: {e}")
+            # 没有待执行的任务，恢复按钮状态
+            self.run_button.setEnabled(True)
+            self.file_button.setEnabled(True)
+
 
     def calculate_subtitle_area_for_video(self, reference_area=None):
         """
@@ -355,11 +391,9 @@ class HomeInterface(QWidget):
             extractor.manage_process = lambda pid: SubtitleExtractorRemoteCall.remote_call_manage_process(queue, pid)
             extractor.run()
         except Exception as e:
-            print(f"字幕提取进程出错: {str(e)}")
             import traceback
             print(traceback.format_exc())
         finally:
-            print("字幕提取进程结束")
             if extractor:
                 extractor.isFinished = True
                 extractor.vsf_running = False
@@ -395,12 +429,18 @@ class HomeInterface(QWidget):
 
     @Slot()
     def processing_finished(self):
+        pending_tasks = self.task_list_component.get_pending_tasks()
+        if pending_tasks:
+            # 还有待执行任务, 忽略
+            return
         # 处理完成后恢复界面可用性
         self.run_button.setEnabled(True)
         self.file_button.setEnabled(True)
         self.se = None
         # 重置视频滑块
         self.video_slider.setValue(1)
+        # 重置当前处理任务索引
+        self.current_processing_task_index = -1
 
     @Slot(int, bool)
     def update_progress(self, progress_total, isFinished):
@@ -408,6 +448,15 @@ class HomeInterface(QWidget):
             pos = min(self.frame_count - 1, int(progress_total / 100 * self.frame_count))
             if pos != self.video_slider.value():
                 self.video_slider.setValue(pos)
+            
+            # 更新任务进度
+            if self.current_processing_task_index >= 0:
+                self.task_list_component.update_task_progress(
+                    self.current_processing_task_index, 
+                    progress_total,
+                    isFinished
+                )
+            
             # 检查是否完成
             if isFinished:
                 self.processing_finished()
@@ -433,64 +482,28 @@ class HomeInterface(QWidget):
             scrollbar = self.output_text.verticalScrollBar()
             scrollbar.setValue(scrollbar.maximum())
 
-    def update_subtitle_area(self):
-        scale_x = self.frame_width / self.video_preview_width
-        scale_y = self.frame_height / self.video_preview_height
-        
-        self.xmin = int(self.selection_rect.x() * scale_x)
-        self.ymin = int(self.selection_rect.y() * scale_y)
-        self.xmax = int((self.selection_rect.x() + self.selection_rect.width()) * scale_x)
-        self.ymax = int((self.selection_rect.y() + self.selection_rect.height()) * scale_y)
-        
-        # Ensure coordinates are within valid range
-        self.xmin = max(0, min(self.xmin, self.frame_width))
-        self.xmax = max(0, min(self.xmax, self.frame_width))
-        self.ymin = max(0, min(self.ymin, self.frame_height))
-        self.ymax = max(0, min(self.ymax, self.frame_height))
-
     def load_video(self, video_path):
         self.video_path = video_path
         self.video_cap = cv2.VideoCapture(self.video_path)
-        if self.video_cap.isOpened():
-            ret, frame = self.video_cap.read()
-            if ret:
-                self.frame_count = int(self.video_cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                self.frame_height = int(self.video_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                self.frame_width = int(self.video_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                self.fps = self.video_cap.get(cv2.CAP_PROP_FPS)
-                
-                # 计算原始视频中的坐标
-                y_orig = int(self.frame_height * config.subtitleSelectionAreaY.value)
-                h_orig = int(self.frame_height * config.subtitleSelectionAreaH.value)
-                x_orig = int(self.frame_width * config.subtitleSelectionAreaX.value)
-                w_orig = int(self.frame_width * config.subtitleSelectionAreaW.value)
-                
-                # 将原始视频坐标转换为显示区域坐标
-                scale_x = self.video_preview_width / self.frame_width
-                scale_y = self.video_preview_height / self.frame_height
-                
-                x_display = int(x_orig * scale_x)
-                y_display = int(y_orig * scale_y)
-                w_display = int(w_orig * scale_x)
-                h_display = int(h_orig * scale_y)
-                
-                # 确保坐标在显示区域有效范围内
-                x_display = max(0, min(x_display, self.video_preview_width))
-                y_display = max(0, min(y_display, self.video_preview_height))
-                w_display = max(1, min(w_display, self.video_preview_width - x_display))
-                h_display = max(1, min(h_display, self.video_preview_height - y_display))
-                
-                # 设置选择框并更新显示
-                selection_rect = QRect(x_display, y_display, w_display, h_display)
-                self.video_display_component.set_selection_rect(selection_rect)
-                self.selection_rect = selection_rect
-                
-                self.update_preview(frame)
-                self.video_slider.setMaximum(self.frame_count)
-                self.video_slider.setValue(1)
-                
-                # 更新字幕区域参数
-                self.update_subtitle_area()
+        if not self.video_cap.isOpened():
+            self.append_output(tr['SubtitleExtractorGUI']['OpenVideoFailed'].format(video_path) + " code: 0001")
+            return False
+        ret, frame = self.video_cap.read()
+        if not ret:
+            self.append_output(tr['SubtitleExtractorGUI']['OpenVideoFailed'].format(video_path) + " code: 0002")
+            return False
+        self.frame_count = int(self.video_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.frame_height = int(self.video_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self.frame_width = int(self.video_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.fps = self.video_cap.get(cv2.CAP_PROP_FPS)
+        
+        self.update_preview(frame)
+        self.video_display_component.load_selection_ratio()
+        self.video_slider.setMaximum(self.frame_count)
+        self.video_slider.setValue(1)
+        
+        self.append_output(f"{tr['SubtitleExtractorGUI']['OpenVideoSuccess']}: {video_path}")
+        return True
 
     def open_file(self):
         files, _ = QtWidgets.QFileDialog.getOpenFileNames(
@@ -500,10 +513,19 @@ class HomeInterface(QWidget):
             "All Files (*.*);;MP4 Files (*.mp4);;FLV Files (*.flv);;WMV Files (*.wmv);;AVI Files (*.avi)"
         )
         if files:
-            self.video_paths = files
-            for video in self.video_paths:
-                self.append_output(f"{tr['SubtitleExtractorGUI']['OpenVideoSuccess']}：{video}")
-            self.load_video(self.video_paths[0])
+            files_loaded = []
+            # 倒序打开, 确保第一个视频截图显示在屏幕上
+            for path in reversed(files):
+                if self.load_video(path):
+                    files_loaded.append(path)
+            # 正序添加, 确保任务列表顺序一致
+            for path in reversed(files_loaded):
+                # 添加到任务列表
+                self.task_list_component.add_task(path)
+                # 添加到视频路径列表
+                self.video_paths.append(path)
+            # 选中第一个任务
+            self.task_list_component.select_task(0)
 
     def closeEvent(self, event):
         """窗口关闭时断开信号连接"""

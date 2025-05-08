@@ -2,7 +2,9 @@ import cv2
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PySide6.QtCore import Qt, Signal, QRect, QRectF
 from PySide6 import QtCore, QtWidgets, QtGui
-from qfluentwidgets import CardWidget, HollowHandleStyle
+from qfluentwidgets import qconfig, CardWidget, HollowHandleStyle
+
+from backend.config import config, tr
 
 class VideoDisplayComponent(QWidget):
     """视频显示组件，包含视频预览和选择框功能"""
@@ -40,6 +42,9 @@ class VideoDisplayComponent(QWidget):
         self.scaled_height = None
         self.border_left = 0
         self.border_top = 0
+        
+        # 保存选择框的相对位置和大小（相对于实际视频的比例）
+        self.selection_ratio = None
         
         self.__initWidget()
         
@@ -158,11 +163,31 @@ class VideoDisplayComponent(QWidget):
         self.current_pixmap = rounded_pix.copy()
         
         self.video_display.setPixmap(rounded_pix)
+        
+        # 如果有保存的选择框比例，根据新视频尺寸重新计算选择框
+        if self.selection_ratio is not None and self.scaled_width and self.scaled_height:
+            x_ratio, y_ratio, w_ratio, h_ratio = self.selection_ratio
+            
+            # 计算新的选择框坐标和大小
+            x = int(x_ratio * self.scaled_width) + self.border_left
+            y = int(y_ratio * self.scaled_height) + self.border_top
+            w = int(w_ratio * self.scaled_width)
+            h = int(h_ratio * self.scaled_height)
+            
+            # 创建新的选择框
+            self.selection_rect = QRect(x, y, w, h)
+            
+            # 更新视频显示
+            self.update_preview_with_rect()
     
-    def update_preview_with_rect(self):
+    def update_preview_with_rect(self, rect=None):
         """更新带有选择框的预览"""
         if not hasattr(self, 'current_pixmap') or self.current_pixmap is None:
             return
+            
+        # 如果提供了新的矩形，使用它
+        if rect is not None:
+            self.selection_rect = rect
             
         # 创建一个副本用于绘制
         pixmap_copy = self.current_pixmap.copy()
@@ -289,9 +314,12 @@ class VideoDisplayComponent(QWidget):
         # 标准化选择框（确保宽度和高度为正）
         self.selection_rect = self.selection_rect.normalized()
         
+        # 保存选择框的相对位置和大小
+        self.save_selection_ratio()
+        
         # 发送选择框变化信号
         self.selection_changed.emit(self.selection_rect)
-    
+        
     def update_cursor_shape(self, pos):
         """根据鼠标位置更新光标形状"""
         if not self.selection_rect.isValid():
@@ -344,4 +372,96 @@ class VideoDisplayComponent(QWidget):
     def set_selection_rect(self, rect):
         """设置选择框"""
         self.selection_rect = rect
+        self.save_selection_ratio()
         self.update_preview_with_rect()
+    
+    def load_selection_ratio(self):
+        """从配置中加载选择框的相对位置和大小"""
+        # 检查是否有有效的视频尺寸
+        if not self.scaled_width or not self.scaled_height:
+            return False
+            
+        # 从配置中读取选择框的相对位置和大小
+        x_ratio = config.subtitleSelectionAreaX.value
+        y_ratio = config.subtitleSelectionAreaY.value
+        w_ratio = config.subtitleSelectionAreaW.value
+        h_ratio = config.subtitleSelectionAreaH.value
+        
+        # 检查配置值是否有效
+        if x_ratio is None or y_ratio is None or w_ratio is None or h_ratio is None:
+            return False
+            
+        # 保存选择框比例
+        self.selection_ratio = (x_ratio, y_ratio, w_ratio, h_ratio)
+        
+        # 计算实际像素坐标
+        x = int(x_ratio * self.scaled_width) + self.border_left
+        y = int(y_ratio * self.scaled_height) + self.border_top
+        w = int(w_ratio * self.scaled_width)
+        h = int(h_ratio * self.scaled_height)
+        
+        # 创建选择框
+        self.selection_rect = QRect(x, y, w, h)
+        
+        # 更新预览
+        self.update_preview_with_rect()
+        
+        return True
+        
+    def save_selection_ratio(self):
+        """保存选择框的相对位置和大小（相对于实际视频的比例）"""
+        if not self.selection_rect.isValid() or not self.scaled_width or not self.scaled_height:
+            return
+            
+        # 调整选择框坐标，考虑黑边偏移
+        x_adjusted = max(0, self.selection_rect.x() - self.border_left)
+        y_adjusted = max(0, self.selection_rect.y() - self.border_top)
+        
+        # 如果选择框超出了实际视频区域，需要调整宽度和高度
+        w_adjusted = min(self.selection_rect.width(), self.scaled_width - x_adjusted)
+        h_adjusted = min(self.selection_rect.height(), self.scaled_height - y_adjusted)
+        
+        # 转换为相对比例
+        x_ratio = x_adjusted / self.scaled_width
+        y_ratio = y_adjusted / self.scaled_height
+        w_ratio = w_adjusted / self.scaled_width
+        h_ratio = h_adjusted / self.scaled_height
+        
+        self.selection_ratio = (x_ratio, y_ratio, w_ratio, h_ratio)
+    
+        config.subtitleSelectionAreaY.value = y_ratio
+        config.subtitleSelectionAreaH.value = h_ratio
+        config.subtitleSelectionAreaX.value = x_ratio
+        config.subtitleSelectionAreaW.value = w_ratio
+        
+        qconfig.save()
+    
+    def get_original_coordinates(self):
+        """获取选择框在原始视频中的坐标"""
+        if not self.selection_rect.isValid() or not self.scaled_width or not self.scaled_height:
+            return None
+            
+        # 调整选择框坐标，考虑黑边偏移
+        x_adjusted = max(0, self.selection_rect.x() - self.border_left)
+        y_adjusted = max(0, self.selection_rect.y() - self.border_top)
+        
+        # 如果选择框超出了实际视频区域，需要调整宽度和高度
+        w_adjusted = min(self.selection_rect.width(), self.scaled_width - x_adjusted)
+        h_adjusted = min(self.selection_rect.height(), self.scaled_height - y_adjusted)
+        
+        # 转换为原始视频坐标
+        scale_x = self.frame_width / self.scaled_width
+        scale_y = self.frame_height / self.scaled_height
+        
+        xmin = int(x_adjusted * scale_x)
+        xmax = int((x_adjusted + w_adjusted) * scale_x)
+        ymin = int(y_adjusted * scale_y)
+        ymax = int((y_adjusted + h_adjusted) * scale_y)
+        
+        # 确保坐标在有效范围内
+        xmin = max(0, min(xmin, self.frame_width))
+        xmax = max(0, min(xmax, self.frame_width))
+        ymin = max(0, min(ymin, self.frame_height))
+        ymax = max(0, min(ymax, self.frame_height))
+        
+        return (ymin, ymax, xmin, xmax)

@@ -14,3 +14,4 @@ shapely==2.0.7
 six==1.17.0
 setuptools==75.8.0
 paddleocr==2.10.0
+show-in-file-manager==1.1.5
