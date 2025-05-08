@@ -6,6 +6,7 @@
 @desc: 主程序入口文件
 """
 import os
+import re
 import random
 import shutil
 from collections import Counter, namedtuple
@@ -406,6 +407,7 @@ class SubtitleExtractor:
             last_total_ms = 0
             processed_image = set()
             rgb_images_path = os.path.join(self.temp_output_dir, 'RGBImages')
+            time_pattern = re.compile(r'^\d+_\d+_\d+_\d+__')
             while self.vsf_running and not self.isFinished:
                 time.sleep(0.2)
                 # 如果还没有rgb_images_path说明vsf还没处理完
@@ -418,6 +420,8 @@ class SubtitleExtractor:
                     for rgb_image in rgb_images:
                         # 如果当前图片已被处理，则跳过
                         if rgb_image in processed_image:
+                            continue
+                        if not time_pattern.match(rgb_image):
                             continue
                         # self.append_output('rgb_image: ', rgb_image)
                         processed_image.add(rgb_image)
