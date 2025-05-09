@@ -80,6 +80,8 @@
 
 > NVIDIA provides a list of supported compute capabilities for each GPU model. You can refer to the following link: [CUDA GPUs](https://developer.nvidia.com/cuda-gpus) to check which CUDA version is compatible with your GPU.
 
+> NVIDIA 50 series graphics cards require CUDA 12.8.0 or above, but Paddle 3.0.0 does not support it yet, so it is recommended to use the DirectML universal version.
+
 **Recognition Mode Selection**:
 
 | Mode Name     | GPU  | OCR Model Size | Subtitle Detection Engine | Notes            |

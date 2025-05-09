@@ -98,6 +98,8 @@ Video-subtitle-extractor (VSE) 是一款将视频中的硬字幕提取为外挂�
 
 > NVIDIA官方提供了各GPU型号的计算能力列表，您可以参考链接: [CUDA GPUs](https://developer.nvidia.com/cuda-gpus) 查看你的GPU适合哪个CUDA版本
 
+> NVIDIA 50系显卡需要使用cuda12.8.0及以上版本, 但Paddle3.0.0目前仍未支持，所以建议使用Directml通用版本
+
 **识别模式选择说明**：
 |    模式名称    | GPU | OCR模型尺寸 | 字幕检测引擎 | 备注 |
 |---------------|-----|---------|------|------|
