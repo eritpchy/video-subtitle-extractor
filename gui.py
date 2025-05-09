@@ -52,6 +52,8 @@ class SubtitleExtractorGUI(FluentWindow):
 
     def _lazy_check_update(self):
         """ 延迟检查更新 """
+        if not config.checkUpdateOnStartup.value:
+            return
         self.check_update_timer = QtCore.QTimer(self)
         self.check_update_timer.setSingleShot(True)
         self.check_update_timer.timeout.connect(lambda: self.advancedSettingInterface.check_update(ignore=True))

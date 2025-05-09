@@ -82,6 +82,8 @@ class Config(QConfig):
     wordSegmentation = ConfigItem("Main", "WordSegmentation", True, BoolValidator())
     # 是否使用硬件加速
     hardwareAcceleration = ConfigItem("Main", "HardwareAcceleration", HARDWARD_ACCELERATION_OPTION, BoolValidator())
+    # 启动时检查应用更新
+    checkUpdateOnStartup = ConfigItem("Main", "CheckUpdateOnStartup", True, BoolValidator())
     
 CONFIG_FILE = 'config/config.json'
 config = Config()

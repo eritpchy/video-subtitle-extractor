@@ -52,6 +52,7 @@ class AdvancedSettingInterface(ScrollArea):
         self.advanced_group.addSettingCard(self.threshold_text_similarity)
         self.advanced_group.addSettingCard(self.drop_score)
         self.advanced_group.addSettingCard(self.subtitle_area_deviation_rate)
+        self.advanced_group.addSettingCard(self.check_update_on_startup)
         self.expandLayout.addWidget(self.advanced_group)
         
         self.dev_group.addSettingCard(self.debug_ocr_loss)
@@ -162,6 +163,14 @@ class AdvancedSettingInterface(ScrollArea):
             icon=FluentIcon.PIE_SINGLE,
             title=tr["Setting"]["SubtitleAreaDeviationRate"],
             content=tr["Setting"]["SubtitleAreaDeviationRateDesc"],
+            parent=self.advanced_group
+        )
+        # 启动时检查应用更新
+        self.check_update_on_startup = SwitchSettingCard(
+            configItem=config.checkUpdateOnStartup,
+            icon=FluentIcon.UPDATE,
+            title=tr["Setting"]["CheckUpdateOnStartup"],
+            content=tr["Setting"]["CheckUpdateOnStartupDesc"],
             parent=self.advanced_group
         )
         # 输出丢失的字幕帧
