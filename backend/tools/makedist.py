@@ -30,6 +30,7 @@ def main():
     if args.cuda == "10.2":
         sub_modules.append(CustomPackage("paddlepaddle-gpu==2.5.2.post102", deploy_mode=DEFAULT_DEPLOY_MODE, find_links="https://www.paddlepaddle.org.cn/whl/windows/mkl/avx/stable.html"))
         sub_modules.append(CopyCUDAPackage(cuda_version=args.cuda))
+        sub_modules.append(CustomPackage("numpy==1.26.4", deploy_mode=DEFAULT_DEPLOY_MODE))
     elif args.cuda == "11.8":
         sub_modules.append(CustomPackage("paddlepaddle-gpu==3.0.0", deploy_mode=DEFAULT_DEPLOY_MODE, find_links=PYPI_PIP_SOURCE, opts="--index-url https://www.paddlepaddle.org.cn/packages/stable/cu118/ "))
     elif args.cuda == "12.6":
