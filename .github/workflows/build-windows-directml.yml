@@ -87,7 +87,7 @@ jobs:
         prerelease: true
         tag_name: ${{ env.VERSION }}
         target_commitish: ${{ github.sha }}
-        name: 硬字幕提取器 ${{ env.VERSION }}
+        name: 硬字幕提取器 v${{ env.VERSION }}
         files: |
           vse_out/Release/vse-v${{ env.VERSION }}-windows-directml.7z*
     
