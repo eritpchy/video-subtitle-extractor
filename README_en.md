@@ -76,11 +76,10 @@
 | `vse-windows-directml.7z`        | 3.12   | 3.0.0 | Windows without Nvidia GPU         | Universal                         |
 | `vse-windows-nvidia-cuda-10.2.7z`| 3.11   | 2.5.2  | CUDA 10.2                         | 3.0 – 7.5                          |
 | `vse-windows-nvidia-cuda-11.8.7z`| 3.12   | 3.0.0 | CUDA 11.8                         | 3.5 – 8.9                          |
-| `vse-windows-nvidia-cuda-12.6.7z`| 3.12   | 3.0.0 | CUDA 12.6                         | 5.0 – 9.0                          |
+| `vse-windows-nvidia-cuda-12.6.7z`| 3.12   | 3.0.0 | CUDA 12.6                         | 5.0 – 8.9                          |
+| `vse-windows-nvidia-cuda-12.8.7z`| 3.12   | 3.0.0 | CUDA 12.8                         | 5.0 – 9.0+                          |
 
 > NVIDIA provides a list of supported compute capabilities for each GPU model. You can refer to the following link: [CUDA GPUs](https://developer.nvidia.com/cuda-gpus) to check which CUDA version is compatible with your GPU.
-
-> NVIDIA 50 series graphics cards require CUDA 12.8.0 or above, but Paddle 3.0.0 does not support it yet, so it is recommended to use the DirectML universal version.
 
 **Recognition Mode Selection**:
 

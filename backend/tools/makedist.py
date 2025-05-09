@@ -34,6 +34,8 @@ def main():
         sub_modules.append(CustomPackage("paddlepaddle-gpu==3.0.0", deploy_mode=DEFAULT_DEPLOY_MODE, find_links=PYPI_PIP_SOURCE, opts="--index-url https://www.paddlepaddle.org.cn/packages/stable/cu118/ "))
     elif args.cuda == "12.6":
         sub_modules.append(CustomPackage("paddlepaddle-gpu==3.0.0", deploy_mode=DEFAULT_DEPLOY_MODE, find_links=PYPI_PIP_SOURCE, opts="--index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/ "))
+    elif args.cuda == "12.8":
+        sub_modules.append(CustomPackage("paddlepaddle-gpu==3.0.0.dev20250507", deploy_mode=DEFAULT_DEPLOY_MODE, find_links=PYPI_PIP_SOURCE, opts="--index-url https://www.paddlepaddle.org.cn/packages/nightly/cu128/ "))
 
     if os.getenv("QPT_Action") == "True":
         set_default_pip_source(PYPI_PIP_SOURCE)
