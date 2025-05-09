@@ -23,7 +23,7 @@
   - **auto**: (Recommended) Automatically selects the model. It uses the lightweight model under the CPU, and the precise model under the GPU. While subtitle extraction speed is slower and might miss a minor amount of subtitles, there are almost no typos.
   - **accurate**: (Not Recommended) Uses the precise model with frame-by-frame detection under the GPU, ensuring no missed subtitles and almost non-existent typos, but the speed is **very slow**.
 
-<p style="text-align:center;"><img src="https://github.com/YaoFANGUK/video-subtitle-extractor/raw/main/design/demo.png" alt="demo.png"/></p>
+<p style="text-align:center;"><img src="design/demo.png" alt="demo.png"/></p>
 
 **Features**：
 
