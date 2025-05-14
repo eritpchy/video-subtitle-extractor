@@ -18,6 +18,12 @@ PROJECT_UPDATE_URLS = [
 # 硬件加速选项开关
 HARDWARD_ACCELERATION_OPTION = True
 
+# 读取界面语言配置
+tr = configparser.ConfigParser()
+
+TRANSLATION_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'interface', f"en.ini")
+tr.read(TRANSLATION_FILE, encoding='utf-8')
+
 class Config(QConfig):
     # 界面语言设置
     intefaceTexts = {
@@ -43,7 +49,7 @@ class Config(QConfig):
     subtitleSelectionAreaH = ConfigItem("Main", "SubtitleSelectionAreaH", 0.21)
 
     # 字幕语言设置
-    language = OptionsConfigItem("Main", "Language", "ch", OptionsValidator(["ch", "chinese_cht", "en", "ko", "japan", "vi", "es"]))
+    language = OptionsConfigItem("Main", "Language", "ch", OptionsValidator([name for name in tr["Language"]]))
     # 识别模式设置
     mode = OptionsConfigItem("Main", "Mode", "fast",  OptionsValidator(["auto", "fast", "accurate"]))
     # 是否生成TXT文本字幕
@@ -94,12 +100,8 @@ tr = configparser.ConfigParser()
 
 TRANSLATION_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'interface', f"{config.interface.value}.ini")
 tr.read(TRANSLATION_FILE, encoding='utf-8')
-config.language.validator.options = tr["Language"]
 
 # 项目的base目录
 BASE_DIR = str(Path(os.path.abspath(__file__)).parent)
 
-# ×××××××××××××××××××× [不要改]读取语言、模型路径、字典路径 start ××××××××××××××××××××
-
-# ×××××××××××××××××××× [不要改]读取语言、模型路径、字典路径 end ××××××××××××××××××××
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
