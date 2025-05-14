@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import shutil
 import numpy as np
 from collections import namedtuple
+from backend.config import tr
 
 
 def extract_subtitles(data, text_recogniser, img, raw_subtitles,
@@ -51,16 +52,30 @@ def extract_subtitles(data, text_recogniser, img, raw_subtitles,
             coordinate_polygon = coordinate_to_polygon(coordinate)
             # 计算两个区域是否有交集交集
             intersection = sub_area_polygon.intersection(coordinate_polygon)
+            drop_reason = ''
             # 如果有交集
             if not intersection.is_empty:
                 # 计算越界允许偏差
                 overflow_area_rate = ((sub_area_polygon.area + coordinate_polygon.area - intersection.area) / sub_area_polygon.area) - 1
                 # 如果越界比例低于设定阈值且该行文本识别的置信度高于设定阈值
-                if overflow_area_rate <= options.SUB_AREA_DEVIATION_RATE and prob > options.DROP_SCORE:
+                not_overflow = overflow_area_rate <= options.SUB_AREA_DEVIATION_RATE
+                confident = prob > options.DROP_SCORE
+                if not_overflow and confident:
                     # 保留该帧
                     selected = True
                     line += f'{str(data["i"]).zfill(8)}\t{coordinate}\t{text}\n'
                     raw_subtitles.append(f'{str(data["i"]).zfill(8)}\t{coordinate}\t{text}\n')
+                else:
+                    if not not_overflow:
+                        drop_reason = tr['Main']['OcrDropOutOfBoxRate'].format(int(options.SUB_AREA_DEVIATION_RATE * 100), int(overflow_area_rate * 100))
+                    elif not confident:
+                        drop_reason = tr['Main']['OcrDropConfidentLow'].format(int(options.DROP_SCORE * 100))
+            else:
+                drop_reason = tr['Main']['OcrDropNoIntercetion']
+            if drop_reason:
+                tqdm.write(tr['Main']['OcrResultWithDropReason'].format(text, round(prob * 100,1), drop_reason))
+            else:
+                tqdm.write(tr['Main']['OcrResult'].format(text, round(prob * 100,1)))
             # 保存丢掉的识别结果
             loss_info = namedtuple('loss_info', 'text prob overflow_area_rate coordinate selected')
             loss_list.append(loss_info(text, prob, overflow_area_rate, coordinate, selected))
