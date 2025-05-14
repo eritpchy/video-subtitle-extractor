@@ -201,11 +201,11 @@ class SubtitleExtractor:
         if config.wordSegmentation.value:
             reformat.execute(os.path.join(os.path.splitext(self.video_path)[0] + '.srt'), config.language.value)
         self.append_output(tr['Main']['FinishGenerateSub'], f"{round(time.time() - start_time, 2)}s")
-        # self.update_progress(ocr=100, frame_extract=100)
-        # self.isFinished = True
-        # # 删除缓存文件
-        # self.empty_cache()
-        # self.lock.release()
+        self.update_progress(ocr=100, frame_extract=100)
+        self.isFinished = True
+        # 删除缓存文件
+        self.empty_cache()
+        self.lock.release()
         if config.generateTxt.value:
             self.srt2txt(os.path.join(os.path.splitext(self.video_path)[0] + '.srt'))
 
