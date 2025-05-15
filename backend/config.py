@@ -7,7 +7,7 @@ from backend.tools.constant import SubtitleArea, VideoSubFinderDecoder
 import configparser
 
 # 项目版本号
-VERSION = "2.1.0"
+VERSION = "2.1.1"
 PROJECT_HOME_URL = "https://github.com/YaoFANGUK/video-subtitle-extractor"
 PROJECT_ISSUES_URL = PROJECT_HOME_URL + "/issues"
 PROJECT_RELEASES_URL = PROJECT_HOME_URL + "/releases"
