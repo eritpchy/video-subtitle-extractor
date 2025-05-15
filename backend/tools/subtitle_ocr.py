@@ -128,7 +128,7 @@ def paint_chinese_opencv(im, chinese, pos, color):
     position = pos
     draw = ImageDraw.Draw(img_pil)
     draw.text(position, chinese, font=FONT, fill=fill_color)
-    img = np.asarray(img_pil)
+    img = np.array(img_pil)
     return img
 
 
