@@ -108,7 +108,7 @@ class PaddleModelConfig:
     def convertToOnnxModelIfNeeded(self, model_dir, model_filename="inference.pdmodel", params_filename="inference.pdiparams", opset_version=14):
         """Converts a Paddle model to ONNX if ONNX providers are available and the model does not already exist."""
         
-        if not self.hardware_accelerator.get_onnx_providers():
+        if not self.hardware_accelerator.onnx_providers:
             return model_dir
         
         onnx_model_path = os.path.join(model_dir, "model.onnx")
