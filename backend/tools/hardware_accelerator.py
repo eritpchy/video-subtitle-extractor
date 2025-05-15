@@ -15,7 +15,7 @@ class HardwareAccelerator:
         return cls._instance
 
     def __init__(self):
-        self.__gpu = False
+        self.__cuda = False
         self.__onnx_providers = []
         self.__enabled = True
 
@@ -29,10 +29,10 @@ class HardwareAccelerator:
         # 查看是否有可用的gpu
             if len(paddle.static.cuda_places()) > 0:
                 # 如果有GPU则使用GPU
-                self.__gpu = True
+                self.__cuda = True
 
     def check_onnx(self):
-        if self.__gpu:
+        if self.__cuda:
             return
         try:
             import onnxruntime as ort
@@ -62,27 +62,29 @@ class HardwareAccelerator:
     def has_accelerator(self):
         if not self.__enabled:
             return False
-        return self.__gpu or len(self.__onnx_providers) > 0
+        return self.__cuda or len(self.__onnx_providers) > 0
 
-    def get_accelerator_name(self):
+    @property
+    def accelerator_name(self):
         if not self.__enabled:
             return "CPU"
-        if self.__gpu:
+        if self.__cuda:
             return "GPU"
         elif len(self.__onnx_providers) > 0:
             return ", ".join(self.__onnx_providers)
         else:
             return "CPU"
 
-    def get_onnx_providers(self):
+    @property
+    def onnx_providers(self):
         if not self.__enabled:
             return []
         return self.__onnx_providers
 
-    def has_gpu(self):
+    def has_cuda(self):
         if not self.__enabled:
             return False
-        return self.__gpu
+        return self.__cuda
     
     def set_enabled(self, enable):
         self.__enabled = enable

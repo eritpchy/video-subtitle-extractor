@@ -45,12 +45,12 @@ class SubtitleDetect:
         from paddleocr.tools.infer import utility
         from paddleocr.tools.infer.predict_det import TextDetector
         hardware_accelerator = HardwareAccelerator.instance()
-        onnx_providers = hardware_accelerator.get_onnx_providers()
+        onnx_providers = hardware_accelerator.onnx_providers
         model_config = PaddleModelConfig(hardware_accelerator)
         args = utility.parse_args()
         args.det_algorithm = 'DB'
         args.det_model_dir = model_config.convertToOnnxModelIfNeeded(model_config.DET_MODEL_PATH)
-        args.use_gpu=hardware_accelerator.has_gpu(),
+        args.use_gpu=hardware_accelerator.has_cuda()
         args.use_onnx=len(onnx_providers) > 0
         args.onnx_providers=onnx_providers
         self.text_detector = TextDetector(args)
@@ -135,7 +135,7 @@ class SubtitleExtractor:
         self.append_output(f"{tr['Main']['RecMode']}：{config.mode.value}")
         # 如果使用GPU加速，则打印GPU加速提示
         if self.hardware_accelerator.has_accelerator():
-            self.append_output(tr['Main']['AcceleratorON'].format(self.hardware_accelerator.get_accelerator_name()))
+            self.append_output(tr['Main']['AcceleratorON'].format(self.hardware_accelerator.accelerator_name))
         
         # 打印视频帧数与帧率
         self.append_output(f"{tr['Main']['FrameCount']}：{self.frame_count}"
@@ -483,7 +483,7 @@ class SubtitleExtractor:
         left_end = self.sub_area[2] / self.frame_width
         # re：图像右半部分所占百分比，取值【0-1】
         right_end = self.sub_area[3] / self.frame_width
-        if (not self.hardware_accelerator.has_gpu()) and len(self.hardware_accelerator.get_onnx_providers()) > 0:
+        if (not self.hardware_accelerator.has_cuda()) and len(self.hardware_accelerator.onnx_providers) > 0:
             cpu_count = multiprocessing.cpu_count()
         else:
             # 留2核心来给其他任务使用

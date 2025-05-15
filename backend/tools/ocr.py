@@ -87,9 +87,9 @@ class OcrRecogniser:
 
     def init_model(self):
         model_config = PaddleModelConfig(self.hardware_accelerator)
-        onnx_providers = self.hardware_accelerator.get_onnx_providers()
+        onnx_providers = self.hardware_accelerator.onnx_providers
         return PaddleOCR(
-            use_gpu=self.hardware_accelerator.has_gpu(),
+            use_gpu=self.hardware_accelerator.has_cuda(),
             gpu_mem=500,
             det_algorithm='DB',
             # 设置文本检测模型路径
