@@ -653,7 +653,7 @@ class SubtitleExtractor:
                     frame_content = content[2]
                     subtitle_line = f'{line_code}\n{frame_start} --> {frame_end}\n{frame_content}\n'
                     f.write(subtitle_line)
-            self.append_output(f"[NO-VSF]{tr['Main']['SubLocation']} {self.subtitle_output_path}")
+            self.append_output(tr['Main']['SubLocation'].format(self.subtitle_output_path))
             # 返回持续时间低于1s的字幕行
             return post_process_subtitle
 
@@ -687,7 +687,7 @@ class SubtitleExtractor:
                 continue
 
         pysrt.SubRipFile(final_subtitles).save(self.subtitle_output_path, encoding='utf-8')
-        self.append_output(f"[VSF]{tr['Main']['SubLocation']} {self.subtitle_output_path}")
+        self.append_output(tr['Main']['SubLocation'].format(self.subtitle_output_path))
 
     def _detect_watermark_area(self):
         """
