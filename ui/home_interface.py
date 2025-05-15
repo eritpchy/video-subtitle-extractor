@@ -46,18 +46,6 @@ class HomeInterface(QWidget):
         # 当前正在处理的任务索引
         self.current_processing_task_index = -1
 
-        # 获取屏幕大小
-        screen = QtWidgets.QApplication.primaryScreen().size()
-        self.screen_width = screen.width()
-        self.screen_height = screen.height()
-        
-        # 设置视频预览区域大小（根据屏幕宽度动态调整）
-        self.video_preview_width = 960
-        self.video_preview_height = self.video_preview_width * 9 // 16
-        if self.screen_width // 2 < 960:
-            self.video_preview_width = 640
-            self.video_preview_height = self.video_preview_width * 9 // 16
-
         self.__initWidget()
         self.progress_signal.connect(self.update_progress)
         self.append_log_signal.connect(self.append_log)
@@ -206,32 +194,30 @@ class HomeInterface(QWidget):
         
         # 更新视频显示（这会同时保存current_pixmap）
         self.video_display_component.update_video_display(resized_frame)
-        
-        # 如果有选择框，再单独更新选择框
-        if hasattr(self, 'selection_rect') and not self.selection_rect.isEmpty():
-            self.video_display_component.update_preview_with_rect()
 
     def _img_resize(self, image):
         height, width = image.shape[:2]
         
+        video_preview_width = self.video_display_component.video_preview_width
+        video_preview_height = self.video_display_component.video_preview_height
         # 计算等比缩放后的尺寸
-        target_ratio = self.video_preview_width / self.video_preview_height
+        target_ratio = video_preview_width / video_preview_height
         image_ratio = width / height
         
         if image_ratio > target_ratio:
             # 宽度适配，高度按比例缩放
-            new_width = self.video_preview_width
+            new_width = video_preview_width
             new_height = int(new_width / image_ratio)
-            top_border = (self.video_preview_height - new_height) // 2
-            bottom_border = self.video_preview_height - new_height - top_border
+            top_border = (video_preview_height - new_height) // 2
+            bottom_border = video_preview_height - new_height - top_border
             left_border = 0
             right_border = 0
         else:
             # 高度适配，宽度按比例缩放
-            new_height = self.video_preview_height
+            new_height = video_preview_height
             new_width = int(new_height * image_ratio)
-            left_border = (self.video_preview_width - new_width) // 2
-            right_border = self.video_preview_width - new_width - left_border
+            left_border = (video_preview_width - new_width) // 2
+            right_border = video_preview_width - new_width - left_border
             top_border = 0
             bottom_border = 0
         
@@ -268,16 +254,6 @@ class HomeInterface(QWidget):
         try:
             self.run_button.setEnabled(False)
             self.file_button.setEnabled(False)
-            
-            # 获取字幕区域坐标（直接从视频显示组件获取）
-            subtitle_area = self.video_display_component.get_original_coordinates()
-            self.ymin, self.ymax, self.xmin, self.xmax = subtitle_area
-            
-            self.append_output(f"{tr['SubtitleExtractorGUI']['SubtitleArea']}：({self.ymin},{self.ymax},{self.xmin},{self.xmax})")
-            
-            # 当前视频的字幕区域
-            current_subtitle_area = (self.ymin, self.ymax, self.xmin, self.xmax)
-            
             # 获取所有待执行的任务
             pending_tasks = self.task_list_component.get_pending_tasks()
             if not pending_tasks:
@@ -307,10 +283,17 @@ class HomeInterface(QWidget):
                         if self.video_cap:
                             self.video_cap.release()
                             self.video_cap = None
+                            
+                            
+                        # 获取字幕区域坐标（直接从视频显示组件获取）
+                        subtitle_area = self.video_display_component.get_original_coordinates()
+                        if not subtitle_area:
+                            self.append_output(tr['SubtitleExtractorGUI']['SelectSubtitleArea'])
+                            return
+                        self.append_output(f"{tr['SubtitleExtractorGUI']['SubtitleArea']}: {subtitle_area}")
+                            
                         self.load_video(video_path)
                         
-                        # 为每个视频重新计算字幕区域
-                        subtitle_area = self.calculate_subtitle_area_for_video(current_subtitle_area)
                         process = self.run_subtitle_extractor_process(video_path, subtitle_area)
                         
                         # 更新任务状态为已完成
@@ -341,37 +324,6 @@ class HomeInterface(QWidget):
             # 没有待执行的任务，恢复按钮状态
             self.run_button.setEnabled(True)
             self.file_button.setEnabled(True)
-
-
-    def calculate_subtitle_area_for_video(self, reference_area=None):
-        """
-        为每个视频计算正确的字幕区域
-        
-        Args:
-            reference_area: 参考字幕区域 (ymin, ymax, xmin, xmax)，如果为None则使用配置中的比例
-            
-        Returns:
-            tuple: 调整后的字幕区域 (ymin, ymax, xmin, xmax)
-        """
-        # 使用保存的比例计算新视频的字幕区域
-        y_ratio = config.subtitleSelectionAreaY.value
-        h_ratio = config.subtitleSelectionAreaH.value
-        x_ratio = config.subtitleSelectionAreaX.value
-        w_ratio = config.subtitleSelectionAreaW.value
-        
-        # 计算像素坐标
-        ymin = int(y_ratio * self.frame_height)
-        ymax = int((y_ratio + h_ratio) * self.frame_height)
-        xmin = int(x_ratio * self.frame_width)
-        xmax = int((x_ratio + w_ratio) * self.frame_width)
-        
-        # 确保坐标在有效范围内
-        xmin = max(0, min(xmin, self.frame_width))
-        xmax = max(0, min(xmax, self.frame_width))
-        ymin = max(0, min(ymin, self.frame_height))
-        ymax = max(0, min(ymax, self.frame_height))
-        
-        return (ymin, ymax, xmin, xmax)
 
     @staticmethod
     def extractor_process(queue, video_path, subtitle_area):
@@ -486,11 +438,9 @@ class HomeInterface(QWidget):
         self.video_path = video_path
         self.video_cap = cv2.VideoCapture(self.video_path)
         if not self.video_cap.isOpened():
-            self.append_output(tr['SubtitleExtractorGUI']['OpenVideoFailed'].format(video_path) + " code: 0001")
             return False
         ret, frame = self.video_cap.read()
         if not ret:
-            self.append_output(tr['SubtitleExtractorGUI']['OpenVideoFailed'].format(video_path) + " code: 0002")
             return False
         self.frame_count = int(self.video_cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.frame_height = int(self.video_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -501,9 +451,9 @@ class HomeInterface(QWidget):
         self.video_display_component.load_selection_ratio()
         self.video_slider.setMaximum(self.frame_count)
         self.video_slider.setValue(1)
-        
-        self.append_output(f"{tr['SubtitleExtractorGUI']['OpenVideoSuccess']}: {video_path}")
+        self.video_display_component.set_dragger_enabled(True)
         return True
+
 
     def open_file(self):
         files, _ = QtWidgets.QFileDialog.getOpenFileNames(
@@ -517,7 +467,10 @@ class HomeInterface(QWidget):
             # 倒序打开, 确保第一个视频截图显示在屏幕上
             for path in reversed(files):
                 if self.load_video(path):
+                    self.append_output(f"{tr['SubtitleExtractorGUI']['OpenVideoSuccess']}: {path}")
                     files_loaded.append(path)
+                else:
+                    self.append_output(f"{tr['SubtitleExtractorGUI']['OpenVideoFailed']}: {path}")
             # 正序添加, 确保任务列表顺序一致
             for path in reversed(files_loaded):
                 # 添加到任务列表
@@ -544,3 +497,4 @@ class HomeInterface(QWidget):
         except Exception as e:
             print(f"关闭窗口时出错: {str(e)}")
         super().closeEvent(event)
+    
