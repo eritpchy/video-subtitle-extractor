@@ -100,6 +100,8 @@ class SubtitleExtractor:
         self.vsf_subtitle = os.path.join(self.subtitle_output_dir, 'raw_vsf.srt')
         # 提取的原始字幕文本存储路径
         self.raw_subtitle_path = os.path.join(self.subtitle_output_dir, 'raw.txt')
+        # 定义输出字幕文件路径
+        self.subtitle_output_path = os.path.splitext(self.video_path)[0] + '.srt'
         # 自定义ocr对象
         self.ocr = None
         # 总处理进度
@@ -199,7 +201,7 @@ class SubtitleExtractor:
             # 如果未使用vsf提取字幕，则使用常规字幕生成方法
             self.generate_subtitle_file()
         if config.wordSegmentation.value:
-            reformat.execute(os.path.join(os.path.splitext(self.video_path)[0] + '.srt'), config.language.value)
+            reformat.execute(self.subtitle_output_path, config.language.value)
         self.append_output(tr['Main']['FinishGenerateSub'], f"{round(time.time() - start_time, 2)}s")
         self.update_progress(ocr=100, frame_extract=100)
         self.isFinished = True
@@ -207,7 +209,7 @@ class SubtitleExtractor:
         self.empty_cache()
         self.lock.release()
         if config.generateTxt.value:
-            self.srt2txt(os.path.join(os.path.splitext(self.video_path)[0] + '.srt'))
+            self.srt2txt(self.subtitle_output_path)
 
     def capture_frame_with_subtitle_area(self):
         """
@@ -632,10 +634,9 @@ class SubtitleExtractor:
         """
         if not self.use_vsf:
             subtitle_content = self._remove_duplicate_subtitle()
-            srt_filename = os.path.join(os.path.splitext(self.video_path)[0] + '.srt')
             # 保存持续时间不足1秒的字幕行，用于后续处理
             post_process_subtitle = []
-            with open(srt_filename, mode='w', encoding='utf-8') as f:
+            with open(self.subtitle_output_path, mode='w', encoding='utf-8') as f:
                 for index, content in enumerate(subtitle_content):
                     line_code = index + 1
                     frame_start = self._frame_to_timecode(int(content[0]))
@@ -648,7 +649,7 @@ class SubtitleExtractor:
                     frame_content = content[2]
                     subtitle_line = f'{line_code}\n{frame_start} --> {frame_end}\n{frame_content}\n'
                     f.write(subtitle_line)
-            self.append_output(f"[NO-VSF]{tr['Main']['SubLocation']} {srt_filename}")
+            self.append_output(f"[NO-VSF]{tr['Main']['SubLocation']} {self.subtitle_output_path}")
             # 返回持续时间低于1s的字幕行
             return post_process_subtitle
 
@@ -681,9 +682,8 @@ class SubtitleExtractor:
                 final_subtitles.append(sub)
                 continue
 
-        srt_filename = os.path.join(os.path.splitext(self.video_path)[0] + '.srt')
-        pysrt.SubRipFile(final_subtitles).save(srt_filename, encoding='utf-8')
-        self.append_output(f"[VSF]{tr['Main']['SubLocation']} {srt_filename}")
+        pysrt.SubRipFile(final_subtitles).save(self.subtitle_output_path, encoding='utf-8')
+        self.append_output(f"[VSF]{tr['Main']['SubLocation']} {self.subtitle_output_path}")
 
     def _detect_watermark_area(self):
         """
@@ -1047,6 +1047,8 @@ class SubtitleExtractor:
             'HARDWARD_ACCELERATOR': self.hardware_accelerator,
         }
         process, task_queue, progress_queue = subtitle_ocr.async_start(self.video_path, self.raw_subtitle_path, self.sub_area, options)
+        ProcessManager.instance().add_process(process)
+        self.manage_process(process.pid)
         self.subtitle_ocr_task_queue = task_queue
         self.subtitle_ocr_progress_queue = progress_queue
         # 开启线程负责更新OCR进度

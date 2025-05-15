@@ -5,6 +5,7 @@ import atexit
 import multiprocessing
 import time
 import traceback
+from pathlib import Path
 from multiprocessing import managers
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QFileDialog
 from PySide6.QtCore import Qt, Slot, QTimer, QRect, QRectF, Signal
@@ -14,18 +15,19 @@ from qfluentwidgets import (qconfig, PushButton, CardWidget, SubtitleLabel, Plai
 from ui.setting_interface import SettingInterface
 from ui.component.video_display_component import VideoDisplayComponent
 from ui.component.task_list_component import TaskListComponent, TaskStatus
+from ui.icon.my_fluent_icon import MyFluentIcon
 from backend.config import config, tr
-from backend.tools.process_manager import ProcessManager
 from backend.tools.subtitle_extractor_remote_call import SubtitleExtractorRemoteCall
+from backend.tools.process_manager import ProcessManager
 
 class HomeInterface(QWidget):
     progress_signal = Signal(int, bool) 
     append_log_signal = Signal(list)
+    task_error_signal = Signal(object)
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.setObjectName("HomeInterface")
         # 初始化一些变量
-        self.video_paths = []
         self.video_path = None
         self.video_cap = None
         self.fps = None
@@ -42,6 +44,9 @@ class HomeInterface(QWidget):
 
         # 添加自动滚动控制标志
         self.auto_scroll = True
+        self.running_task = False
+        self.running_process = None
+        self.running_sub_process_pids = []
         
         # 当前正在处理的任务索引
         self.current_processing_task_index = -1
@@ -49,6 +54,7 @@ class HomeInterface(QWidget):
         self.__initWidget()
         self.progress_signal.connect(self.update_progress)
         self.append_log_signal.connect(self.append_log)
+        self.task_error_signal.connect(self.on_task_error)
         print(tr['Main']['AcceleratorWarning'])
 
     def __initWidget(self):
@@ -117,13 +123,19 @@ class HomeInterface(QWidget):
         self.file_button = PushButton(tr['SubtitleExtractorGUI']['Open'], self)
         self.file_button.setIcon(FluentIcon.FOLDER)
         self.file_button.clicked.connect(self.open_file)
+        button_layout.addWidget(self.file_button)
         
         self.run_button = PushButton(tr['SubtitleExtractorGUI']['Run'], self)
         self.run_button.setIcon(FluentIcon.PLAY)
         self.run_button.clicked.connect(self.run_button_clicked)
-        
-        button_layout.addWidget(self.file_button)
         button_layout.addWidget(self.run_button)
+        
+        self.stop_button = PushButton(tr['SubtitleExtractorGUI']['Stop'], self)
+        self.stop_button.setIcon(MyFluentIcon.Stop)
+        self.stop_button.setVisible(False)
+        self.stop_button.clicked.connect(self.stop_button_clicked)
+        
+        button_layout.addWidget(self.stop_button)
         
         button_container.setLayout(button_layout)
         right_layout.addWidget(button_container)
@@ -170,13 +182,10 @@ class HomeInterface(QWidget):
         if index == self.current_processing_task_index:
             self.current_processing_task_index = -1
         
-        # 如果删除的是待处理队列中的任务，则需要从队列中移除
-        if index < len(self.video_paths):
-            self.video_paths.pop(index)
-        
-        if len(self.video_paths) > 0:
+        task = self.task_list_component.get_task(0)
+        if task:
             # 如果还有任务，选中第一个
-            self.load_video(self.video_paths[0])
+            self.load_video(task.path)
             self.task_list_component.select_task(0)
 
     def update_preview(self, frame):
@@ -246,105 +255,125 @@ class HomeInterface(QWidget):
         
         return padded
 
+    def stop_button_clicked(self):
+        try:
+            self.running_task = False
+            for pid in self.running_sub_process_pids:
+                ProcessManager.instance().terminate_by_pid(pid)
+            running_process = self.running_process
+            if running_process:
+                ProcessManager.instance().terminate_by_process(running_process)
+            # 更新任务状态为待处理
+            if self.current_processing_task_index >= 0:
+                self.task_list_component.update_task_status(self.current_processing_task_index, TaskStatus.PENDING)
+        finally:    
+            self.running_sub_process_pids = []
+            self.running_process = None
+            self.run_button.setVisible(True)
+            self.stop_button.setVisible(False)
+
     def run_button_clicked(self):
         if not self.task_list_component.get_pending_tasks():
             self.append_output(tr['SubtitleExtractorGUI']['OpenVideoFirst'])
             return
             
         try:
-            self.run_button.setEnabled(False)
-            self.file_button.setEnabled(False)
             # 获取所有待执行的任务
             pending_tasks = self.task_list_component.get_pending_tasks()
             if not pending_tasks:
-                # 没有待执行的任务，恢复按钮状态
-                self.run_button.setEnabled(True)
-                self.file_button.setEnabled(True)
                 return
-            # 更新视频路径列表，只包含待执行的任务
-            self.video_paths = [path for _, path in pending_tasks]
             
+            self.run_button.setVisible(False)
+            self.stop_button.setVisible(True)
             # 开启后台线程处理视频
             def task():
-                task_index = 0
-                while self.video_paths:
-                    try:
-                        video_path = self.video_paths.pop(0)
-                        
-                        # 更新当前处理的任务索引
-                        self.current_processing_task_index = pending_tasks[task_index][0]
-                        
-                        # 更新任务状态为运行中
-                        self.task_list_component.update_task_progress(self.current_processing_task_index, 1)
-                        
-                        # 选中当前任务
-                        self.task_list_component.select_task(self.current_processing_task_index)
-                        
-                        if self.video_cap:
-                            self.video_cap.release()
-                            self.video_cap = None
+                self.running_task = True
+                try:
+                    while self.running_task:
+                        try:
+                            pending_tasks = self.task_list_component.get_pending_tasks()
+                            if not pending_tasks:
+                                break
+                            pending_task = pending_tasks[0]
+                            # 更新当前处理的任务索引
+                            self.current_processing_task_index, task = pending_task
+                            if not self.load_video(task.path):
+                                self.append_output(tr['SubtitleExtractorGUI']['OpenVideoFailed'].format(task.path))
+                                self.task_list_component.update_task_status(self.current_processing_task_index, TaskStatus.FAILED)
+                                continue
+                            
+                            # 更新任务状态为运行中
+                            self.task_list_component.update_task_progress(self.current_processing_task_index, 1)
+                            
+                            # 选中当前任务
+                            self.task_list_component.select_task(self.current_processing_task_index)
                             
                             
-                        # 获取字幕区域坐标（直接从视频显示组件获取）
-                        subtitle_area = self.video_display_component.get_original_coordinates()
-                        if not subtitle_area:
-                            self.append_output(tr['SubtitleExtractorGUI']['SelectSubtitleArea'])
-                            return
-                        self.append_output(f"{tr['SubtitleExtractorGUI']['SubtitleArea']}: {subtitle_area}")
+                            # 获取字幕区域坐标（直接从视频显示组件获取）
+                            subtitle_area = self.video_display_component.get_original_coordinates()
+                            if not subtitle_area:
+                                self.append_output(tr['SubtitleExtractorGUI']['SelectSubtitleArea'])
+                                return
+                            self.append_output(f"{tr['SubtitleExtractorGUI']['SubtitleArea']}: {subtitle_area}")
                             
-                        self.load_video(video_path)
-                        
-                        process = self.run_subtitle_extractor_process(video_path, subtitle_area)
-                        
-                        # 更新任务状态为已完成
-                        self.task_list_component.update_task_progress(self.current_processing_task_index, 100, True)
-                        
-                        task_index += 1
-                    except Exception as e:
-                        print(e)
-                        self.append_output(f"Error: {e}")
-                        
-                        # 更新任务状态为失败
-                        if self.current_processing_task_index >= 0:
-                            self.task_list_component.update_task_status(self.current_processing_task_index, TaskStatus.FAILED)
-                        
-                        self.video_paths.append(video_path)
-                        break
-                    finally:
-                        self.progress_signal.emit(100, True)
-                        
-                        if self.video_cap:
-                            self.video_cap.release()
-                            self.video_cap = None
+                            self.task_list_component.update_task_status(self.current_processing_task_index, TaskStatus.PROCESSING)
+                            process = self.run_subtitle_extractor_process(task.path, task.output_path, subtitle_area)
+                            
+                            # 更新任务状态为已完成
+                            task = self.task_list_component.get_task(self.current_processing_task_index)
+                            if process.exitcode == 0 and task and task.status == TaskStatus.PROCESSING:
+                                self.progress_signal.emit(100, True)
+                                self.task_list_component.update_task_status(self.current_processing_task_index, TaskStatus.COMPLETED)
+                            else:
+                                self.task_list_component.update_task_status(self.current_processing_task_index, TaskStatus.FAILED)
+                            
+                        except Exception as e:
+                            print(e)
+                            self.append_output(f"Error: {e}")
+                            # 更新任务状态为失败
+                            if self.current_processing_task_index >= 0:
+                                self.task_list_component.update_task_status(self.current_processing_task_index, TaskStatus.FAILED)
+                            break
+                        finally:
+                            if self.video_cap:
+                                self.video_cap.release()
+                                self.video_cap = None
+                            time.sleep(1)
+                finally:
+                    self.running_task = False
+                    self.run_button.setVisible(True)
+                    self.stop_button.setVisible(False)
 
             threading.Thread(target=task, daemon=True).start()
         except Exception as e:
             print(traceback.format_exc())
             self.append_output(f"Error: {e}")
             # 没有待执行的任务，恢复按钮状态
-            self.run_button.setEnabled(True)
-            self.file_button.setEnabled(True)
+            self.run_button.setVisible(True)
+            self.stop_button.setVisible(False)
 
     @staticmethod
-    def extractor_process(queue, video_path, subtitle_area):
+    def extractor_process(queue, video_path, output_path, subtitle_area):
         """
         在子进程中执行字幕提取的函数
         
         Args:
             video_path: 视频文件路径
+            output_path: 输出文件路径
             subtitle_area: 字幕区域坐标 (ymin, ymax, xmin, xmax)
         """
         extractor = None
         try:
             from backend.main import SubtitleExtractor
             extractor = SubtitleExtractor(video_path, subtitle_area)
+            extractor.subtitle_output_path = output_path
             extractor.add_progress_listener(lambda progress, isFinished: SubtitleExtractorRemoteCall.remote_call_update_progress(queue, progress, isFinished))
             extractor.append_output = lambda *args: SubtitleExtractorRemoteCall.remote_call_append_log(queue, args)
             extractor.manage_process = lambda pid: SubtitleExtractorRemoteCall.remote_call_manage_process(queue, pid)
             extractor.run()
         except Exception as e:
-            import traceback
-            print(traceback.format_exc())
+            traceback.print_exc()
+            SubtitleExtractorRemoteCall.remote_call_catch_error(queue, e)
         finally:
             if extractor:
                 extractor.isFinished = True
@@ -354,27 +383,37 @@ class HomeInterface(QWidget):
             
 
     # 修改run_subtitle_extractor_process方法
-    def run_subtitle_extractor_process(self, video_path, subtitle_area):
+    def run_subtitle_extractor_process(self, video_path, output_path, subtitle_area):
         """
         使用多进程执行字幕提取，并等待进程完成
         
         Args:
             video_path: 视频文件路径
+            output_path: 输出文件路径
             subtitle_area: 字幕区域坐标 (ymin, ymax, xmin, xmax)
         """
 
         subtitle_extractor_remote_caller = SubtitleExtractorRemoteCall()
         subtitle_extractor_remote_caller.register_update_progress_callback(self.progress_signal.emit)
         subtitle_extractor_remote_caller.register_log_callback(self.append_log_signal.emit)
-        subtitle_extractor_remote_caller.register_manage_process_callback(lambda pid: ProcessManager.instance().add_pid(pid))
+        subtitle_extractor_remote_caller.register_manage_process_callback(lambda pid: (
+                ProcessManager.instance().add_pid(pid),
+                self.running_sub_process_pids.append(pid),
+            )
+        )
+        subtitle_extractor_remote_caller.register_error_callback(self.task_error_signal.emit)
         process = multiprocessing.Process(
             target=HomeInterface.extractor_process,
-            args=(subtitle_extractor_remote_caller.queue, video_path, subtitle_area)
+            args=(subtitle_extractor_remote_caller.queue, video_path, output_path, subtitle_area)
         )
         try:
+            if not self.running_task:
+                return process
             process.start()
             ProcessManager.instance().add_process(process)
+            self.running_process = process
             process.join()
+            print(f"Process exited with code {process.exitcode}")
         finally:
             subtitle_extractor_remote_caller.stop()
         return process
@@ -386,8 +425,8 @@ class HomeInterface(QWidget):
             # 还有待执行任务, 忽略
             return
         # 处理完成后恢复界面可用性
-        self.run_button.setEnabled(True)
-        self.file_button.setEnabled(True)
+        self.run_button.setVisible(True)
+        self.stop_button.setVisible(False)
         self.se = None
         # 重置视频滑块
         self.video_slider.setValue(1)
@@ -406,7 +445,6 @@ class HomeInterface(QWidget):
                 self.task_list_component.update_task_progress(
                     self.current_processing_task_index, 
                     progress_total,
-                    isFinished
                 )
             
             # 检查是否完成
@@ -434,8 +472,16 @@ class HomeInterface(QWidget):
             scrollbar = self.output_text.verticalScrollBar()
             scrollbar.setValue(scrollbar.maximum())
 
+    @Slot(object)
+    def on_task_error(self, e):
+        self.append_output(tr['SubtitleExtractorGUI']['ErrorDuringProcessing'].format(str(e)))
+        if self.current_processing_task_index >= 0:
+            self.task_list_component.update_task_status(self.current_processing_task_index, TaskStatus.FAILED)
     def load_video(self, video_path):
         self.video_path = video_path
+        if self.video_cap:
+            self.video_cap.release()
+            self.video_cap = None
         self.video_cap = cv2.VideoCapture(self.video_path)
         if not self.video_cap.isOpened():
             return False
@@ -473,12 +519,10 @@ class HomeInterface(QWidget):
                     self.append_output(f"{tr['SubtitleExtractorGUI']['OpenVideoFailed']}: {path}")
             # 正序添加, 确保任务列表顺序一致
             for path in reversed(files_loaded):
+                output_path = os.path.splitext(path)[0] + '.srt'
                 # 添加到任务列表
-                self.task_list_component.add_task(path)
-                # 添加到视频路径列表
-                self.video_paths.append(path)
-            # 选中第一个任务
-            self.task_list_component.select_task(0)
+                self.task_list_component.add_task(path, output_path)
+            self.task_list_component.select_task(max(0, self.task_list_component.find_task_index_by_path(path)))
 
     def closeEvent(self, event):
         """窗口关闭时断开信号连接"""
@@ -486,6 +530,7 @@ class HomeInterface(QWidget):
             # 断开信号连接
             self.progress_signal.disconnect(self.update_progress)
             self.append_log_signal.disconnect(self.append_log)
+            self.task_error_signal.disconnect(self.on_task_error)
             
             # 释放视频资源
             if self.video_cap:

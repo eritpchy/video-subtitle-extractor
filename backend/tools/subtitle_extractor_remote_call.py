@@ -7,6 +7,7 @@ class Command(Enum):
     PROGRESS = 1,
     LOG = 2,
     MANAGE_PROCESS = 3,
+    ERROR = 4,
 
 class SubtitleExtractorRemoteCall:
     """
@@ -42,6 +43,9 @@ class SubtitleExtractorRemoteCall:
     def register_manage_process_callback(self, callback):
         self.callbacks[Command.MANAGE_PROCESS] = callback
 
+    def register_error_callback(self, callback):
+        self.callbacks[Command.ERROR] = callback
+
     @staticmethod
     def remote_call_update_progress(queue, progress, isFinished):
         queue.put((Command.PROGRESS, (progress, isFinished,)))
@@ -53,6 +57,10 @@ class SubtitleExtractorRemoteCall:
     @staticmethod
     def remote_call_finish(queue, *args):
         queue.put((Command.FINISH, (None,)))
+        
+    @staticmethod
+    def remote_call_catch_error(queue, e):
+        queue.put((Command.ERROR, (e,)))
 
     @staticmethod
     def remote_call_manage_process(queue, pid):
