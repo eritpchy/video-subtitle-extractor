@@ -1,5 +1,6 @@
 import os
 from enum import Enum
+from dataclasses import dataclass
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QMenu, QAbstractItemView, QTableWidgetItem, QHeaderView
 from PySide6.QtCore import Qt, Signal, QModelIndex, QUrl
 from qfluentwidgets import TableWidget, BodyLabel, FluentIcon, InfoBar, InfoBarPosition
@@ -13,6 +14,14 @@ class TaskStatus(Enum):
     PROCESSING = tr['TaskList']['Processing']
     COMPLETED = tr['TaskList']['Completed']
     FAILED = tr['TaskList']['Failed']
+
+@dataclass
+class Task:
+    path: str
+    name: str
+    progress: int
+    status: TaskStatus
+    output_path: str
 
 class TaskListComponent(QWidget):
     """任务列表组件"""
@@ -64,7 +73,7 @@ class TaskListComponent(QWidget):
         
         layout.addWidget(self.table)
         
-    def add_task(self, video_path):
+    def add_task(self, video_path, output_path):
         """添加任务到列表
         
         Args:
@@ -72,7 +81,7 @@ class TaskListComponent(QWidget):
         """
         # 覆盖相同路径的任务
         for row, task in enumerate(self.tasks[:]):
-            if task["path"] == video_path:
+            if task.path == video_path:
                 self.delete_task(row)
                 continue
                 
@@ -80,12 +89,13 @@ class TaskListComponent(QWidget):
         file_name = os.path.basename(video_path)
         
         # 添加到任务列表
-        task = {
-            "path": video_path,
-            "name": file_name,
-            "progress": 0,
-            "status": TaskStatus.PENDING
-        }
+        task = Task(
+            path=video_path,
+            name=file_name,
+            progress=0,
+            status=TaskStatus.PENDING,
+            output_path=output_path,
+        )
         self.tasks.append(task)
         
         # 更新表格
@@ -113,28 +123,21 @@ class TaskListComponent(QWidget):
         self.table.scrollToBottom()
         return True
         
-    def update_task_progress(self, index, progress, is_completed=False):
+    def update_task_progress(self, index, progress):
         """更新任务进度
         
         Args:
             index: 任务索引
             progress: 进度值(0-100)
-            is_completed: 是否已完成
         """
         if 0 <= index < len(self.tasks):
-            self.tasks[index]["progress"] = progress
+            self.tasks[index].progress = progress
             
             # 更新进度单元格
             progress_item = self.table.item(index, 1)
             if progress_item:
                 progress_item.setText(f"{progress}%")
             
-            # 如果已完成，更新状态
-            if is_completed:
-                self.update_task_status(index, TaskStatus.COMPLETED)
-            elif progress > 0:
-                self.update_task_status(index, TaskStatus.PROCESSING)
-                
             # 如果是当前处理的任务，滚动到可见区域
             if index == self.current_task_index:
                 self.table.scrollTo(self.table.model().index(index, 0))
@@ -147,7 +150,7 @@ class TaskListComponent(QWidget):
             status: 任务状态
         """
         if 0 <= index < len(self.tasks):
-            self.tasks[index]["status"] = status
+            self.tasks[index].status = status
             status_item = self.table.item(index, 2)
             if status_item:
                 status_item.setText(status.value)
@@ -171,9 +174,9 @@ class TaskListComponent(QWidget):
         """获取所有待处理的任务
         
         Returns:
-            list: 待处理任务列表，每项为 (索引, 路径) 元组
+            list: 待处理任务列表，每项为 (索引, 任务) 元组
         """
-        return [(i, task["path"]) for i, task in enumerate(self.tasks) if task["status"] == TaskStatus.PENDING]
+        return [(i, task) for i, task in enumerate(self.tasks) if task.status == TaskStatus.PENDING]
     
     def get_all_tasks(self):
         """获取所有任务
@@ -182,6 +185,26 @@ class TaskListComponent(QWidget):
             list: 所有任务列表
         """
         return self.tasks
+
+    def get_task(self, index):
+        """获取指定索引的任务
+
+        Args:
+            index: 任务索引
+
+        Returns:
+            Task: 任务对象
+        """
+        if 0 <= index < len(self.tasks):
+            return self.tasks[index]
+        return None
+    
+    def find_task_index_by_path(self, path):
+        tasks = self.get_all_tasks()
+        for idx, task in enumerate(tasks):
+            if task.path == path:
+                return idx
+        return -1  # 没找到返回-1
         
     def show_context_menu(self, pos):
         """显示右键菜单
@@ -195,13 +218,33 @@ class TaskListComponent(QWidget):
             
             # 打开视频文件位置
             open_video_location_action = QAction(tr['TaskList']['OpenVideoLocation'], self)
-            open_video_location_action.triggered.connect(lambda: self.open_file_location(index.row(), is_subtitle=False))
+            open_video_location_action.triggered.connect(lambda: self.open_file_location(self.tasks[index.row()].path))
             menu.addAction(open_video_location_action)
             
-            # 打开字幕文件位置（仅当任务已完成时可用）
-            open_subtitle_location_action = QAction(tr['TaskList']['OpenSubtitleLocation'], self)
-            open_subtitle_location_action.triggered.connect(lambda: self.open_file_location(index.row(), is_subtitle=True))
-            menu.addAction(open_subtitle_location_action)
+            # 打开目标文件位置
+            def open_target_location():
+                task = self.tasks[index.row()]
+                path = task.output_path
+                if task.status != TaskStatus.COMPLETED:
+                    InfoBar.warning(
+                        title=tr['TaskList']['Warning'],
+                        content=tr['TaskList']['SubtitleNotFound'],
+                        parent=self.get_root_parent(),
+                        duration=3000
+                    )
+                    return
+                self.open_file_location(path)
+            open_target_location_action = QAction(tr['TaskList']['OpenSubtitleLocation'], self)
+            open_target_location_action.triggered.connect(open_target_location)
+            menu.addAction(open_target_location_action)
+
+            reset_task_status_action = QAction(tr['TaskList']['ResetTaskStatus'], self)
+            reset_task_status_action.triggered.connect((lambda: (
+                    self.update_task_status(index.row(), TaskStatus.PENDING), 
+                    self.update_task_progress(index.row(), 0)
+                )
+            ))
+            menu.addAction(reset_task_status_action)
             
             # 删除任务
             delete_action = QAction(tr['TaskList']['DeleteTask'], self)
@@ -241,7 +284,7 @@ class TaskListComponent(QWidget):
         if 0 <= row < len(self.tasks):
             self.current_task_index = row
             # 发出信号，通知外部加载对应视频
-            self.task_selected.emit(row, self.tasks[row]["path"])
+            self.task_selected.emit(row, self.tasks[row].path)
             
     def set_current_task(self, index):
         """设置当前处理的任务
@@ -262,45 +305,24 @@ class TaskListComponent(QWidget):
         """
         self.set_current_task(index)
 
-    def open_file_location(self, row, is_subtitle=False):
+    def open_file_location(self, path):
         """打开文件所在位置
         
         Args:
             row: 行索引
             is_subtitle: 是否为字幕文件
-        """
-        if 0 <= row < len(self.tasks):
-            video_path = self.tasks[row]["path"]
+        """                
+        # 检查视频文件是否存在
+        if not os.path.exists(path):
+            InfoBar.warning(
+                title=tr['TaskList']['Warning'],
+                content=tr['TaskList']['UnableToLocateFile'],
+                parent=self.get_root_parent(),
+                duration=3000
+            )
+            return
             
-            if is_subtitle:
-                # 如果任务未完成，显示提示
-                if self.tasks[row]["status"] != TaskStatus.COMPLETED:
-                    InfoBar.warning(
-                        title=tr['TaskList']['Warning'],
-                        content=tr['TaskList']['SubtitleNotFound'],
-                        parent=self.get_root_parent(),
-                        duration=3000
-                    )
-                    return
-                    
-                # 获取字幕文件路径
-                subtitle_path = os.path.splitext(video_path)[0] + '.srt'
-                
-                path = subtitle_path
-            else:
-                path = video_path
-                
-            # 检查视频文件是否存在
-            if not os.path.exists(path):
-                InfoBar.warning(
-                    title=tr['TaskList']['Warning'],
-                    content=tr['TaskList']['UnableToLocateFile'],
-                    parent=self.get_root_parent(),
-                    duration=3000
-                )
-                return
-                
-            show_in_file_manager(os.path.abspath(path))
+        show_in_file_manager(os.path.abspath(path))
 
     def get_root_parent(self):
         parent = self
