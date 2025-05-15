@@ -20,6 +20,10 @@ class BackgroundColor(Enum):
     UNKNOWN = 2
 
 
+class VideoSubFinderDecoder(Enum):
+    OPENCV = "OpenCV"
+    FFMPEG = "FFmpeg"
+
 BGR_COLOR_GREEN = (0, 0xff, 0)
 BGR_COLOR_BLUE = (0xff, 0, 0)
 BGR_COLOR_RED = (0, 0, 0xff)

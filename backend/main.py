@@ -488,10 +488,13 @@ class SubtitleExtractor:
         else:
             # 留2核心来给其他任务使用
             cpu_count = max(multiprocessing.cpu_count() - 2, 1)
+        if config.videoSubFinderCpuCores.value > 0:
+            cpu_count = config.videoSubFinderCpuCores.value
         if platform.system() == 'Windows':
             # 定义执行命令
             cmd = f"{path_vsf} --use_cuda -c -r -i \"{self.video_path}\" -o \"{self.temp_output_dir}\" -ces \"{self.vsf_subtitle}\" "
-            cmd += f"-te {top_end} -be {bottom_end} -le {left_end} -re {right_end} -nthr {cpu_count} -nocrthr {cpu_count}"
+            cmd += f"-te {top_end} -be {bottom_end} -le {left_end} -re {right_end} -nthr {cpu_count} -nocrthr {cpu_count} "
+            cmd += f"--open_video_{config.videoSubFinderDecoder.value.value.lower()} "
             # 计算进度
             try:
                 self.vsf_running = True
@@ -509,7 +512,8 @@ class SubtitleExtractor:
             cmd = f"{path_vsf} -c -r -i \"{self.video_path}\" -o \"{self.temp_output_dir}\" -ces \"{self.vsf_subtitle}\" "
             if self.hardware_accelerator.has_accelerator():
                 cmd += "--use_cuda "
-            cmd += f"-te {top_end} -be {bottom_end} -le {left_end} -re {right_end} -nthr {cpu_count} -dsi"
+            cmd += f"-te {top_end} -be {bottom_end} -le {left_end} -re {right_end} -nthr {cpu_count} -dsi "
+            cmd += f"--open_video_{config.videoSubFinderDecoder.value.value.lower()} "
             self.vsf_running = True
             try:
                 p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1,

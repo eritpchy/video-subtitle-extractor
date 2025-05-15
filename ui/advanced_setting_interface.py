@@ -11,6 +11,7 @@ from qfluentwidgets import (ScrollArea, ExpandLayout, CardWidget, SubtitleLabel,
 from backend.config import config, tr, VERSION, PROJECT_HOME_URL, PROJECT_ISSUES_URL, PROJECT_RELEASES_URL
 from backend.tools.version_service import VersionService
 from backend.tools.concurrent import TaskExecutor
+from backend.tools.constant import VideoSubFinderDecoder
 
 class AdvancedSettingInterface(ScrollArea):
     """高级设置页面"""
@@ -54,17 +55,21 @@ class AdvancedSettingInterface(ScrollArea):
         self.advanced_group.addSettingCard(self.subtitle_area_deviation_rate)
         self.advanced_group.addSettingCard(self.check_update_on_startup)
         self.expandLayout.addWidget(self.advanced_group)
-        
+
+        self.video_sub_finder_group.addSettingCard(self.video_sub_finder_cpu_cores)
+        self.video_sub_finder_group.addSettingCard(self.video_sub_finder_decoder)
+        self.expandLayout.addWidget(self.video_sub_finder_group)
+
         self.dev_group.addSettingCard(self.debug_ocr_loss)
         self.dev_group.addSettingCard(self.debug_no_delete_cache)
         self.dev_group.addSettingCard(self.delete_empty_time_stamp)
+        self.expandLayout.addWidget(self.dev_group)
 
         self.about_group.addSettingCard(self.feedback)
         self.about_group.addSettingCard(self.copyright)
         self.about_group.addSettingCard(self.project_link)
-        
-        self.expandLayout.addWidget(self.dev_group)
         self.expandLayout.addWidget(self.about_group)
+       
         self.expandLayout.setSpacing(16)
         self.expandLayout.setContentsMargins(16, 16, 16, 48)
         
@@ -72,6 +77,8 @@ class AdvancedSettingInterface(ScrollArea):
         """设置UI"""
         # 高级设置组
         self.advanced_group = SettingCardGroup(tr["Setting"]["AdvancedSetting"], self.scrollWidget)
+        # VideoSubFinder设置组
+        self.video_sub_finder_group = SettingCardGroup(tr["Setting"]["VideoSubFinderSetting"], self.scrollWidget)
         # 开发设置组  
         self.dev_group = SettingCardGroup(tr["Setting"]["DevSetting"], self.scrollWidget)
         # 关于设置组  
@@ -172,6 +179,23 @@ class AdvancedSettingInterface(ScrollArea):
             title=tr["Setting"]["CheckUpdateOnStartup"],
             content=tr["Setting"]["CheckUpdateOnStartupDesc"],
             parent=self.advanced_group
+        )
+        # VideoSubFinder CPU核心数
+        self.video_sub_finder_cpu_cores = RangeSettingCard(
+            configItem=config.videoSubFinderCpuCores,
+            icon=FluentIcon.SPEED_MEDIUM,
+            title=tr["Setting"]["VideoSubFinderCpuCores"],
+            content=tr["Setting"]["VideoSubFinderCpuCoresDesc"],
+            parent=self.video_sub_finder_group
+        )
+        # VideoSubFinder 视频解码组件
+        self.video_sub_finder_decoder = ComboBoxSettingCard(
+            configItem=config.videoSubFinderDecoder,
+            icon=FluentIcon.VIDEO,
+            title=tr["Setting"]["VideoSubFinderDecoder"],
+            content=tr["Setting"]["VideoSubFinderDecoderDesc"],
+            texts=[item.value for item in VideoSubFinderDecoder],
+            parent=self.video_sub_finder_group
         )
         # 输出丢失的字幕帧
         self.debug_ocr_loss = SwitchSettingCard(
