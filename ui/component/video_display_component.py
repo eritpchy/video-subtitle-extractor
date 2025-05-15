@@ -1,6 +1,6 @@
 import cv2
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
-from PySide6.QtCore import Qt, Signal, QRect, QRectF
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizePolicy
+from PySide6.QtCore import Qt, Signal, QRect, QRectF, QTimer, QObject, QEvent
 from PySide6 import QtCore, QtWidgets, QtGui
 from qfluentwidgets import qconfig, CardWidget, HollowHandleStyle
 
@@ -22,6 +22,7 @@ class VideoDisplayComponent(QWidget):
         self.drag_start_pos = None
         self.resize_edge = None
         self.edge_size = 10  # 调整大小的边缘区域
+        self.enable_mouse_events = True  # 控制是否启用鼠标事件
         
         # 获取屏幕大小
         screen = QtWidgets.QApplication.primaryScreen().size()
@@ -45,7 +46,7 @@ class VideoDisplayComponent(QWidget):
         
         # 保存选择框的相对位置和大小（相对于实际视频的比例）
         self.selection_ratio = None
-        
+
         self.__initWidget()
         
     def __initWidget(self):
@@ -68,7 +69,8 @@ class VideoDisplayComponent(QWidget):
         self.black_container.setStyleSheet("""
             #blackContainer {
                 background-color: black;
-                border-radius: 8px;
+                border-radius: 10px;
+                border: 0px solid transparent;
             }
         """)
         black_layout = QVBoxLayout()
@@ -80,11 +82,15 @@ class VideoDisplayComponent(QWidget):
         self.video_display = QtWidgets.QLabel()
         self.video_display.setStyleSheet("""
             background-color: black;
-            border-top-left-radius: 8px;
-            border-top-right-radius: 8px;
+            border-top-left-radius: 10px;
+            border-top-right-radius: 10px;
+            border: 0px solid transparent;
         """)
-        self.video_display.setFixedSize(self.video_preview_width, self.video_preview_height)
+        self.video_display.setMinimumSize(self.video_preview_width, self.video_preview_height)
+        
         self.video_display.setMouseTracking(True)
+        self.video_display.setScaledContents(True)
+        self.video_display.setAlignment(Qt.AlignCenter)
         self.video_display.mousePressEvent = self.selection_mouse_press
         self.video_display.mouseMoveEvent = self.selection_mouse_move
         self.video_display.mouseReleaseEvent = self.selection_mouse_release
@@ -104,8 +110,30 @@ class VideoDisplayComponent(QWidget):
         
         # 视频预览区域
         self.video_display.setObjectName('videoDisplay')
-        black_layout.addWidget(self.video_display, 0, Qt.AlignCenter)
-        
+        # black_layout.addWidget(self.video_display, 0, Qt.AlignCenter)
+        # 创建一个容器来保持比例
+        ratio_container = QWidget()
+        ratio_layout = QVBoxLayout(ratio_container)
+        ratio_layout.setContentsMargins(0, 0, 0, 0)
+        ratio_layout.addWidget(self.video_display)
+
+        # 设置固定的宽高比
+        ratio_container.setFixedHeight(ratio_container.width() * 9 // 16)
+        ratio_container.setMinimumWidth(self.video_preview_width)
+
+        # 添加到布局
+        black_layout.addWidget(ratio_container)
+
+        # 添加一个事件过滤器来处理大小变化
+        class RatioEventFilter(QObject):
+            def eventFilter(self, obj, event):
+                if event.type() == QEvent.Resize:
+                    obj.setFixedHeight(obj.width() * 9 // 16)
+                return False
+
+        ratio_filter = RatioEventFilter(ratio_container)
+        ratio_container.installEventFilter(ratio_filter)
+
         # 进度条和滑块容器
         control_container = QWidget(self)
         control_layout = QVBoxLayout()
@@ -125,7 +153,13 @@ class VideoDisplayComponent(QWidget):
         self.video_container.setLayout(video_layout)
         main_layout.addWidget(self.video_container)
     
-    def update_video_display(self, frame):
+    def update_video_display(self, frame, draw_selection=True):
+        """更新视频显示"""
+        if frame is None:
+            return
+
+        # 调整视频帧大小以适应视频预览区域
+        frame = cv2.resize(frame, (self.video_preview_width, self.video_preview_height))
         # 将 OpenCV 帧（BGR 格式）转换为 QImage 并显示在 QLabel 上
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb_frame.shape
@@ -139,6 +173,7 @@ class VideoDisplayComponent(QWidget):
         
         painter = QtGui.QPainter(rounded_pix)
         painter.setRenderHint(QtGui.QPainter.Antialiasing)  # 抗锯齿
+        painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, True)
         
         # 创建圆角路径
         path = QtGui.QPainterPath()
@@ -165,7 +200,7 @@ class VideoDisplayComponent(QWidget):
         self.video_display.setPixmap(rounded_pix)
         
         # 如果有保存的选择框比例，根据新视频尺寸重新计算选择框
-        if self.selection_ratio is not None and self.scaled_width and self.scaled_height:
+        if draw_selection and self.selection_ratio is not None and self.scaled_width and self.scaled_height:
             x_ratio, y_ratio, w_ratio, h_ratio = self.selection_ratio
             
             # 计算新的选择框坐标和大小
@@ -207,12 +242,37 @@ class VideoDisplayComponent(QWidget):
     
     def selection_mouse_press(self, event):
         """鼠标按下事件处理"""
+        if not self.enable_mouse_events:
+            return
         pos = event.pos()
+
+        # 检测双击或三击，重置选择框
+        if event.type() == QtCore.QEvent.MouseButtonDblClick:
+            self.selection_rect = QRect(pos, pos)
+            self.resize_edge = None
+            self.is_drawing = True
+            self.drag_start_pos = pos
+            return
         
         # 检查是否在选择框边缘（用于调整大小）
         if self.selection_rect.isValid():
+            # 右下角
+            if abs(pos.x() - self.selection_rect.right()) <= self.edge_size and abs(pos.y() - self.selection_rect.bottom()) <= self.edge_size:
+                self.resize_edge = "bottomright"
+                self.drag_start_pos = pos
+                return
+            # 右上角
+            elif abs(pos.x() - self.selection_rect.right()) <= self.edge_size and abs(pos.y() - self.selection_rect.top()) <= self.edge_size:
+                self.resize_edge = "topright"
+                self.drag_start_pos = pos
+                return
+            # 左下角
+            elif abs(pos.x() - self.selection_rect.left()) <= self.edge_size and abs(pos.y() - self.selection_rect.bottom()) <= self.edge_size:
+                self.resize_edge = "bottomleft"
+                self.drag_start_pos = pos
+                return
             # 左边缘
-            if abs(pos.x() - self.selection_rect.left()) <= self.edge_size and self.selection_rect.top() <= pos.y() <= self.selection_rect.bottom():
+            elif abs(pos.x() - self.selection_rect.left()) <= self.edge_size and self.selection_rect.top() <= pos.y() <= self.selection_rect.bottom():
                 self.resize_edge = "left"
                 self.drag_start_pos = pos
                 return
@@ -236,21 +296,6 @@ class VideoDisplayComponent(QWidget):
                 self.resize_edge = "topleft"
                 self.drag_start_pos = pos
                 return
-            # 右上角
-            elif abs(pos.x() - self.selection_rect.right()) <= self.edge_size and abs(pos.y() - self.selection_rect.top()) <= self.edge_size:
-                self.resize_edge = "topright"
-                self.drag_start_pos = pos
-                return
-            # 左下角
-            elif abs(pos.x() - self.selection_rect.left()) <= self.edge_size and abs(pos.y() - self.selection_rect.bottom()) <= self.edge_size:
-                self.resize_edge = "bottomleft"
-                self.drag_start_pos = pos
-                return
-            # 右下角
-            elif abs(pos.x() - self.selection_rect.right()) <= self.edge_size and abs(pos.y() - self.selection_rect.bottom()) <= self.edge_size:
-                self.resize_edge = "bottomright"
-                self.drag_start_pos = pos
-                return
             # 在选择框内部（用于移动）
             elif self.selection_rect.contains(pos):
                 self.resize_edge = "move"
@@ -265,6 +310,8 @@ class VideoDisplayComponent(QWidget):
     
     def selection_mouse_move(self, event):
         """鼠标移动事件处理"""
+        if not self.enable_mouse_events:
+            return
         pos = event.pos()
         
         # 根据不同的操作模式处理鼠标移动
@@ -276,7 +323,40 @@ class VideoDisplayComponent(QWidget):
                 # 移动整个选择框
                 dx = pos.x() - self.drag_start_pos.x()
                 dy = pos.y() - self.drag_start_pos.y()
-                self.selection_rect.translate(dx, dy)
+                
+                # 保存原始选择框尺寸
+                original_width = self.selection_rect.width()
+                original_height = self.selection_rect.height()
+                
+                # 计算新位置
+                new_rect = self.selection_rect.translated(dx, dy)
+                
+                # 获取视频显示区域
+                display_rect = self.video_display.rect()
+                
+                # 检查是否超出边界，如果超出则调整位置但保持尺寸
+                if new_rect.left() < 0:
+                    new_rect.moveLeft(0)
+                if new_rect.top() < 0:
+                    new_rect.moveTop(0)
+                if new_rect.right() > display_rect.width():
+                    new_rect.moveRight(display_rect.width())
+                if new_rect.bottom() > display_rect.height():
+                    new_rect.moveBottom(display_rect.height())
+                    
+                # 确保尺寸不变
+                if new_rect.width() != original_width or new_rect.height() != original_height:
+                    # 如果尺寸变了，恢复原始尺寸
+                    if new_rect.left() == 0:
+                        new_rect.setWidth(original_width)
+                    if new_rect.top() == 0:
+                        new_rect.setHeight(original_height)
+                    if new_rect.right() == display_rect.width():
+                        new_rect.setLeft(new_rect.right() - original_width)
+                    if new_rect.bottom() == display_rect.height():
+                        new_rect.setTop(new_rect.bottom() - original_height)
+                    
+                self.selection_rect = new_rect
                 self.drag_start_pos = pos
             else:
                 # 调整选择框大小
@@ -288,18 +368,18 @@ class VideoDisplayComponent(QWidget):
                     self.selection_rect.setTop(pos.y())
                 if "bottom" in self.resize_edge:
                     self.selection_rect.setBottom(pos.y())
-            
-            # 确保选择框在视频显示区域内
-            display_rect = self.video_display.rect()
-            if self.selection_rect.left() < 0:
-                self.selection_rect.setLeft(0)
-            if self.selection_rect.top() < 0:
-                self.selection_rect.setTop(0)
-            if self.selection_rect.right() > display_rect.width():
-                self.selection_rect.setRight(display_rect.width())
-            if self.selection_rect.bottom() > display_rect.height():
-                self.selection_rect.setBottom(display_rect.height())
                 
+                # 确保选择框在视频显示区域内
+                display_rect = self.video_display.rect()
+                if self.selection_rect.left() < 0:
+                    self.selection_rect.setLeft(0)
+                if self.selection_rect.top() < 0:
+                    self.selection_rect.setTop(0)
+                if self.selection_rect.right() > display_rect.width():
+                    self.selection_rect.setRight(display_rect.width())
+                if self.selection_rect.bottom() > display_rect.height():
+                    self.selection_rect.setBottom(display_rect.height())
+                    
             self.update_preview_with_rect()
         else:
             # 更新鼠标指针形状
@@ -307,6 +387,8 @@ class VideoDisplayComponent(QWidget):
     
     def selection_mouse_release(self, event):
         """鼠标释放事件处理"""
+        if not self.enable_mouse_events:
+            return
         # 结束绘制或调整
         self.is_drawing = False
         self.resize_edge = None
@@ -390,7 +472,18 @@ class VideoDisplayComponent(QWidget):
         # 检查配置值是否有效
         if x_ratio is None or y_ratio is None or w_ratio is None or h_ratio is None:
             return False
-            
+
+        # 检查配置值是否在有效范围内
+        if w_ratio <= 0.01 or h_ratio <= 0.005:
+            config.set(config.subtitleSelectionAreaX, config.subtitleSelectionAreaX.defaultValue)
+            config.set(config.subtitleSelectionAreaY, config.subtitleSelectionAreaY.defaultValue)
+            config.set(config.subtitleSelectionAreaW, config.subtitleSelectionAreaW.defaultValue)
+            config.set(config.subtitleSelectionAreaH, config.subtitleSelectionAreaH.defaultValue)
+            x_ratio = config.subtitleSelectionAreaX.value
+            y_ratio = config.subtitleSelectionAreaY.value
+            w_ratio = config.subtitleSelectionAreaW.value
+            h_ratio = config.subtitleSelectionAreaH.value
+
         # 保存选择框比例
         self.selection_ratio = (x_ratio, y_ratio, w_ratio, h_ratio)
         
@@ -465,3 +558,9 @@ class VideoDisplayComponent(QWidget):
         ymax = max(0, min(ymax, self.frame_height))
         
         return (ymin, ymax, xmin, xmax)
+
+    def set_dragger_enabled(self, enabled):
+        """设置拖动器是否可用"""
+        self.enable_mouse_events = enabled
+        self.video_display.setMouseTracking(enabled)
+        self.video_display.setCursor(Qt.ArrowCursor)
