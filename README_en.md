@@ -197,7 +197,7 @@ This project supports four runtime modes: CUDA (NVIDIA GPU acceleration), CPU (n
   pip install -r requirements_directml.txt
   ```
 
-    - Linux:
+#### (3) ONNX (Suitable for macOS, AMD ROCm, and other hardware-accelerated environments; the basic setup is the same as DirectML, not tested!)
 
 - If using this method, DO NOT REPORT ISSUES.
 - Suitable for Linux or macOS devices with AMD/Metal GPUs/Apple Silicon GPUs.
@@ -212,7 +212,6 @@ This project supports four runtime modes: CUDA (NVIDIA GPU acceleration), CPU (n
   # Example:
   # requirements_coreml.txt
   #   paddle2onnx==1.3.1
-  #   onnxruntime-gpu==1.20.1
   #   onnxruntime-coreml==1.13.1
 
   pip install -r requirements_coreml.txt
