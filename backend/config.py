@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from qfluentwidgets import (qconfig, ConfigItem, QConfig, OptionsValidator, BoolValidator, OptionsConfigItem, 
                             EnumSerializer, RangeValidator, RangeConfigItem)
-from backend.tools.constant import SubtitleArea
+from backend.tools.constant import SubtitleArea, VideoSubFinderDecoder
 import configparser
 
 # 项目版本号
@@ -90,6 +90,10 @@ class Config(QConfig):
     hardwareAcceleration = ConfigItem("Main", "HardwareAcceleration", HARDWARD_ACCELERATION_OPTION, BoolValidator())
     # 启动时检查应用更新
     checkUpdateOnStartup = ConfigItem("Main", "CheckUpdateOnStartup", True, BoolValidator())
+    # VideoSubFinder CPU核心数
+    videoSubFinderCpuCores = RangeConfigItem("Main", "VideoSubFinderCpuCores", 0, RangeValidator(0, os.cpu_count()))
+    # VideoSubFinder 视频解码组件
+    videoSubFinderDecoder = OptionsConfigItem("Main", "VideoSubFinderDecoder", VideoSubFinderDecoder.OPENCV, OptionsValidator(VideoSubFinderDecoder), EnumSerializer(VideoSubFinderDecoder))
     
 CONFIG_FILE = 'config/config.json'
 config = Config()
