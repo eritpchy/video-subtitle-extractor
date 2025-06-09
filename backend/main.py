@@ -1017,11 +1017,12 @@ class SubtitleExtractor:
         :param frame_extract 视频帧提取进度
         """
         if ocr is not None:
-            self.progress_ocr = ocr
+            self.progress_ocr = max(0, min(100, ocr))  # Clamp value between 0 and 100
         if frame_extract is not None:
-            self.progress_frame_extract = frame_extract
-        self.progress_total = (self.progress_frame_extract + self.progress_ocr) / 2
-        # 通知所有监听器
+            self.progress_frame_extract = max(0, min(100, frame_extract))  # Clamp value between 0 and 100
+
+        self.progress_total = (self.progress_frame_extract * 0.4) + (self.progress_ocr * 0.6)
+        # Notify listeners
         self.notify_progress_listeners()
 
     def start_subtitle_ocr_async(self):
