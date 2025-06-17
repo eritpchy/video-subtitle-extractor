@@ -47,8 +47,8 @@ class SubtitleExtractorRemoteCall:
         self.callbacks[Command.ERROR] = callback
 
     @staticmethod
-    def remote_call_update_progress(queue, progress, isFinished):
-        queue.put((Command.PROGRESS, (progress, isFinished,)))
+    def remote_call_update_progress(queue, progress_ocr, progress_frame_extract, progress_total, isFinished):
+        queue.put((Command.PROGRESS, (progress_ocr, progress_frame_extract, progress_total, isFinished,)))
 
     @staticmethod
     def remote_call_append_log(queue, *args):

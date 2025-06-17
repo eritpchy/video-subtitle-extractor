@@ -1,12 +1,14 @@
 """
 @desc: 高级设置页面
 """
+import sys
 
 from PySide6 import QtWidgets, QtCore, QtGui
+from PySide6.QtWidgets import QFileDialog
 from qfluentwidgets import (ScrollArea, ExpandLayout, CardWidget, SubtitleLabel,
                            FluentIcon, NavigationWidget, NavigationItemPosition,
                            SettingCardGroup, RangeSettingCard, SwitchSettingCard,
-                           HyperlinkCard, PrimaryPushSettingCard, ComboBoxSettingCard,
+                           HyperlinkCard, PrimaryPushSettingCard, ComboBoxSettingCard, PushSettingCard,
                            MessageBox)
 from backend.config import config, tr, VERSION, PROJECT_HOME_URL, PROJECT_ISSUES_URL, PROJECT_RELEASES_URL
 from backend.tools.version_service import VersionService
@@ -53,6 +55,7 @@ class AdvancedSettingInterface(ScrollArea):
         self.advanced_group.addSettingCard(self.threshold_text_similarity)
         self.advanced_group.addSettingCard(self.drop_score)
         self.advanced_group.addSettingCard(self.subtitle_area_deviation_rate)
+        self.advanced_group.addSettingCard(self.save_directory)
         self.advanced_group.addSettingCard(self.check_update_on_startup)
         self.expandLayout.addWidget(self.advanced_group)
 
@@ -172,6 +175,15 @@ class AdvancedSettingInterface(ScrollArea):
             content=tr["Setting"]["SubtitleAreaDeviationRateDesc"],
             parent=self.advanced_group
         )
+        # 视频保存路径
+        self.save_directory = PushSettingCard(
+            text=tr["Setting"]["ChooseDirectory"],
+            icon=FluentIcon.DOWNLOAD,
+            title=tr["Setting"]["SaveDirectory"],
+            content=tr["Setting"]["SaveDirectoryDefault"] if not config.saveDirectory.value else config.saveDirectory.value,
+            parent=self.advanced_group
+        )
+        self.save_directory.clicked.connect(self.choose_save_directory)
         # 启动时检查应用更新
         self.check_update_on_startup = SwitchSettingCard(
             configItem=config.checkUpdateOnStartup,
@@ -288,3 +300,28 @@ class AdvancedSettingInterface(ScrollArea):
                 tr["Setting"]["NoUpdatesAvailableTitle"],
                 tr["Setting"]["NoUpdatesAvailableDesc"],
             )
+    
+    def choose_save_directory(self):
+        """选择保存目录"""
+        last_save_directory = "./" if not config.saveDirectory.value else config.saveDirectory.value
+        folder = QFileDialog.getExistingDirectory(
+            self, tr['Setting']['ChooseDirectory'], last_save_directory)
+        if not folder:
+            folder = ""
+
+        config.set(config.saveDirectory, folder)
+        self.save_directory.setContent(tr["Setting"]["SaveDirectoryDefault"] if not config.saveDirectory.value else config.saveDirectory.value)
+            
+    def macos_scrollarea_issue_workaround(self):
+        if sys.platform != "darwin":
+            return
+        self.verticalScrollBar().setValue(0)
+        self.scrollWidget.adjustSize()
+        self.expandLayout.update()
+        self.expandLayout.activate()
+        
+    def resizeEvent(self, event):
+        # macos_scrollarea_issue_workaround
+        if sys.platform == "darwin":
+            self.verticalScrollBar().setValue(0)
+        super().resizeEvent(event)

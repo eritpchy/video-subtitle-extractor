@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from qfluentwidgets import (qconfig, ConfigItem, QConfig, OptionsValidator, BoolValidator, OptionsConfigItem, 
-                            EnumSerializer, RangeValidator, RangeConfigItem)
+                            EnumSerializer, RangeValidator, RangeConfigItem, ConfigValidator)
 from backend.tools.constant import SubtitleArea, VideoSubFinderDecoder
 import configparser
 
@@ -44,10 +44,9 @@ class Config(QConfig):
     windowW = ConfigItem("Window", "Width", 1200)
     windowH = ConfigItem("Window", "Height", 1200)
 
-    subtitleSelectionAreaX = ConfigItem("Main", "SubtitleSelectionAreaX", 0.05)
-    subtitleSelectionAreaY = ConfigItem("Main", "SubtitleSelectionAreaY", 0.78)
-    subtitleSelectionAreaW = ConfigItem("Main", "SubtitleSelectionAreaW", 0.90)
-    subtitleSelectionAreaH = ConfigItem("Main", "SubtitleSelectionAreaH", 0.21)
+    # 使用一个配置项存储所有选区
+    # 默认值为一个选区，格式为："ymin,ymax,xmin,xmax;ymin,ymax,xmin,xmax;..."，分号分隔不同选区
+    subtitleSelectionAreas = ConfigItem("Main", "SubtitleSelectionAreas", "0.78,0.99,0.05,0.95")
 
     # 字幕语言设置
     language = OptionsConfigItem("Main", "Language", "ch", OptionsValidator([name for name in tr["Language"]]))
@@ -91,6 +90,8 @@ class Config(QConfig):
     hardwareAcceleration = ConfigItem("Main", "HardwareAcceleration", HARDWARD_ACCELERATION_OPTION, BoolValidator())
     # 启动时检查应用更新
     checkUpdateOnStartup = ConfigItem("Main", "CheckUpdateOnStartup", True, BoolValidator())
+    # 视频保存目录
+    saveDirectory = ConfigItem("Main", "SaveDirectory", "", ConfigValidator())
     # VideoSubFinder CPU核心数
     videoSubFinderCpuCores = RangeConfigItem("Main", "VideoSubFinderCpuCores", 0, RangeValidator(0, os.cpu_count()))
     # VideoSubFinder 视频解码组件

@@ -9,6 +9,7 @@ import os
 import re
 import random
 import shutil
+import traceback
 from collections import Counter, namedtuple
 import unicodedata
 from threading import Thread
@@ -30,46 +31,24 @@ from backend.tools.ocr import OcrRecogniser, get_coordinates
 from backend.tools import subtitle_ocr
 from backend.tools.paddle_model_config import PaddleModelConfig
 from backend.tools.process_manager import ProcessManager
+from backend.tools.subtitle_detect import SubtitleDetect
+from backend.bean.subtitle_area import SubtitleArea
 import threading
 import platform
 import multiprocessing
 import time
 import pysrt
 
-class SubtitleDetect:
-    """
-    文本框检测类，用于检测视频帧中是否存在文本框
-    """
-
-    def __init__(self):
-        from paddleocr.tools.infer import utility
-        from paddleocr.tools.infer.predict_det import TextDetector
-        hardware_accelerator = HardwareAccelerator.instance()
-        onnx_providers = hardware_accelerator.onnx_providers
-        model_config = PaddleModelConfig(hardware_accelerator)
-        args = utility.parse_args()
-        args.det_algorithm = 'DB'
-        args.det_model_dir = model_config.convertToOnnxModelIfNeeded(model_config.DET_MODEL_PATH)
-        args.use_gpu=hardware_accelerator.has_cuda()
-        args.use_onnx=len(onnx_providers) > 0
-        args.onnx_providers=onnx_providers
-        self.text_detector = TextDetector(args)
-
-    def detect_subtitle(self, img):
-        dt_boxes, elapse = self.text_detector(img)
-        return dt_boxes, elapse
-
-
 class SubtitleExtractor:
     """
     视频字幕提取类
     """
 
-    def __init__(self, vd_path, sub_area=None):
+    def __init__(self, vd_path):
         # 线程锁
         self.lock = threading.RLock()
         # 用户指定的字幕区域位置
-        self.sub_area = sub_area
+        self.sub_area = None
         self.hardware_accelerator = HardwareAccelerator.instance()
         # 是否使用硬件加速
         self.hardware_accelerator.set_enabled(config.hardwareAcceleration.value)
@@ -105,7 +84,7 @@ class SubtitleExtractor:
         # 自定义ocr对象
         self.ocr = None
         # 总处理进度
-        self.progress_total = 0
+        self.progress_total = 200
         # 视频帧提取进度
         self.progress_frame_extract = 0
         # OCR识别进度
@@ -231,12 +210,12 @@ class SubtitleExtractor:
         
         if ret:
             # 如果有字幕区域，绘制矩形
-            if self.sub_area is not None:
-                s_ymin, s_ymax, s_xmin, s_xmax = self.sub_area
+            sub_area = self.sub_area
+            if sub_area is not None:
                 # 绘制绿色矩形框
-                cv2.rectangle(frame, (s_xmin, s_ymin), (s_xmax, s_ymax), (0, 255, 0), 2)
+                cv2.rectangle(frame, (sub_area.xmin, sub_area.ymin), (sub_area.xmax, sub_area.ymax), (0, 255, 0), 2)
                 # 添加文字标注
-                cv2.putText(frame, "Subtitle Area", (s_xmin, s_ymin - 10), 
+                cv2.putText(frame, "Subtitle Area", (sub_area.xmin, sub_area.ymin - 10), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
             
             # 保存图像
@@ -303,15 +282,15 @@ class SubtitleExtractor:
             tbar.update(1)
             dt_boxes, elapse = self.sub_detector.detect_subtitle(frame)
             has_subtitle = False
-            if self.sub_area is not None:
-                s_ymin, s_ymax, s_xmin, s_xmax = self.sub_area
+            sub_area = self.sub_area
+            if sub_area is not None:
                 coordinate_list = get_coordinates(dt_boxes.tolist())
                 if coordinate_list:
                     for coordinate in coordinate_list:
                         xmin, xmax, ymin, ymax = coordinate
-                        if (s_xmin <= xmin and xmax <= s_xmax
-                                and s_ymin <= ymin
-                                and ymax <= s_ymax):
+                        if (sub_area.xmin <= xmin and xmax <= sub_area.xmax
+                                and sub_area.ymin <= ymin
+                                and ymax <= sub_area.ymax):
                             has_subtitle = True
                             # 检测到字幕时，如果列表为空，则为字幕头
                             if first_flag:
@@ -476,13 +455,13 @@ class SubtitleExtractor:
             path_vsf = os.path.join(BASE_DIR, 'subfinder', 'linux', 'VideoSubFinderCli.run')
             os.chmod(path_vsf, 0o775)
         # ：图像上半部分所占百分比，取值【0-1】
-        top_end = 1 - self.sub_area[0] / self.frame_height
+        top_end = 1 - self.sub_area.ymin / self.frame_height
         # bottom_end：图像下半部分所占百分比，取值【0-1】
-        bottom_end = 1 - self.sub_area[1] / self.frame_height
+        bottom_end = 1 - self.sub_area.ymax / self.frame_height
         # left_end：图像左半部分所占百分比，取值【0-1】
-        left_end = self.sub_area[2] / self.frame_width
+        left_end = self.sub_area.xmin / self.frame_width
         # re：图像右半部分所占百分比，取值【0-1】
-        right_end = self.sub_area[3] / self.frame_width
+        right_end = self.sub_area.xmax / self.frame_width
         if (not self.hardware_accelerator.has_cuda()) and len(self.hardware_accelerator.onnx_providers) > 0:
             cpu_count = multiprocessing.cpu_count()
         else:
@@ -932,16 +911,13 @@ class SubtitleExtractor:
         coordinates = get_coordinates(box)
         area_text = []
         for content, coordinate in zip(text, coordinates):
-            if self.sub_area is not None:
-                s_ymin = self.sub_area[0]
-                s_ymax = self.sub_area[1]
-                s_xmin = self.sub_area[2]
-                s_xmax = self.sub_area[3]
+            sub_area = self.sub_area
+            if sub_area is not None:
                 xmin = coordinate[0]
                 xmax = coordinate[1]
                 ymin = coordinate[2]
                 ymax = coordinate[3]
-                if s_xmin <= xmin and xmax <= s_xmax and s_ymin <= ymin and ymax <= s_ymax:
+                if sub_area.xmin <= xmin and xmax <= sub_area.xmax and sub_area.ymin <= ymin and ymax <= sub_area.ymax:
                     area_text.append(content[0])
         return area_text
 
@@ -1019,10 +995,8 @@ class SubtitleExtractor:
         if ocr is not None:
             self.progress_ocr = max(0, min(100, ocr))  # Clamp value between 0 and 100
         if frame_extract is not None:
-            self.progress_frame_extract = max(0, min(100, frame_extract))  # Clamp value between 0 and 100
-
-        self.progress_total = (self.progress_frame_extract * 0.4) + (self.progress_ocr * 0.6)
-        # Notify listeners
+            self.progress_frame_extract = max(0, min(100, frame_extract))
+        # 通知所有监听器
         self.notify_progress_listeners()
 
     def start_subtitle_ocr_async(self):
@@ -1080,7 +1054,7 @@ class SubtitleExtractor:
         添加进度监听器
         
         Args:
-            listener: 一个回调函数，接收参数 (progress_total, isFinished)
+            listener: 一个回调函数，接收参数 (progress_ocr, progress_frame_extract, progress_total, isFinished)
         """
         if listener not in self.progress_listeners:
             self.progress_listeners.append(listener)
@@ -1101,9 +1075,9 @@ class SubtitleExtractor:
         """
         for listener in self.progress_listeners:
             try:
-                listener(self.progress_total, self.isFinished)
+                listener(self.progress_ocr, self.progress_frame_extract, self.progress_total, self.isFinished)
             except Exception as e:
-                print(f"通知进度监听器时出错: {str(e)}")
+                traceback.print_exc()
 
     def manage_process(pid):
         pass
@@ -1116,10 +1090,11 @@ if __name__ == '__main__':
     try:
         y_min, y_max, x_min, x_max = map(int, input(
             f"{tr['Main']['ChooseSubArea']} (ymin ymax xmin xmax)：").split())
-        subtitle_area = (y_min, y_max, x_min, x_max)
+        subtitle_area = SubtitleArea(y_min, y_max, x_min, x_max)
     except ValueError as e:
         subtitle_area = None
     # 新建字幕提取对象
-    se = SubtitleExtractor(video_path, subtitle_area)
+    se = SubtitleExtractor(video_path)
+    se.sub_area = subtitle_area
     # 开始提取字幕
     se.run()

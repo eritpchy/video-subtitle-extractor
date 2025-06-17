@@ -47,7 +47,7 @@ def extract_subtitles(data, text_recogniser, img, raw_subtitles,
             # 初始化超界偏差为0
             overflow_area_rate = 0
             # 用户指定的字幕区域
-            sub_area_polygon = sub_area_to_polygon(sub_area)
+            sub_area_polygon = sub_area.to_polygon()
             # 识别出的字幕区域
             coordinate_polygon = coordinate_to_polygon(coordinate)
             # 计算两个区域是否有交集交集
@@ -92,7 +92,7 @@ def dump_debug_info(options, line, img, loss_list, ocr_loss_debug_path, sub_area
     if loss:
         if not os.path.exists(ocr_loss_debug_path):
             os.makedirs(ocr_loss_debug_path, mode=0o777, exist_ok=True)
-        img = cv2.rectangle(img, (sub_area[2], sub_area[0]), (sub_area[3], sub_area[1]), constant.BGR_COLOR_BLUE, 2)
+        img = cv2.rectangle(img, (sub_area.xmin, sub_area.ymin), (sub_area.xmax, sub_area.ymax), constant.BGR_COLOR_BLUE, 2)
         for loss_info in loss_list:
             coordinate = loss_info.coordinate
             color = constant.BGR_COLOR_GREEN if loss_info.selected else constant.BGR_COLOR_RED
@@ -100,15 +100,6 @@ def dump_debug_info(options, line, img, loss_list, ocr_loss_debug_path, sub_area
             img = paint_chinese_opencv(img, text, pos=(coordinate[0], coordinate[2] - 30), color=color)
             img = cv2.rectangle(img, (coordinate[0], coordinate[2]), (coordinate[1], coordinate[3]), color, 2)
         cv2.imwrite(os.path.join(os.path.abspath(ocr_loss_debug_path), f'{str(data["i"]).zfill(8)}.png'), img)
-
-
-def sub_area_to_polygon(sub_area):
-    s_ymin = sub_area[0]
-    s_ymax = sub_area[1]
-    s_xmin = sub_area[2]
-    s_xmax = sub_area[3]
-    return Polygon([[s_xmin, s_ymin], [s_xmax, s_ymin], [s_xmax, s_ymax], [s_xmin, s_ymax]])
-
 
 def coordinate_to_polygon(coordinate):
     xmin = coordinate[0]

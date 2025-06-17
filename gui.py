@@ -12,9 +12,9 @@ import os
 import configparser
 import cv2
 import multiprocessing
-from PySide6.QtCore import Qt, QTranslator
+from PySide6.QtCore import Qt, QTimer
 from PySide6 import QtCore, QtWidgets, QtGui
-from PySide6.QtWidgets import QApplication, QFrame, QStackedWidget, QHBoxLayout, QLabel
+from PySide6.QtWidgets import QApplication, QWidget
 from qfluentwidgets import (FluentWindow, PushButton, Slider, ProgressBar, PlainTextEdit,
                           setTheme, Theme, FluentIcon, CardWidget, SettingCardGroup,
                           ComboBoxSettingCard, SwitchSettingCard, setThemeColor, OptionsConfigItem,
@@ -82,12 +82,12 @@ class SubtitleExtractorGUI(FluentWindow):
         self.addSubInterface(self.homeInterface,FluentIcon.HOME, tr['SubtitleExtractorGUI']['Title'])
         self.addSubInterface(self.advancedSettingInterface, FluentIcon.SETTING, tr['Setting']['AdvancedSetting'], NavigationItemPosition.BOTTOM)
 
-    def on_navigation_item_changed(self, key):
-        """导航项变更时的处理函数"""
-        if key == 'main':
-            self.stackWidget.setCurrentIndex(0)
-        elif key == 'advanced':
-            self.stackWidget.setCurrentIndex(1)
+    def switchTo(self, interface: QWidget):
+        super().switchTo(interface)
+        if interface == self.advancedSettingInterface:
+            QTimer.singleShot(222, lambda: self.advancedSettingInterface.macos_scrollarea_issue_workaround())
+            # try again
+            QTimer.singleShot(666, lambda: self.advancedSettingInterface.macos_scrollarea_issue_workaround())
 
     def closeEvent(self, event):
         """程序关闭时保存窗口位置并恢复标准输出和标准错误"""

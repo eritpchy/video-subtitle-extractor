@@ -1,19 +1,30 @@
 import os
-from enum import Enum
+from pathlib import Path
+from enum import Enum, unique
 from dataclasses import dataclass
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QMenu, QAbstractItemView, QTableWidgetItem, QHeaderView
+from functools import cached_property
+
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QAbstractItemView, QTableWidgetItem, QHeaderView
 from PySide6.QtCore import Qt, Signal, QModelIndex, QUrl
-from qfluentwidgets import TableWidget, BodyLabel, FluentIcon, InfoBar, InfoBarPosition
+from qfluentwidgets import TableWidget, InfoBar, RoundMenu
 from PySide6.QtGui import QAction, QColor, QBrush
 from showinfm import show_in_file_manager
 
-from backend.config import tr
+from backend.config import config, tr
 
+@unique
 class TaskStatus(Enum):
     PENDING = tr['TaskList']['Pending']
     PROCESSING = tr['TaskList']['Processing']
     COMPLETED = tr['TaskList']['Completed']
     FAILED = tr['TaskList']['Failed']
+
+
+@unique
+class TaskOptions(Enum):
+    AB_SECTIONS = "ab_sections"
+    # 目前只支持单选
+    SUB_AREAS = "sub_area"
 
 @dataclass
 class Task:
@@ -21,7 +32,27 @@ class Task:
     name: str
     progress: int
     status: TaskStatus
-    output_path: str
+    options: dict
+    # 用于储存只读的输出路径, 在任务完成后设置
+    _output_path: str = None
+
+    @property
+    def output_path(self):
+        """获取输出路径"""
+        if self._output_path is not None:
+            return self._output_path
+        save_directory = os.path.dirname(self.path) if not config.saveDirectory.value else config.saveDirectory.value
+        output_path = os.path.abspath(os.path.join(save_directory, f'{Path(self.path).stem}.srt'))
+        return output_path
+
+    @output_path.setter
+    def output_path(self, value):
+        self._output_path = value
+
+    @cached_property
+    def is_image(self):
+        """判断是否是图片文件"""
+        return False
 
 class TaskListComponent(QWidget):
     """任务列表组件"""
@@ -39,9 +70,9 @@ class TaskListComponent(QWidget):
         self.current_task_index = -1  # 当前选中的任务索引
         
         # 创建布局
-        self.__initWidget()
+        self.__init_widgets()
         
-    def __initWidget(self):
+    def __init_widgets(self):
         """初始化组件"""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -73,7 +104,7 @@ class TaskListComponent(QWidget):
         
         layout.addWidget(self.table)
         
-    def add_task(self, video_path, output_path):
+    def add_task(self, video_path):
         """添加任务到列表
         
         Args:
@@ -94,7 +125,7 @@ class TaskListComponent(QWidget):
             name=file_name,
             progress=0,
             status=TaskStatus.PENDING,
-            output_path=output_path,
+            options={},
         )
         self.tasks.append(task)
         
@@ -214,7 +245,7 @@ class TaskListComponent(QWidget):
         """
         index = self.table.indexAt(pos)
         if index.isValid():
-            menu = QMenu(self)
+            menu = RoundMenu()
             
             # 打开视频文件位置
             open_video_location_action = QAction(tr['TaskList']['OpenVideoLocation'], self)
@@ -228,7 +259,7 @@ class TaskListComponent(QWidget):
                 if task.status != TaskStatus.COMPLETED:
                     InfoBar.warning(
                         title=tr['TaskList']['Warning'],
-                        content=tr['TaskList']['SubtitleNotFound'],
+                        content=tr['TaskList']['TargetFileNotFound'],
                         parent=self.get_root_parent(),
                         duration=3000
                     )
@@ -296,6 +327,14 @@ class TaskListComponent(QWidget):
             self.current_task_index = index
             self.table.selectRow(index)
             self.table.scrollTo(self.table.model().index(index, 0))
+        
+    def get_current_task_index(self):
+        """获取当前处理的任务索引
+
+        Returns:
+            int: 任务索引
+        """
+        return self.current_task_index
             
     def select_task(self, index):
         """选中指定任务
@@ -304,13 +343,15 @@ class TaskListComponent(QWidget):
             index: 任务索引
         """
         self.set_current_task(index)
+        if 0 <= index < len(self.tasks):
+            self.task_selected.emit(index, self.tasks[index].path)
 
     def open_file_location(self, path):
         """打开文件所在位置
         
         Args:
             row: 行索引
-            is_subtitle: 是否为字幕文件
+            path: 目标路径
         """                
         # 检查视频文件是否存在
         if not os.path.exists(path):
@@ -329,3 +370,26 @@ class TaskListComponent(QWidget):
         while parent.parent():
             parent = parent.parent()
         return parent
+
+    def update_task_option(self, index, task_option: TaskOptions, value):
+        """更新任务选项
+
+        Args:
+            index: 任务索引
+            task_option: 选项名
+            value: 选项值
+        """
+        if 0 <= index < len(self.tasks):
+            self.tasks[index].options[task_option.value] = value
+
+    def get_task_option(self, index, task_option: TaskOptions, default=None):
+        """获取任务选项
+        Args:
+            index: 任务索引
+            task_option: 选项名
+            default: 默认值
+        Returns:
+            选项值
+        """
+        if 0 <= index < len(self.tasks):
+            return self.tasks[index].options.get(task_option.value, default)
