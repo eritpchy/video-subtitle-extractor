@@ -41,7 +41,8 @@ class SubtitleExtractorGUI(FluentWindow):
         # 初始化系统主题监听器并连接信号
         # self.themeListener = SystemThemeListener(self)
         # self.themeListener.start()
- 
+        # 任何尺寸下都悬浮展开, 防止窗口撑大
+        self.navigationInterface.panel.minimumExpandWidth = 999999
         # 设置窗口图标
         self.setWindowIcon(QtGui.QIcon("design/vse.ico"))
         self.setWindowTitle(tr['SubtitleExtractorGUI']['Title'] + " v" + VERSION)
