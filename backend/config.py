@@ -33,7 +33,8 @@ class Config(QConfig):
         '한국어': 'ko',
         '日本語': 'japan',
         'Tiếng Việt': 'vi',
-        'Español': 'es'
+        'Español': 'es',
+        'Turkish': 'tr'
     }
     interface = OptionsConfigItem("Window", "Interface", "ChineseSimplified", OptionsValidator(intefaceTexts.values()), restart = True)
     
