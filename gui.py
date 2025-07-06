@@ -45,7 +45,9 @@ class SubtitleExtractorGUI(FluentWindow):
         # 任何尺寸下都悬浮展开, 防止窗口撑大
         self.navigationInterface.panel.minimumExpandWidth = 999999
         # 设置窗口图标
-        self.setWindowIcon(QtGui.QIcon("design/vse.ico"))
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        icon_path = os.path.abspath(os.path.join(script_dir, "design", "vse.png"))
+        self.setWindowIcon(QtGui.QIcon(icon_path))
         self.setWindowTitle(tr['SubtitleExtractorGUI']['Title'] + " v" + VERSION)
         # 创建界面布局
         self._create_layout()

@@ -1,5 +1,6 @@
 
 import os
+import platform
 from pathlib import Path
 from qfluentwidgets import (qconfig, ConfigItem, QConfig, OptionsValidator, BoolValidator, OptionsConfigItem, 
                             EnumSerializer, RangeValidator, RangeConfigItem, ConfigValidator)
@@ -97,7 +98,19 @@ class Config(QConfig):
     # VideoSubFinder 视频解码组件
     videoSubFinderDecoder = OptionsConfigItem("Main", "VideoSubFinderDecoder", VideoSubFinderDecoder.OPENCV, OptionsValidator(VideoSubFinderDecoder), EnumSerializer(VideoSubFinderDecoder))
 
-CONFIG_FILE = 'config/config.json'
+def get_config_file():
+    system = platform.system()
+
+    if system == 'Windows':
+        return os.path.join('config', 'config.json')
+
+    else:
+        config_dir = Path.home() / '.config' / 'video-subtitle-extractor'
+
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return str(config_dir / 'config.json')
+
+CONFIG_FILE = get_config_file()
 config = Config()
 qconfig.load(CONFIG_FILE, config)
 
