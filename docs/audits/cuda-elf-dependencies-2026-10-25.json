@@ -1,0 +1,132 @@
+[
+  {
+    "path": "paddle/libs/libcinnapi.so",
+    "bytes": 109412264,
+    "sha256": "4ddae84558c03c4198c9edd3900533235a1cfb151cb875ef7114c6fc81165c6b",
+    "record_verified": true,
+    "needed": [
+      "libpthread.so.0",
+      "libdnnl.so.3",
+      "libnvrtc.so.12",
+      "libcudart.so.12",
+      "libcuda.so.1",
+      "libcublas.so.12",
+      "libcudnn.so.9",
+      "libcurand.so.10",
+      "libcusolver.so.11",
+      "libnvToolsExt.so.1",
+      "libdl.so.2",
+      "libphi.so",
+      "libphi_gpu.so",
+      "libphi_core.so",
+      "librt.so.1",
+      "libiomp5.so",
+      "libcommon.so",
+      "libmklml_intel.so",
+      "libstdc++.so.6",
+      "libm.so.6",
+      "libgcc_s.so.1",
+      "libc.so.6",
+      "ld-linux-x86-64.so.2"
+    ]
+  },
+  {
+    "path": "paddle/libs/libphi.so",
+    "bytes": 14048,
+    "sha256": "11479b8a7704884fbca1f5ce99981db8c3d6a8d38021aae4824b34808f18095c",
+    "record_verified": true,
+    "needed": [
+      "libpthread.so.0",
+      "libphi_gpu.so",
+      "libphi_core.so",
+      "librt.so.1",
+      "libcommon.so",
+      "libdnnl.so.3",
+      "libiomp5.so"
+    ]
+  },
+  {
+    "path": "paddle/libs/libphi_core.so",
+    "bytes": 1009012016,
+    "sha256": "7435c05e726aa28d426e633f09b0de123090816c5cc5b3bb9d1a6da58745159b",
+    "record_verified": true,
+    "needed": [
+      "libpthread.so.0",
+      "librt.so.1",
+      "libcommon.so",
+      "libdnnl.so.3",
+      "libiomp5.so",
+      "libcudart.so.12",
+      "libstdc++.so.6",
+      "libm.so.6",
+      "libgcc_s.so.1",
+      "libc.so.6",
+      "ld-linux-x86-64.so.2"
+    ]
+  },
+  {
+    "path": "paddle/libs/libcommon.so",
+    "bytes": 530192,
+    "sha256": "8f0bf4f46cd700ed91ac11710890bf2904517c56ea33c27bb1316e2900f12399",
+    "record_verified": true,
+    "needed": [
+      "libpthread.so.0",
+      "libstdc++.so.6",
+      "libm.so.6",
+      "libgomp.so.1",
+      "libgcc_s.so.1",
+      "libc.so.6"
+    ]
+  },
+  {
+    "path": "paddle/base/libpaddle.so",
+    "bytes": 500742632,
+    "sha256": "ca1e5e71f03ea5c6adbc56001fb8894043ce81c08a021513041482c84441b735",
+    "record_verified": true,
+    "needed": [
+      "libpthread.so.0",
+      "librt.so.1",
+      "libcinnapi.so",
+      "libdl.so.2",
+      "libmklml_intel.so",
+      "libnvrtc.so.12",
+      "libcudart.so.12",
+      "libcuda.so.1",
+      "libcublas.so.12",
+      "libcudnn.so.9",
+      "libcurand.so.10",
+      "libcusolver.so.11",
+      "libnvToolsExt.so.1",
+      "libphi.so",
+      "libphi_gpu.so",
+      "libphi_core.so",
+      "libdnnl.so.3",
+      "libiomp5.so",
+      "libcommon.so",
+      "libstdc++.so.6",
+      "libm.so.6",
+      "libgcc_s.so.1",
+      "libc.so.6",
+      "ld-linux-x86-64.so.2"
+    ]
+  },
+  {
+    "path": "paddle/libs/libphi_gpu.so",
+    "bytes": 812326176,
+    "sha256": "1f42a4710da43b39dc76259f91a2d85925ee217d78019ee6d94e4d01f913a3d4",
+    "record_verified": true,
+    "needed": [
+      "libpthread.so.0",
+      "libphi_core.so",
+      "libcommon.so",
+      "libdnnl.so.3",
+      "libiomp5.so",
+      "libcudart.so.12",
+      "libstdc++.so.6",
+      "libm.so.6",
+      "libgcc_s.so.1",
+      "libc.so.6",
+      "ld-linux-x86-64.so.2"
+    ]
+  }
+]

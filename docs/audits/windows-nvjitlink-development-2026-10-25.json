@@ -1,0 +1,181 @@
+{
+  "wheel_inventory": [
+    {
+      "platform": "win_amd64",
+      "name": "nvidia-nvjitlink-cu12",
+      "version": "12.6.85",
+      "url": "https://files.pythonhosted.org/packages/89/76/93c1467b1387387440a4d25102d86b7794535449b689f8e2dc22c1c8ff7f/nvidia_nvjitlink_cu12-12.6.85-py3-none-win_amd64.whl",
+      "sha256": "e61120e52ed675747825cdd16febc6a0730537451d867ee58bee3853b1b13d1c",
+      "wheel_bytes": 161908572,
+      "expanded_bytes": 492874196,
+      "files": [
+        {
+          "path": "nvidia/__init__.py",
+          "bytes": 0,
+          "compressed": 2
+        },
+        {
+          "path": "nvidia/nvjitlink/__init__.py",
+          "bytes": 0,
+          "compressed": 2
+        },
+        {
+          "path": "nvidia/nvjitlink/bin/__init__.py",
+          "bytes": 0,
+          "compressed": 2
+        },
+        {
+          "path": "nvidia/nvjitlink/bin/nvJitLink_120_0.dll",
+          "bytes": 39236608,
+          "compressed": 16436271
+        },
+        {
+          "path": "nvidia/nvjitlink/include/__init__.py",
+          "bytes": 0,
+          "compressed": 2
+        },
+        {
+          "path": "nvidia/nvjitlink/include/nvJitLink.h",
+          "bytes": 17612,
+          "compressed": 3611
+        },
+        {
+          "path": "nvidia/nvjitlink/lib/x64/nvJitLink.lib",
+          "bytes": 29680,
+          "compressed": 3484
+        },
+        {
+          "path": "nvidia/nvjitlink/lib/x64/nvJitLink_static.lib",
+          "bytes": 453528212,
+          "compressed": 145447829
+        },
+        {
+          "path": "nvidia_nvjitlink_cu12-12.6.85.dist-info/License.txt",
+          "bytes": 59262,
+          "compressed": 14143
+        },
+        {
+          "path": "nvidia_nvjitlink_cu12-12.6.85.dist-info/METADATA",
+          "bytes": 1520,
+          "compressed": 536
+        },
+        {
+          "path": "nvidia_nvjitlink_cu12-12.6.85.dist-info/WHEEL",
+          "bytes": 97,
+          "compressed": 98
+        },
+        {
+          "path": "nvidia_nvjitlink_cu12-12.6.85.dist-info/top_level.txt",
+          "bytes": 7,
+          "compressed": 9
+        },
+        {
+          "path": "nvidia_nvjitlink_cu12-12.6.85.dist-info/RECORD",
+          "bytes": 1198,
+          "compressed": 541
+        }
+      ]
+    },
+    {
+      "platform": "win_amd64",
+      "name": "nvidia-nvjitlink-cu12",
+      "version": "12.8.93",
+      "url": "https://files.pythonhosted.org/packages/ed/d7/34f02dad2e30c31b10a51f6b04e025e5dd60e5f936af9045a9b858a05383/nvidia_nvjitlink_cu12-12.8.93-py3-none-win_amd64.whl",
+      "sha256": "bd93fbeeee850917903583587f4fc3a4eafa022e34572251368238ab5e6bd67f",
+      "wheel_bytes": 268553710,
+      "expanded_bytes": 1079877460,
+      "files": [
+        {
+          "path": "nvidia/__init__.py",
+          "bytes": 0,
+          "compressed": 2
+        },
+        {
+          "path": "nvidia/nvjitlink/__init__.py",
+          "bytes": 0,
+          "compressed": 2
+        },
+        {
+          "path": "nvidia/nvjitlink/bin/__init__.py",
+          "bytes": 0,
+          "compressed": 2
+        },
+        {
+          "path": "nvidia/nvjitlink/bin/nvJitLink_120_0.dll",
+          "bytes": 77860352,
+          "compressed": 33043570
+        },
+        {
+          "path": "nvidia/nvjitlink/include/__init__.py",
+          "bytes": 0,
+          "compressed": 2
+        },
+        {
+          "path": "nvidia/nvjitlink/include/nvJitLink.h",
+          "bytes": 17612,
+          "compressed": 3611
+        },
+        {
+          "path": "nvidia/nvjitlink/lib/x64/nvJitLink.lib",
+          "bytes": 36684,
+          "compressed": 5032
+        },
+        {
+          "path": "nvidia/nvjitlink/lib/x64/nvJitLink_static.lib",
+          "bytes": 1001900552,
+          "compressed": 235484061
+        },
+        {
+          "path": "nvidia_nvjitlink_cu12-12.8.93.dist-info/License.txt",
+          "bytes": 59262,
+          "compressed": 14143
+        },
+        {
+          "path": "nvidia_nvjitlink_cu12-12.8.93.dist-info/METADATA",
+          "bytes": 1695,
+          "compressed": 594
+        },
+        {
+          "path": "nvidia_nvjitlink_cu12-12.8.93.dist-info/WHEEL",
+          "bytes": 97,
+          "compressed": 98
+        },
+        {
+          "path": "nvidia_nvjitlink_cu12-12.8.93.dist-info/top_level.txt",
+          "bytes": 7,
+          "compressed": 9
+        },
+        {
+          "path": "nvidia_nvjitlink_cu12-12.8.93.dist-info/RECORD",
+          "bytes": 1199,
+          "compressed": 542
+        }
+      ]
+    }
+  ],
+  "real_verified_wheel_prune": {
+    "before_bytes": 492874196,
+    "after_bytes_with_audit": 39346521,
+    "report": {
+      "status": "applied",
+      "distribution": "nvidia-nvjitlink-cu12",
+      "version": "12.6.85",
+      "gpu_inference_verified": false,
+      "removed": [
+        {
+          "path": "nvidia/nvjitlink/lib/x64/nvJitLink_static.lib",
+          "bytes": 453528212,
+          "sha256_base64url": "P-jHA29E_PMvlLW3cU3TYInNCejHDSl0hio7HQUs0xc"
+        }
+      ],
+      "retained": [
+        {
+          "path": "nvidia/nvjitlink/bin/nvJitLink_120_0.dll",
+          "bytes": 39236608,
+          "sha256_base64url": "i9_jmttyv0_X7WZdwkLfHkjaAVtkFlEYPTXpp9t2q-g"
+        }
+      ],
+      "saved_bytes": 453528212
+    }
+  }
+}

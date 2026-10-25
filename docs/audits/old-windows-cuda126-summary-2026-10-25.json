@@ -1,0 +1,396 @@
+{
+  "archive_compressed_bytes": 3751414321,
+  "archive_expanded_bytes": 4107800590,
+  "entries": 5592,
+  "header_fetched_bytes": 130065,
+  "categories_bytes": {
+    "Python/": 88951550,
+    "resources/backend/models/": 536912378,
+    "resources/backend/subfinder/": 238084770,
+    "resources/backend/subfinder/linux/": 47123092,
+    "resources/backend/subfinder/windows/": 190961678,
+    "opt/packages/": 2833501875,
+    "resources/design/": 48397279,
+    "resources/test/": 344145024
+  },
+  "duplicate_wheel_distributions": {
+    "certifi": [
+      {
+        "path": "opt/packages/certifi-2025.4.26-py3-none-any.whl",
+        "bytes": 159618,
+        "compressed": null,
+        "directory": false
+      },
+      {
+        "path": "opt/packages/certifi-2025.6.15-py3-none-any.whl",
+        "bytes": 157650,
+        "compressed": null,
+        "directory": false
+      }
+    ],
+    "networkx": [
+      {
+        "path": "opt/packages/networkx-3.4.2-py3-none-any.whl",
+        "bytes": 1723263,
+        "compressed": null,
+        "directory": false
+      },
+      {
+        "path": "opt/packages/networkx-3.5-py3-none-any.whl",
+        "bytes": 2034406,
+        "compressed": null,
+        "directory": false
+      }
+    ],
+    "numpy": [
+      {
+        "path": "opt/packages/numpy-2.2.4-cp312-cp312-win_amd64.whl",
+        "bytes": 12644305,
+        "compressed": null,
+        "directory": false
+      },
+      {
+        "path": "opt/packages/numpy-2.3.1-cp312-cp312-win_amd64.whl",
+        "bytes": 12734973,
+        "compressed": null,
+        "directory": false
+      }
+    ],
+    "pillow": [
+      {
+        "path": "opt/packages/pillow-10.4.0-cp312-cp312-win_amd64.whl",
+        "bytes": 2554951,
+        "compressed": null,
+        "directory": false
+      },
+      {
+        "path": "opt/packages/pillow-11.1.0-cp312-cp312-win_amd64.whl",
+        "bytes": 2626369,
+        "compressed": null,
+        "directory": false
+      },
+      {
+        "path": "opt/packages/pillow-11.2.1-cp312-cp312-win_amd64.whl",
+        "bytes": 2676768,
+        "compressed": null,
+        "directory": false
+      }
+    ],
+    "protobuf": [
+      {
+        "path": "opt/packages/protobuf-6.30.2-cp310-abi3-win_amd64.whl",
+        "bytes": 431003,
+        "compressed": null,
+        "directory": false
+      },
+      {
+        "path": "opt/packages/protobuf-6.31.1-cp310-abi3-win_amd64.whl",
+        "bytes": 435283,
+        "compressed": null,
+        "directory": false
+      }
+    ]
+  },
+  "largest_files": [
+    {
+      "path": "opt/packages/nvidia_cudnn_cu12-9.5.1.17-py3-none-win_amd64.whl",
+      "bytes": 565440743,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "opt/packages/paddlepaddle_gpu-3.0.0-cp312-cp312-win_amd64.whl",
+      "bytes": 442791452,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "opt/packages/nvidia_cublas_cu12-12.6.4.1-py3-none-win_amd64.whl",
+      "bytes": 434535301,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "opt/packages/nvidia_nvjitlink_cu12-12.8.93-py3-none-win_amd64.whl",
+      "bytes": 268553710,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "opt/packages/nvidia_cusparse_cu12-12.5.4.2-py3-none-win_amd64.whl",
+      "bytes": 213712630,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "opt/packages/nvidia_cufft_cu12-11.3.0.4-py3-none-win_amd64.whl",
+      "bytes": 199356881,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "opt/packages/nvidia_cusolver_cu12-11.7.1.2-py3-none-win_amd64.whl",
+      "bytes": 149287877,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "opt/packages/PySide6_Addons-6.9.1-cp39-abi3-win_amd64.whl",
+      "bytes": 143150906,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/backend/models/V4/ch_rec/inference.pdiparams",
+      "bytes": 90453599,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "opt/packages/PySide6_Essentials-6.9.1-cp39-abi3-win_amd64.whl",
+      "bytes": 72435676,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/test/test_korean.flv",
+      "bytes": 68738184,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/test/test_german.mp4",
+      "bytes": 60718379,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/backend/subfinder/windows/opencv_world430.dll",
+      "bytes": 58043904,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "opt/packages/nvidia_curand_cu12-10.3.7.77-py3-none-win_amd64.whl",
+      "bytes": 55783873,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/backend/models/V2/ch_rec/inference_1.pdiparams",
+      "bytes": 50000000,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/backend/models/V2/ch_rec/inference_2.pdiparams",
+      "bytes": 50000000,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/backend/models/V4/ch_det/inference_1.pdiparams",
+      "bytes": 50000000,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/backend/models/V4/ch_det/inference_2.pdiparams",
+      "bytes": 50000000,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/backend/models/V2/ch_det/inference.pdiparams",
+      "bytes": 48843892,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/backend/subfinder/linux/VideoSubFinderCli",
+      "bytes": 47121988,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/test/test_es.flv",
+      "bytes": 46980327,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "opt/packages/opencv_contrib_python-4.11.0.86-cp37-abi3-win_amd64.whl",
+      "bytes": 46185163,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/backend/subfinder/windows/avcodec-58.dll",
+      "bytes": 44948480,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "opt/packages/scipy-1.15.3-cp312-cp312-win_amd64.whl",
+      "bytes": 40966184,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "opt/packages/opencv_python-4.11.0.86-cp37-abi3-win_amd64.whl",
+      "bytes": 39488044,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "opt/packages/opencv_python_headless-4.11.0.86-cp37-abi3-win_amd64.whl",
+      "bytes": 39402386,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/test/test_it.flv",
+      "bytes": 36055924,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "opt/packages/imageio_ffmpeg-0.6.0-py3-none-win_amd64.whl",
+      "bytes": 31246824,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/backend/subfinder/windows/nppig64_11.dll",
+      "bytes": 26118656,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/test/test_cn2.mp4",
+      "bytes": 25065072,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/test/test_japan.mp4",
+      "bytes": 22829476,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/backend/subfinder/windows/opencv_videoio_ffmpeg430_64.dll",
+      "bytes": 22099456,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/test/test_cn.mp4",
+      "bytes": 19824720,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/test/test_chinese_cht.flv",
+      "bytes": 19205653,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/backend/tools/NotoSansCJK-Bold.otf",
+      "bytes": 17111432,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/design/paper (2020).pdf",
+      "bytes": 16148017,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/test/test_en_ch.mp4",
+      "bytes": 15715884,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/design/demo2.gif",
+      "bytes": 15613485,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/design/demo.gif",
+      "bytes": 14723754,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/backend/models/V4/ch_det/inference_3.pdiparams",
+      "bytes": 13295054,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "opt/packages/scikit_image-0.25.2-cp312-cp312-win_amd64.whl",
+      "bytes": 12899474,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "opt/packages/numpy-2.3.1-cp312-cp312-win_amd64.whl",
+      "bytes": 12734973,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "opt/packages/numpy-2.2.4-cp312-cp312-win_amd64.whl",
+      "bytes": 12644305,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/test/test_ar.flv",
+      "bytes": 12057417,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/backend/models/V2/ch_rec/inference_3.pdiparams",
+      "bytes": 11517375,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/backend/subfinder/windows/avformat-58.dll",
+      "bytes": 11337728,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/test/test_en.mp4",
+      "bytes": 11318528,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/backend/models/V3/chinese_cht_rec_fast/inference.pdiparams",
+      "bytes": 11081578,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/backend/subfinder/windows/avfilter-7.dll",
+      "bytes": 10862592,
+      "compressed": null,
+      "directory": false
+    },
+    {
+      "path": "resources/backend/models/V4/ch_rec_fast/inference.pdiparams",
+      "bytes": 10766823,
+      "compressed": null,
+      "directory": false
+    }
+  ]
+}

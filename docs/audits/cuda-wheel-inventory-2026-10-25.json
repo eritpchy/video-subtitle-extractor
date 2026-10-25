@@ -1,0 +1,884 @@
+{
+  "linux_x86_64": {
+    "url": "https://paddle-whl.cdn.bcebos.com/stable/cu126/paddlepaddle-gpu/paddlepaddle_gpu-3.3.1-cp312-cp312-linux_x86_64.whl",
+    "wheel_bytes": 2021398367,
+    "expanded_bytes": 3506073785,
+    "metadata": "Metadata-Version: 2.2\nName: paddlepaddle-gpu\nVersion: 3.3.1\nSummary: Parallel Distributed Deep Learning\nHome-page: https://www.paddlepaddle.org.cn/\nDownload-URL: https://github.com/paddlepaddle/paddle\nAuthor-email: Paddle-better@baidu.com\nMaintainer: PaddlePaddle\nMaintainer-email: Paddle-better@baidu.com\nLicense: Apache Software License\nClassifier: Development Status :: 5 - Production/Stable\nClassifier: Operating System :: OS Independent\nClassifier: Intended Audience :: Developers\nClassifier: Intended Audience :: Education\nClassifier: Intended Audience :: Science/Research\nClassifier: License :: OSI Approved :: Apache Software License\nClassifier: Programming Language :: C++\nClassifier: Programming Language :: Python :: 3.9\nClassifier: Programming Language :: Python :: 3.10\nClassifier: Programming Language :: Python :: 3.11\nClassifier: Programming Language :: Python :: 3.12\nClassifier: Programming Language :: Python :: 3.13\nClassifier: Typing :: Typed\nDescription-Content-Type: text/markdown\nLicense-File: LICENSE\nLicense-File: AUTHORS.md\nRequires-Dist: httpx\nRequires-Dist: numpy>=1.21\nRequires-Dist: protobuf>=3.20.2\nRequires-Dist: Pillow\nRequires-Dist: opt_einsum==3.3.0\nRequires-Dist: networkx\nRequires-Dist: typing_extensions\nRequires-Dist: safetensors>=0.6.0\nRequires-Dist: setuptools; python_version >= \"3.12\"\nRequires-Dist: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == \"Linux\" and platform_machine == \"x86_64\"\nRequires-Dist: nvidia-cuda-runtime-cu12==12.6.77; platform_system == \"Linux\" and platform_machine == \"x86_64\"\nRequires-Dist: nvidia-cuda-cupti-cu12==12.6.80; platform_system == \"Linux\" and platform_machine == \"x86_64\"\nRequires-Dist: nvidia-cudnn-cu12==9.5.1.17; platform_system == \"Linux\" and platform_machine == \"x86_64\"\nRequires-Dist: nvidia-cublas-cu12==12.6.4.1; platform_system == \"Linux\" and platform_machine == \"x86_64\"\nRequires-Dist: nvidia-cufft-cu12==11.3.0.4; platform_system == \"Linux\" and platform_machine == \"x86_64\"\nRequires-Dist: nvidia-curand-cu12==10.3.7.77; platform_system == \"Linux\" and platform_machine == \"x86_64\"\nRequires-Dist: nvidia-cusolver-cu12==11.7.1.2; platform_system == \"Linux\" and platform_machine == \"x86_64\"\nRequires-Dist: nvidia-cusparse-cu12==12.5.4.2; platform_system == \"Linux\" and platform_machine == \"x86_64\"\nRequires-Dist: nvidia-cusparselt-cu12==0.6.3; platform_system == \"Linux\" and platform_machine == \"x86_64\"\nRequires-Dist: nvidia-nccl-cu12==2.25.1; platform_system == \"Linux\" and platform_machine == \"x86_64\"\nRequires-Dist: nvidia-nvtx-cu12==12.6.77; platform_system == \"Linux\" and platform_machine == \"x86_64\"\nRequires-Dist: nvidia-nvjitlink-cu12==12.6.85; platform_system == \"Linux\" and platform_machine == \"x86_64\"\nRequires-Dist: nvidia-cufile-cu12==1.11.1.6; platform_system == \"Linux\" and platform_machine == \"x86_64\"\nRequires-Dist: nvidia-cuda-cccl-cu12==12.6.77; platform_system == \"Linux\" and platform_machine == \"x86_64\"\nDynamic: author-email\nDynamic: classifier\nDynamic: description\nDynamic: description-content-type\nDynamic: download-url\nDynamic: home-page\nDynamic: license\nDynamic: maintainer\nDynamic: maintainer-email\nDynamic: requires-dist\nDynamic: summary\n\n\n--------------------------------------------------------------------------------\n\n[![Documentation Status](https://img.shields.io/badge/docs-latest-brightgreen.svg?style=flat)](http://www.paddlepaddle.org.cn/documentation/docs/en/1.8/beginners_guide/index_en.html)\n[![Documentation Status](https://img.shields.io/badge/\u4e2d\u6587\u6587\u6863-\u6700\u65b0-brightgreen.svg)](http://www.paddlepaddle.org.cn/documentation/docs/zh/1.8/beginners_guide/index_cn.html)\n[![Release](https://img.shields.io/github/release/PaddlePaddle/Paddle.svg)](https://github.com/PaddlePaddle/Paddle/releases)\n[![License](https://img.shields.io/badge/license-Apache%202-blue.svg)](LICENSE)\n\nWelcome to the PaddlePaddle GitHub.\n\nPaddlePaddle, as the only independent R&D deep learning platform in China, has been officially open-sourced to professional communities since 2016. It is an industrial platform with advanced technologies and rich features that cover core deep learning frameworks, basic model libraries, end-to-end development kits, tools & components as well as service platforms.\nPaddlePaddle is originated from industrial practices with dedication and commitments to industrialization. It has been widely adopted by a wide range of sectors including manufacturing, agriculture, enterprise service, and so on while serving more than 2.3 million developers. With such advantages, PaddlePaddle has helped an increasing number of partners commercialize AI.\n\n\n\n## Installation\n\nWe provide users with four installation methods ,which are pip, conda, docker and install with source code.\n\n### PIP Installation\n\n#### PREQUISTIES\n\n##### On Windows:\n\n- **Windows 7/8/10 Pro/Enterprise (64bit)**\n  - **GPU version support CUDA 10.2/11.2/11.6/11.7**\n  - **Only supports single card**\n- **Python version 3.8/3.9/3.10/3.11/3.12 (64 bit)**\n- **pip version 9.0.1+ (64 bit)**\n\n##### On Linux:\n\n- **Linux Version (64 bit)**\n  - **CentOS 7 (GPUVersion Supports CUDA 10.2/11.2/11.6/11.7)**\n  - **Ubuntu 16.04/18.04/20.04/22.04 (GPUVersion Supports CUDA 10.2/11.2/11.6/11.7)**\n- **Python Version: 3.8/3.9/3.10/3.11/3.12 (64 bit)**\n- **pip or pip3 Version 20.2.2+ (64 bit)**\n\n##### On macOS:\n\n- **MacOS version 10.11/10.12/10.13/10.14 (64 bit) (not support GPU version yet)**\n\n- **Python version 3.8/3.9/3.10/3.11/3.12 (64 bit)**\n\n- **pip or pip3 version 9.0.1+ (64 bit)**\n\n\n\n#### Commands to install\n\n###### cpu:\n\n```bash\npip install paddlepaddle\n```\n\n###### gpu:\n\n```bash\npip install paddlepaddle-gpu\n```\n\n\n\n###### specific version cuda:\n\nWe only release paddlepaddle-gpu cuda10.2 on pypi.\n\nIf you want to install paddlepaddle-gpu with cuda version of 10.2/11.2/11.6/11.7, commands to install are on our website: [Installation Document](https://www.paddlepaddle.org.cn/documentation/docs/en/install/pip/frompip_en.html)\n\n\n\n#### Verify installation\n\nAfter the installation is complete, you can use `python3` to enter the Python interpreter and then use `import paddle` and `paddle.utils.run_check()`\n\nIf `PaddlePaddle is installed successfully!` appears, to verify that the installation was successful.\n\n\n\n### Other installation methods\n\nIf you want to install witch conda or docker or pip, please see commands to install on our website: [Installation Document](https://www.paddlepaddle.org.cn/documentation/docs/en/install/index_en.html)\n\n\n\n## FOUR LEADING TECHNOLOGIES\n\n- **Agile Framework for Industrial Development of Deep Neural Networks**\n\n    The PaddlePaddle deep learning framework facilitates the development while lowering the technical burden, through leveraging a programmable scheme to architect the neural networks. It supports both declarative programming and imperative programming with both development flexibility and high runtime performance preserved.  The neural architectures could be automatically designed by algorithms with better performance than the ones designed by human experts.\n\n\n-  **Support Ultra-Large-Scale Training of Deep Neural Networks**\n\n    PaddlePaddle has made breakthroughs in ultra-large-scale deep neural networks training. It launched the world's first large-scale open-source training platform that supports the training of deep networks with 100 billions of features and trillions of parameters using data sources distributed over hundreds of nodes. PaddlePaddle overcomes the online deep learning challenges for ultra-large-scale deep learning models, and further achieved the real-time model updating with more than 1 trillion parameters.\n     [Click here to learn more](https://github.com/PaddlePaddle/Fleet)\n\n\n- **Accelerated High-Performance Inference over Ubiquitous Deployments**\n\n    PaddlePaddle is not only compatible with other open-source frameworks for models training, but also works well on the ubiquitous developments, varying from platforms to devices. More specifically, PaddlePaddle accelerates the inference procedure with the fastest speed-up. Note that, a recent breakthrough of inference speed has been made by PaddlePaddle on Huawei's Kirin NPU, through the hardware/software co-optimization.\n     [Click here to learn more](https://github.com/PaddlePaddle/Paddle-Lite)\n\n- **Industry-Oriented Models and Libraries with Open Source Repositories**\n\n     PaddlePaddle includes and maintains more than 100 mainstream models that have been practiced and polished for a long time in the industry. Some of these models have won major prizes from key international competitions. In the meanwhile, PaddlePaddle has further more than 200 pre-training models (some of them with source codes) to facilitate the rapid development of industrial applications.\n     [Click here to learn more](https://github.com/PaddlePaddle/models)\n\n\n## Documentation\n\nWe provide [English](https://www.paddlepaddle.org.cn/documentation/docs/en/guides/index_en.html) and\n[Chinese](https://www.paddlepaddle.org.cn/documentation/docs/zh/guides/index_cn.html) documentation.\n\n- [Basic Deep Learning Models](https://www.paddlepaddle.org.cn/documentation/docs/en/beginners_guide/index_en.html)\n\n  You might want to start from how to implement deep learning basics with PaddlePaddle.\n\n\n- [User Guides](https://www.paddlepaddle.org.cn/documentation/docs/en/user_guides/index_en.html)\n\n  You might have got the hang of Beginner\u2019s Guide, and wish to model practical problems and build your original networks.\n\n- [Advanced User Guides](https://www.paddlepaddle.org.cn/documentation/docs/en/advanced_guide/index_en.html)\n\n  So far you have already been familiar with Fluid. And the next step should be building a more efficient model or inventing your original Operator.\n\n\n- [API Reference](https://www.paddlepaddle.org.cn/documentation/docs/en/api/index_en.html)\n\n   Our new API enables much shorter programs.\n\n\n- [How to Contribute](https://www.paddlepaddle.org.cn/documentation/docs/zh/dev_guides/index_cn.html)\n\n   We appreciate your contributions!\n\n## Communication\n\n- [Github Issues](https://github.com/PaddlePaddle/Paddle/issues): bug reports, feature requests, install issues, usage issues, etc.\n- QQ discussion group: 796771754 (PaddlePaddle).\n- [Forums](https://aistudio.baidu.com/paddle/forum/): discuss implementations, research, etc.\n\n## Copyright and License\nPaddlePaddle is provided under the [Apache-2.0 license](https://github.com/PaddlePaddle/Paddle/blob/develop/LICENSE).\n",
+    "largest_files": [
+      {
+        "path": "paddle/libs/libphi_core.so",
+        "bytes": 1009012016,
+        "compressed": 635970939,
+        "crc": 3178042887
+      },
+      {
+        "path": "paddle/libs/libphi_gpu.so",
+        "bytes": 812326176,
+        "compressed": 521125500,
+        "crc": 3218209004
+      },
+      {
+        "path": "paddle/libs/libflashattn.so",
+        "bytes": 521820856,
+        "compressed": 398349794,
+        "crc": 4882018
+      },
+      {
+        "path": "paddle/base/libpaddle.so",
+        "bytes": 500742632,
+        "compressed": 158010373,
+        "crc": 1336577326
+      },
+      {
+        "path": "paddle/libs/libflashattnv3.so",
+        "bytes": 212365832,
+        "compressed": 146468511,
+        "crc": 12172357
+      },
+      {
+        "path": "paddle/libs/libmklml_intel.so",
+        "bytes": 130096544,
+        "compressed": 35166813,
+        "crc": 1577561450
+      },
+      {
+        "path": "paddle/libs/libcinnapi.so",
+        "bytes": 109412264,
+        "compressed": 35960104,
+        "crc": 892812207
+      },
+      {
+        "path": "paddle/libs/libflashmaskv2.so",
+        "bytes": 84504648,
+        "compressed": 58823101,
+        "crc": 2207886879
+      },
+      {
+        "path": "paddle/libs/libdnnl.so.3",
+        "bytes": 63727816,
+        "compressed": 15637535,
+        "crc": 2089915919
+      },
+      {
+        "path": "paddle/libs/liblapack.so.3",
+        "bytes": 9546272,
+        "compressed": 2381370,
+        "crc": 1414257827
+      },
+      {
+        "path": "paddle/libs/libwarpctc.so",
+        "bytes": 3084656,
+        "compressed": 1863037,
+        "crc": 2695088124
+      },
+      {
+        "path": "paddle/include/paddle/fluid/pir/dialect/operator/ir/pd_op.h",
+        "bytes": 2830817,
+        "compressed": 108044,
+        "crc": 154562018
+      },
+      {
+        "path": "paddle/libs/libiomp5.so",
+        "bytes": 1932448,
+        "compressed": 644104,
+        "crc": 1112865785
+      },
+      {
+        "path": "paddle/libs/libgfortran.so.3",
+        "bytes": 1229288,
+        "compressed": 349686,
+        "crc": 1519716368
+      },
+      {
+        "path": "paddle/libs/nvshmem_transport_ibgda.so.3",
+        "bytes": 1093856,
+        "compressed": 353255,
+        "crc": 2212983962
+      }
+    ]
+  },
+  "win_amd64": {
+    "url": "https://paddle-whl.cdn.bcebos.com/stable/cu126/paddlepaddle-gpu/paddlepaddle_gpu-3.3.1-cp312-cp312-win_amd64.whl",
+    "wheel_bytes": 579382604,
+    "expanded_bytes": 1111356998,
+    "metadata": "Metadata-Version: 2.1\r\nName: paddlepaddle-gpu\r\nVersion: 3.3.1\r\nSummary: Parallel Distributed Deep Learning\r\nAuthor-email: Paddle-better@baidu.com\r\nMaintainer: PaddlePaddle\r\nMaintainer-email: Paddle-better@baidu.com\r\nLicense: Apache Software License\r\nProject-URL: Homepage, https://www.paddlepaddle.org.cn/\r\nProject-URL: Downloads, https://github.com/paddlepaddle/paddle\r\nClassifier: Development Status :: 5 - Production/Stable\r\nClassifier: Operating System :: OS Independent\r\nClassifier: Intended Audience :: Developers\r\nClassifier: Intended Audience :: Education\r\nClassifier: Intended Audience :: Science/Research\r\nClassifier: License :: OSI Approved :: Apache Software License\r\nClassifier: Programming Language :: C++\r\nClassifier: Programming Language :: Python :: 3.9\r\nClassifier: Programming Language :: Python :: 3.10\r\nClassifier: Programming Language :: Python :: 3.11\r\nClassifier: Programming Language :: Python :: 3.12\r\nClassifier: Programming Language :: Python :: 3.13\r\nClassifier: Typing :: Typed\r\nDescription-Content-Type: text/markdown\r\nRequires-Dist: httpx\r\nRequires-Dist: numpy>=1.21\r\nRequires-Dist: protobuf>=3.20.2\r\nRequires-Dist: Pillow\r\nRequires-Dist: opt-einsum==3.3.0\r\nRequires-Dist: networkx\r\nRequires-Dist: typing-extensions\r\nRequires-Dist: safetensors>=0.6.0\r\nRequires-Dist: nvidia-cuda-runtime-cu12==12.6.77\r\nRequires-Dist: nvidia-cudnn-cu12==9.5.1.17\r\nRequires-Dist: nvidia-cublas-cu12==12.6.4.1\r\nRequires-Dist: nvidia-cufft-cu12==11.3.0.4\r\nRequires-Dist: nvidia-curand-cu12==10.3.7.77\r\nRequires-Dist: nvidia-cusolver-cu12==11.7.1.2\r\nRequires-Dist: nvidia-cusparse-cu12==12.5.4.2\r\nRequires-Dist: setuptools; python_version >= \"3.12\"\r\n\r\n\r\n--------------------------------------------------------------------------------\r\n\r\n[![Documentation Status](https://img.shields.io/badge/docs-latest-brightgreen.svg?style=flat)](http://www.paddlepaddle.org.cn/documentation/docs/en/1.8/beginners_guide/index_en.html)\r\n[![Documentation Status](https://img.shields.io/badge/\u4e2d\u6587\u6587\u6863-\u6700\u65b0-brightgreen.svg)](http://www.paddlepaddle.org.cn/documentation/docs/zh/1.8/beginners_guide/index_cn.html)\r\n[![Release](https://img.shields.io/github/release/PaddlePaddle/Paddle.svg)](https://github.com/PaddlePaddle/Paddle/releases)\r\n[![License](https://img.shields.io/badge/license-Apache%202-blue.svg)](LICENSE)\r\n\r\nWelcome to the PaddlePaddle GitHub.\r\n\r\nPaddlePaddle, as the only independent R&D deep learning platform in China, has been officially open-sourced to professional communities since 2016. It is an industrial platform with advanced technologies and rich features that cover core deep learning frameworks, basic model libraries, end-to-end development kits, tools & components as well as service platforms.\r\nPaddlePaddle is originated from industrial practices with dedication and commitments to industrialization. It has been widely adopted by a wide range of sectors including manufacturing, agriculture, enterprise service, and so on while serving more than 2.3 million developers. With such advantages, PaddlePaddle has helped an increasing number of partners commercialize AI.\r\n\r\n\r\n\r\n## Installation\r\n\r\nWe provide users with four installation methods ,which are pip, conda, docker and install with source code.\r\n\r\n### PIP Installation\r\n\r\n#### PREQUISTIES\r\n\r\n##### On Windows:\r\n\r\n- **Windows 7/8/10 Pro/Enterprise (64bit)**\r\n  - **GPU version support CUDA 10.2/11.2/11.6/11.7**\r\n  - **Only supports single card**\r\n- **Python version 3.8/3.9/3.10/3.11/3.12 (64 bit)**\r\n- **pip version 9.0.1+ (64 bit)**\r\n\r\n##### On Linux:\r\n\r\n- **Linux Version (64 bit)**\r\n  - **CentOS 7 (GPUVersion Supports CUDA 10.2/11.2/11.6/11.7)**\r\n  - **Ubuntu 16.04/18.04/20.04/22.04 (GPUVersion Supports CUDA 10.2/11.2/11.6/11.7)**\r\n- **Python Version: 3.8/3.9/3.10/3.11/3.12 (64 bit)**\r\n- **pip or pip3 Version 20.2.2+ (64 bit)**\r\n\r\n##### On macOS:\r\n\r\n- **MacOS version 10.11/10.12/10.13/10.14 (64 bit) (not support GPU version yet)**\r\n\r\n- **Python version 3.8/3.9/3.10/3.11/3.12 (64 bit)**\r\n\r\n- **pip or pip3 version 9.0.1+ (64 bit)**\r\n\r\n\r\n\r\n#### Commands to install\r\n\r\n###### cpu:\r\n\r\n```bash\r\npip install paddlepaddle\r\n```\r\n\r\n###### gpu:\r\n\r\n```bash\r\npip install paddlepaddle-gpu\r\n```\r\n\r\n\r\n\r\n###### specific version cuda:\r\n\r\nWe only release paddlepaddle-gpu cuda10.2 on pypi.\r\n\r\nIf you want to install paddlepaddle-gpu with cuda version of 10.2/11.2/11.6/11.7, commands to install are on our website: [Installation Document](https://www.paddlepaddle.org.cn/documentation/docs/en/install/pip/frompip_en.html)\r\n\r\n\r\n\r\n#### Verify installation\r\n\r\nAfter the installation is complete, you can use `python3` to enter the Python interpreter and then use `import paddle` and `paddle.utils.run_check()`\r\n\r\nIf `PaddlePaddle is installed successfully!` appears, to verify that the installation was successful.\r\n\r\n\r\n\r\n### Other installation methods\r\n\r\nIf you want to install witch conda or docker or pip, please see commands to install on our website: [Installation Document](https://www.paddlepaddle.org.cn/documentation/docs/en/install/index_en.html)\r\n\r\n\r\n\r\n## FOUR LEADING TECHNOLOGIES\r\n\r\n- **Agile Framework for Industrial Development of Deep Neural Networks**\r\n\r\n    The PaddlePaddle deep learning framework facilitates the development while lowering the technical burden, through leveraging a programmable scheme to architect the neural networks. It supports both declarative programming and imperative programming with both development flexibility and high runtime performance preserved.  The neural architectures could be automatically designed by algorithms with better performance than the ones designed by human experts.\r\n\r\n\r\n-  **Support Ultra-Large-Scale Training of Deep Neural Networks**\r\n\r\n    PaddlePaddle has made breakthroughs in ultra-large-scale deep neural networks training. It launched the world's first large-scale open-source training platform that supports the training of deep networks with 100 billions of features and trillions of parameters using data sources distributed over hundreds of nodes. PaddlePaddle overcomes the online deep learning challenges for ultra-large-scale deep learning models, and further achieved the real-time model updating with more than 1 trillion parameters.\r\n     [Click here to learn more](https://github.com/PaddlePaddle/Fleet)\r\n\r\n\r\n- **Accelerated High-Performance Inference over Ubiquitous Deployments**\r\n\r\n    PaddlePaddle is not only compatible with other open-source frameworks for models training, but also works well on the ubiquitous developments, varying from platforms to devices. More specifically, PaddlePaddle accelerates the inference procedure with the fastest speed-up. Note that, a recent breakthrough of inference speed has been made by PaddlePaddle on Huawei's Kirin NPU, through the hardware/software co-optimization.\r\n     [Click here to learn more](https://github.com/PaddlePaddle/Paddle-Lite)\r\n\r\n- **Industry-Oriented Models and Libraries with Open Source Repositories**\r\n\r\n     PaddlePaddle includes and maintains more than 100 mainstream models that have been practiced and polished for a long time in the industry. Some of these models have won major prizes from key international competitions. In the meanwhile, PaddlePaddle has further more than 200 pre-training models (some of them with source codes) to facilitate the rapid development of industrial applications.\r\n     [Click here to learn more](https://github.com/PaddlePaddle/models)\r\n\r\n\r\n## Documentation\r\n\r\nWe provide [English](https://www.paddlepaddle.org.cn/documentation/docs/en/guides/index_en.html) and\r\n[Chinese](https://www.paddlepaddle.org.cn/documentation/docs/zh/guides/index_cn.html) documentation.\r\n\r\n- [Basic Deep Learning Models](https://www.paddlepaddle.org.cn/documentation/docs/en/beginners_guide/index_en.html)\r\n\r\n  You might want to start from how to implement deep learning basics with PaddlePaddle.\r\n\r\n\r\n- [User Guides](https://www.paddlepaddle.org.cn/documentation/docs/en/user_guides/index_en.html)\r\n\r\n  You might have got the hang of Beginner\u2019s Guide, and wish to model practical problems and build your original networks.\r\n\r\n- [Advanced User Guides](https://www.paddlepaddle.org.cn/documentation/docs/en/advanced_guide/index_en.html)\r\n\r\n  So far you have already been familiar with Fluid. And the next step should be building a more efficient model or inventing your original Operator.\r\n\r\n\r\n- [API Reference](https://www.paddlepaddle.org.cn/documentation/docs/en/api/index_en.html)\r\n\r\n   Our new API enables much shorter programs.\r\n\r\n\r\n- [How to Contribute](https://www.paddlepaddle.org.cn/documentation/docs/zh/dev_guides/index_cn.html)\r\n\r\n   We appreciate your contributions!\r\n\r\n## Communication\r\n\r\n- [Github Issues](https://github.com/PaddlePaddle/Paddle/issues): bug reports, feature requests, install issues, usage issues, etc.\r\n- QQ discussion group: 796771754 (PaddlePaddle).\r\n- [Forums](https://aistudio.baidu.com/paddle/forum/): discuss implementations, research, etc.\r\n\r\n## Copyright and License\r\nPaddlePaddle is provided under the [Apache-2.0 license](https://github.com/PaddlePaddle/Paddle/blob/develop/LICENSE).\r\n",
+    "largest_files": [
+      {
+        "path": "paddle/libs/phi.dll",
+        "bytes": 766903296,
+        "compressed": 482808838,
+        "crc": 1503615757
+      },
+      {
+        "path": "paddle/base/libpaddle.pyd",
+        "bytes": 142681600,
+        "compressed": 42530338,
+        "crc": 670487545
+      },
+      {
+        "path": "paddle/libs/mklml.dll",
+        "bytes": 92649344,
+        "compressed": 28406927,
+        "crc": 1696374522
+      },
+      {
+        "path": "paddle/libs/mkldnn.dll",
+        "bytes": 47321088,
+        "compressed": 9772679,
+        "crc": 1029932604
+      },
+      {
+        "path": "paddle/libs/liblapack.dll",
+        "bytes": 7895054,
+        "compressed": 3241600,
+        "crc": 78940134
+      },
+      {
+        "path": "paddle/base/libpaddle.lib",
+        "bytes": 3801940,
+        "compressed": 322939,
+        "crc": 3912277464
+      },
+      {
+        "path": "paddle/include/build/paddle/fluid/pir/dialect/operator/ir/pd_op.h",
+        "bytes": 2886619,
+        "compressed": 108631,
+        "crc": 3721659471
+      },
+      {
+        "path": "paddle/libs/libiomp5md.dll",
+        "bytes": 1726848,
+        "compressed": 680233,
+        "crc": 655038473
+      },
+      {
+        "path": "paddle/libs/warpctc.dll",
+        "bytes": 1672704,
+        "compressed": 1031871,
+        "crc": 2987801463
+      },
+      {
+        "path": "paddle/libs/warprnnt.dll",
+        "bytes": 1502208,
+        "compressed": 447543,
+        "crc": 1614390844
+      },
+      {
+        "path": "paddle/libs/libgfortran-3.dll",
+        "bytes": 1316352,
+        "compressed": 388826,
+        "crc": 1780340647
+      },
+      {
+        "path": "paddle/_typing/libs/libpaddle/pir/__init__.pyi",
+        "bytes": 947798,
+        "compressed": 133656,
+        "crc": 2372695791
+      },
+      {
+        "path": "paddle/tensor/tensor.pyi",
+        "bytes": 794707,
+        "compressed": 126906,
+        "crc": 3742476998
+      },
+      {
+        "path": "paddle/libs/common.dll",
+        "bytes": 775680,
+        "compressed": 292431,
+        "crc": 493828246
+      },
+      {
+        "path": "paddle/libs/common.lib",
+        "bytes": 679068,
+        "compressed": 76057,
+        "crc": 2575355871
+      }
+    ]
+  },
+  "nvidia_wheels": [
+    {
+      "platform": "linux_x86_64",
+      "name": "nvidia-cuda-nvrtc-cu12",
+      "version": "12.6.77",
+      "url": "https://files.pythonhosted.org/packages/75/2e/46030320b5a80661e88039f59060d1790298b4718944a65a7f2aeda3d9e9/nvidia_cuda_nvrtc_cu12-12.6.77-py3-none-manylinux2014_x86_64.whl",
+      "sha256": "35b0cc6ee3a9636d5409133e79273ce1f3fd087abb0532d2d2e8fff1fe9efc53",
+      "wheel_bytes": 23650380,
+      "expanded_bytes": 64147654,
+      "largest_files": [
+        {
+          "path": "nvidia/cuda_nvrtc/lib/libnvrtc.so.12",
+          "bytes": 58726320,
+          "compressed": 22479399
+        },
+        {
+          "path": "nvidia/cuda_nvrtc/lib/libnvrtc-builtins.so.12.6",
+          "bytes": 5322632,
+          "compressed": 1145233
+        },
+        {
+          "path": "nvidia_cuda_nvrtc_cu12-12.6.77.dist-info/License.txt",
+          "bytes": 59262,
+          "compressed": 14143
+        },
+        {
+          "path": "nvidia/cuda_nvrtc/include/nvrtc.h",
+          "bytes": 36712,
+          "compressed": 8578
+        }
+      ]
+    },
+    {
+      "platform": "linux_x86_64",
+      "name": "nvidia-cuda-runtime-cu12",
+      "version": "12.6.77",
+      "url": "https://files.pythonhosted.org/packages/e1/23/e717c5ac26d26cf39a27fbc076240fad2e3b817e5889d671b67f4f9f49c5/nvidia_cuda_runtime_cu12-12.6.77-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "ba3b56a4f896141e25e19ab287cd71e52a6a0f4b29d0d31609f60e3b4d5219b7",
+      "wheel_bytes": 897690,
+      "expanded_bytes": 4666930,
+      "largest_files": [
+        {
+          "path": "nvidia/cuda_runtime/include/cuda.h",
+          "bytes": 1085609,
+          "compressed": 185262
+        },
+        {
+          "path": "nvidia/cuda_runtime/lib/libcudart.so.12",
+          "bytes": 716128,
+          "compressed": 207200
+        },
+        {
+          "path": "nvidia/cuda_runtime/include/cuda_runtime_api.h",
+          "bytes": 621921,
+          "compressed": 101047
+        },
+        {
+          "path": "nvidia/cuda_runtime/include/cuda_fp16.h",
+          "bytes": 203748,
+          "compressed": 19095
+        }
+      ]
+    },
+    {
+      "platform": "linux_x86_64",
+      "name": "nvidia-cuda-cupti-cu12",
+      "version": "12.6.80",
+      "url": "https://files.pythonhosted.org/packages/49/60/7b6497946d74bcf1de852a21824d63baad12cd417db4195fc1bfe59db953/nvidia_cuda_cupti_cu12-12.6.80-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "6768bad6cab4f19e8292125e5f1ac8aa7d1718704012a0e3272a6f61c4bce132",
+      "wheel_bytes": 8917980,
+      "expanded_bytes": 34855781,
+      "largest_files": [
+        {
+          "path": "nvidia/cuda_cupti/lib/libnvperf_host.so",
+          "bytes": 18842864,
+          "compressed": 4011090
+        },
+        {
+          "path": "nvidia/cuda_cupti/lib/libcupti.so.12",
+          "bytes": 8067920,
+          "compressed": 2541172
+        },
+        {
+          "path": "nvidia/cuda_cupti/lib/libnvperf_target.so",
+          "bytes": 4231664,
+          "compressed": 1267319
+        },
+        {
+          "path": "nvidia/cuda_cupti/lib/libcheckpoint.so",
+          "bytes": 1571144,
+          "compressed": 553292
+        }
+      ]
+    },
+    {
+      "platform": "linux_x86_64",
+      "name": "nvidia-cudnn-cu12",
+      "version": "9.5.1.17",
+      "url": "https://files.pythonhosted.org/packages/2a/78/4535c9c7f859a64781e43c969a3a7e84c54634e319a996d43ef32ce46f83/nvidia_cudnn_cu12-9.5.1.17-py3-none-manylinux_2_28_x86_64.whl",
+      "sha256": "30ac3869f6db17d170e0e556dd6cc5eee02647abc31ca856634d5a40f82c15b2",
+      "wheel_bytes": 570988386,
+      "expanded_bytes": 875245588,
+      "largest_files": [
+        {
+          "path": "nvidia/cudnn/lib/libcudnn_engines_precompiled.so.9",
+          "bytes": 438317848,
+          "compressed": 286077601
+        },
+        {
+          "path": "nvidia/cudnn/lib/libcudnn_adv.so.9",
+          "bytes": 245380760,
+          "compressed": 169986695
+        },
+        {
+          "path": "nvidia/cudnn/lib/libcudnn_ops.so.9",
+          "bytes": 109061640,
+          "compressed": 80407291
+        },
+        {
+          "path": "nvidia/cudnn/lib/libcudnn_heuristic.so.9",
+          "bytes": 50335360,
+          "compressed": 17638055
+        }
+      ]
+    },
+    {
+      "platform": "linux_x86_64",
+      "name": "nvidia-cublas-cu12",
+      "version": "12.6.4.1",
+      "url": "https://files.pythonhosted.org/packages/af/eb/ff4b8c503fa1f1796679dce648854d58751982426e4e4b37d6fce49d259c/nvidia_cublas_cu12-12.6.4.1-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "08ed2686e9875d01b58e3cb379c6896df8e76c75e0d4a7f7dace3d7b6d9ef8eb",
+      "wheel_bytes": 393138322,
+      "expanded_bytes": 600763634,
+      "largest_files": [
+        {
+          "path": "nvidia/cublas/lib/libcublasLt.so.12",
+          "bytes": 491106832,
+          "compressed": 318977961
+        },
+        {
+          "path": "nvidia/cublas/lib/libcublas.so.12",
+          "bytes": 108244960,
+          "compressed": 73878086
+        },
+        {
+          "path": "nvidia/cublas/lib/libnvblas.so.12",
+          "bytes": 757496,
+          "compressed": 216848
+        },
+        {
+          "path": "nvidia/cublas/include/cublas_api.h",
+          "bytes": 374363,
+          "compressed": 16395
+        }
+      ]
+    },
+    {
+      "platform": "linux_x86_64",
+      "name": "nvidia-cufft-cu12",
+      "version": "11.3.0.4",
+      "url": "https://files.pythonhosted.org/packages/8f/16/73727675941ab8e6ffd86ca3a4b7b47065edcca7a997920b831f8147c99d/nvidia_cufft_cu12-11.3.0.4-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "ccba62eb9cef5559abd5e0d54ceed2d9934030f51163df018532142a8ec533e5",
+      "wheel_bytes": 200221632,
+      "expanded_bytes": 281139021,
+      "largest_files": [
+        {
+          "path": "nvidia/cufft/lib/libcufft.so.11",
+          "bytes": 278925008,
+          "compressed": 199857140
+        },
+        {
+          "path": "nvidia/cufft/lib/libcufftw.so.11",
+          "bytes": 2101480,
+          "compressed": 336110
+        },
+        {
+          "path": "nvidia_cufft_cu12-11.3.0.4.dist-info/License.txt",
+          "bytes": 59262,
+          "compressed": 14143
+        },
+        {
+          "path": "nvidia/cufft/include/cufftw.h",
+          "bytes": 20051,
+          "compressed": 2953
+        }
+      ]
+    },
+    {
+      "platform": "linux_x86_64",
+      "name": "nvidia-curand-cu12",
+      "version": "10.3.7.77",
+      "url": "https://files.pythonhosted.org/packages/73/1b/44a01c4e70933637c93e6e1a8063d1e998b50213a6b65ac5a9169c47e98e/nvidia_curand_cu12-10.3.7.77-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "a42cd1344297f70b9e39a1e4f467a4e1c10f1da54ff7a85c12197f6c652c8bdf",
+      "wheel_bytes": 56279010,
+      "expanded_bytes": 98640598,
+      "largest_files": [
+        {
+          "path": "nvidia/curand/lib/libcurand.so.10",
+          "bytes": 96472496,
+          "compressed": 55768078
+        },
+        {
+          "path": "nvidia/curand/include/curand_precalc.h",
+          "bytes": 1392393,
+          "compressed": 355499
+        },
+        {
+          "path": "nvidia/curand/include/curand_mtgp32dc_p_11213.h",
+          "bytes": 276889,
+          "compressed": 60488
+        },
+        {
+          "path": "nvidia/curand/include/curand_mrg32k3a.h",
+          "bytes": 170296,
+          "compressed": 22899
+        }
+      ]
+    },
+    {
+      "platform": "linux_x86_64",
+      "name": "nvidia-cusolver-cu12",
+      "version": "11.7.1.2",
+      "url": "https://files.pythonhosted.org/packages/f0/6e/c2cf12c9ff8b872e92b4a5740701e51ff17689c4d726fca91875b07f655d/nvidia_cusolver_cu12-11.7.1.2-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "e9e49843a7707e42022babb9bcfa33c29857a93b88020c4e4434656a655b698c",
+      "wheel_bytes": 158229790,
+      "expanded_bytes": 243636553,
+      "largest_files": [
+        {
+          "path": "nvidia/cusolver/lib/libcusolver.so.11",
+          "bytes": 153126304,
+          "compressed": 103157025
+        },
+        {
+          "path": "nvidia/cusolver/lib/libcusolverMg.so.11",
+          "bytes": 90190968,
+          "compressed": 55031716
+        },
+        {
+          "path": "nvidia/cusolver/include/cusolverDn.h",
+          "bytes": 152030,
+          "compressed": 8605
+        },
+        {
+          "path": "nvidia_cusolver_cu12-11.7.1.2.dist-info/License.txt",
+          "bytes": 59262,
+          "compressed": 14143
+        }
+      ]
+    },
+    {
+      "platform": "linux_x86_64",
+      "name": "nvidia-cusparse-cu12",
+      "version": "12.5.4.2",
+      "url": "https://files.pythonhosted.org/packages/06/1e/b8b7c2f4099a37b96af5c9bb158632ea9e5d9d27d7391d7eb8fc45236674/nvidia_cusparse_cu12-12.5.4.2-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "7556d9eca156e18184b94947ade0fba5bb47d69cec46bf8660fd2c71a4b48b73",
+      "wheel_bytes": 216561367,
+      "expanded_bytes": 293978233,
+      "largest_files": [
+        {
+          "path": "nvidia/cusparse/lib/libcusparse.so.12",
+          "bytes": 293618392,
+          "compressed": 216526269
+        },
+        {
+          "path": "nvidia/cusparse/include/cusparse.h",
+          "bytes": 295206,
+          "compressed": 16728
+        },
+        {
+          "path": "nvidia_cusparse_cu12-12.5.4.2.dist-info/License.txt",
+          "bytes": 59262,
+          "compressed": 14143
+        },
+        {
+          "path": "nvidia/cusparse/include/cusparse_v2.h",
+          "bytes": 2587,
+          "compressed": 1221
+        }
+      ]
+    },
+    {
+      "platform": "linux_x86_64",
+      "name": "nvidia-cusparselt-cu12",
+      "version": "0.6.3",
+      "url": "https://files.pythonhosted.org/packages/3b/9a/72ef35b399b0e183bc2e8f6f558036922d453c4d8237dab26c666a04244b/nvidia_cusparselt_cu12-0.6.3-py3-none-manylinux2014_x86_64.whl",
+      "sha256": "e5c8a26c36445dd2e6812f1177978a24e2d37cacce7e090f297a688d1ec44f46",
+      "wheel_bytes": 156785796,
+      "expanded_bytes": 237426410,
+      "largest_files": [
+        {
+          "path": "cusparselt/lib/libcusparseLt.so.0",
+          "bytes": 237384129,
+          "compressed": 156773465
+        },
+        {
+          "path": "cusparselt/LICENSE.txt",
+          "bytes": 17948,
+          "compressed": 6736
+        },
+        {
+          "path": "cusparselt/include/cusparseLt.h",
+          "bytes": 16823,
+          "compressed": 2294
+        },
+        {
+          "path": "nvidia_cusparselt_cu12-0.6.3.dist-info/METADATA",
+          "bytes": 6768,
+          "compressed": 1703
+        }
+      ]
+    },
+    {
+      "platform": "linux_x86_64",
+      "name": "nvidia-nccl-cu12",
+      "version": "2.25.1",
+      "url": "https://files.pythonhosted.org/packages/11/0c/8c78b7603f4e685624a3ea944940f1e75f36d71bd6504330511f4a0e1557/nvidia_nccl_cu12-2.25.1-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "362aed5963fb9ea2ed2f264409baae30143498fd0e5c503aeaa1badd88cdc54a",
+      "wheel_bytes": 201352353,
+      "expanded_bytes": 271912285,
+      "largest_files": [
+        {
+          "path": "nvidia/nccl/lib/libnccl.so.2",
+          "bytes": 271887104,
+          "compressed": 201343123
+        },
+        {
+          "path": "nvidia/nccl/include/nccl.h",
+          "bytes": 20384,
+          "compressed": 5369
+        },
+        {
+          "path": "nvidia_nccl_cu12-2.25.1.dist-info/License.txt",
+          "bytes": 1895,
+          "compressed": 988
+        },
+        {
+          "path": "nvidia_nccl_cu12-2.25.1.dist-info/METADATA",
+          "bytes": 1822,
+          "compressed": 722
+        }
+      ]
+    },
+    {
+      "platform": "linux_x86_64",
+      "name": "nvidia-nvtx-cu12",
+      "version": "12.6.77",
+      "url": "https://files.pythonhosted.org/packages/56/9a/fff8376f8e3d084cd1530e1ef7b879bb7d6d265620c95c1b322725c694f4/nvidia_nvtx_cu12-12.6.77-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "b90bed3df379fa79afbd21be8e04a0314336b8ae16768b58f2d34cb1d04cd7d2",
+      "wheel_bytes": 89276,
+      "expanded_bytes": 369610,
+      "largest_files": [
+        {
+          "path": "nvidia/nvtx/include/nvToolsExt.h",
+          "bytes": 53680,
+          "compressed": 11187
+        },
+        {
+          "path": "nvidia/nvtx/include/nvtx3/nvToolsExt.h",
+          "bytes": 52247,
+          "compressed": 11739
+        },
+        {
+          "path": "nvidia/nvtx/lib/libnvToolsExt.so.1",
+          "bytes": 40136,
+          "compressed": 11023
+        },
+        {
+          "path": "nvidia/nvtx/include/nvtx3/nvtxDetail/nvtxInitDefs.h",
+          "bytes": 35432,
+          "compressed": 2504
+        }
+      ]
+    },
+    {
+      "platform": "linux_x86_64",
+      "name": "nvidia-nvjitlink-cu12",
+      "version": "12.6.85",
+      "url": "https://files.pythonhosted.org/packages/9d/d7/c5383e47c7e9bf1c99d5bd2a8c935af2b6d705ad831a7ec5c97db4d82f4f/nvidia_nvjitlink_cu12-12.6.85-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl",
+      "sha256": "eedc36df9e88b682efe4309aa16b5b4e78c2407eac59e8c10a6a47535164369a",
+      "wheel_bytes": 19744971,
+      "expanded_bytes": 50497993,
+      "largest_files": [
+        {
+          "path": "nvidia/nvjitlink/lib/libnvJitLink.so.12",
+          "bytes": 50418984,
+          "compressed": 19724415
+        },
+        {
+          "path": "nvidia_nvjitlink_cu12-12.6.85.dist-info/License.txt",
+          "bytes": 59262,
+          "compressed": 14143
+        },
+        {
+          "path": "nvidia/nvjitlink/include/nvJitLink.h",
+          "bytes": 17081,
+          "compressed": 3583
+        },
+        {
+          "path": "nvidia_nvjitlink_cu12-12.6.85.dist-info/METADATA",
+          "bytes": 1520,
+          "compressed": 536
+        }
+      ]
+    },
+    {
+      "platform": "linux_x86_64",
+      "name": "nvidia-cufile-cu12",
+      "version": "1.11.1.6",
+      "url": "https://files.pythonhosted.org/packages/b2/66/cc9876340ac68ae71b15c743ddb13f8b30d5244af344ec8322b449e35426/nvidia_cufile_cu12-1.11.1.6-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "cc23469d1c7e52ce6c1d55253273d32c565dd22068647f3aa59b3c6b005bf159",
+      "wheel_bytes": 1142103,
+      "expanded_bytes": 3179200,
+      "largest_files": [
+        {
+          "path": "nvidia/cufile/lib/libcufile.so.0",
+          "bytes": 3041296,
+          "compressed": 1104321
+        },
+        {
+          "path": "nvidia_cufile_cu12-1.11.1.6.dist-info/License.txt",
+          "bytes": 59262,
+          "compressed": 14143
+        },
+        {
+          "path": "nvidia/cufile/lib/libcufile_rdma.so.1",
+          "bytes": 46528,
+          "compressed": 13400
+        },
+        {
+          "path": "nvidia/cufile/include/cufile.h",
+          "bytes": 29408,
+          "compressed": 7303
+        }
+      ]
+    },
+    {
+      "platform": "linux_x86_64",
+      "name": "nvidia-cuda-cccl-cu12",
+      "version": "12.6.77",
+      "url": "https://files.pythonhosted.org/packages/ed/81/5db553af81b7df0ae048302c2b68a970720f49d12abdac1b26a892316744/nvidia_cuda_cccl_cu12-12.6.77-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "ea80be91ccd49b0785fd744afd470cd0c0175bcf25d4fe65b7d548095b68687a",
+      "wheel_bytes": 2879094,
+      "expanded_bytes": 12547502,
+      "largest_files": [
+        {
+          "path": "nvidia/cuda_cccl/include/cuda/std/__atomic/functions/cuda_ptx_generated.h",
+          "bytes": 475443,
+          "compressed": 15198
+        },
+        {
+          "path": "nvidia/cuda_cccl/.metadata/guardword_scan_stdout.txt",
+          "bytes": 208650,
+          "compressed": 10836
+        },
+        {
+          "path": "nvidia_cuda_cccl_cu12-12.6.77.dist-info/RECORD",
+          "bytes": 183987,
+          "compressed": 69908
+        },
+        {
+          "path": "nvidia/cuda_cccl/include/thrust/set_operations.h",
+          "bytes": 173005,
+          "compressed": 6851
+        }
+      ]
+    },
+    {
+      "platform": "win_amd64",
+      "name": "nvidia-cuda-runtime-cu12",
+      "version": "12.6.77",
+      "url": "https://files.pythonhosted.org/packages/fa/76/4c80fa138333cc975743fd0687a745fccb30d167f906f13c1c7f9a85e5ea/nvidia_cuda_runtime_cu12-12.6.77-py3-none-win_amd64.whl",
+      "sha256": "86c58044c824bf3c173c49a2dbc7a6c8b53cb4e4dca50068be0bf64e9dab3f7f",
+      "wheel_bytes": 891773,
+      "expanded_bytes": 4705092,
+      "largest_files": [
+        {
+          "path": "nvidia/cuda_runtime/include/cuda.h",
+          "bytes": 1110638,
+          "compressed": 186204
+        },
+        {
+          "path": "nvidia/cuda_runtime/include/cuda_runtime_api.h",
+          "bytes": 636200,
+          "compressed": 101909
+        },
+        {
+          "path": "nvidia/cuda_runtime/bin/cudart64_12.dll",
+          "bytes": 556544,
+          "compressed": 172092
+        },
+        {
+          "path": "nvidia/cuda_runtime/include/cuda_fp16.h",
+          "bytes": 209029,
+          "compressed": 19200
+        }
+      ]
+    },
+    {
+      "platform": "win_amd64",
+      "name": "nvidia-cudnn-cu12",
+      "version": "9.5.1.17",
+      "url": "https://files.pythonhosted.org/packages/b6/b2/3f60d15f037fa5419d9d7f788b100ef33ea913ae5315c87ca6d6fa606c35/nvidia_cudnn_cu12-9.5.1.17-py3-none-win_amd64.whl",
+      "sha256": "d7af0f8a4f3b4b9dbb3122f2ef553b45694ed9c384d5a75bab197b8eefb79ab8",
+      "wheel_bytes": 565440743,
+      "expanded_bytes": 849405241,
+      "largest_files": [
+        {
+          "path": "nvidia/cudnn/bin/cudnn_engines_precompiled64_9.dll",
+          "bytes": 425201704,
+          "compressed": 282441299
+        },
+        {
+          "path": "nvidia/cudnn/bin/cudnn_adv64_9.dll",
+          "bytes": 243946040,
+          "compressed": 170160947
+        },
+        {
+          "path": "nvidia/cudnn/bin/cudnn_ops64_9.dll",
+          "bytes": 107492904,
+          "compressed": 79848106
+        },
+        {
+          "path": "nvidia/cudnn/bin/cudnn_heuristic64_9.dll",
+          "bytes": 48084520,
+          "compressed": 17380647
+        }
+      ]
+    },
+    {
+      "platform": "win_amd64",
+      "name": "nvidia-cublas-cu12",
+      "version": "12.6.4.1",
+      "url": "https://files.pythonhosted.org/packages/84/f7/985e9bdbe3e0ac9298fcc8cfa51a392862a46a0ffaccbbd56939b62a9c83/nvidia_cublas_cu12-12.6.4.1-py3-none-win_amd64.whl",
+      "sha256": "9e4fa264f4d8a4eb0cdbd34beadc029f453b3bafae02401e999cf3d5a5af75f8",
+      "wheel_bytes": 434535301,
+      "expanded_bytes": 637693311,
+      "largest_files": [
+        {
+          "path": "nvidia/cublas/bin/cublasLt64_12.dll",
+          "bytes": 531812352,
+          "compressed": 361296642
+        },
+        {
+          "path": "nvidia/cublas/bin/cublas64_12.dll",
+          "bytes": 104883712,
+          "compressed": 73039394
+        },
+        {
+          "path": "nvidia/cublas/include/cublas_api.h",
+          "bytes": 380198,
+          "compressed": 16424
+        },
+        {
+          "path": "nvidia/cublas/bin/nvblas64_12.dll",
+          "bytes": 331776,
+          "compressed": 133628
+        }
+      ]
+    },
+    {
+      "platform": "win_amd64",
+      "name": "nvidia-cufft-cu12",
+      "version": "11.3.0.4",
+      "url": "https://files.pythonhosted.org/packages/b4/38/36fd800cec8f6e89b7c1576edaaf8076e69ec631644cdbc1b5f2e2b5a9df/nvidia_cufft_cu12-11.3.0.4-py3-none-win_amd64.whl",
+      "sha256": "6048ebddfb90d09d2707efb1fd78d4e3a77cb3ae4dc60e19aab6be0ece2ae464",
+      "wheel_bytes": 199356881,
+      "expanded_bytes": 277628411,
+      "largest_files": [
+        {
+          "path": "nvidia/cufft/bin/cufft64_11.dll",
+          "bytes": 277351424,
+          "compressed": 199244153
+        },
+        {
+          "path": "nvidia/cufft/bin/cufftw64_11.dll",
+          "bytes": 163328,
+          "compressed": 84288
+        },
+        {
+          "path": "nvidia_cufft_cu12-11.3.0.4.dist-info/License.txt",
+          "bytes": 59262,
+          "compressed": 14143
+        },
+        {
+          "path": "nvidia/cufft/include/cufftw.h",
+          "bytes": 20516,
+          "compressed": 2972
+        }
+      ]
+    },
+    {
+      "platform": "win_amd64",
+      "name": "nvidia-curand-cu12",
+      "version": "10.3.7.77",
+      "url": "https://files.pythonhosted.org/packages/a9/a8/0cd0cec757bd4b4b4ef150fca62ec064db7d08a291dced835a0be7d2c147/nvidia_curand_cu12-10.3.7.77-py3-none-win_amd64.whl",
+      "sha256": "6d6d935ffba0f3d439b7cd968192ff068fafd9018dbf1b85b37261b13cfc9905",
+      "wheel_bytes": 55783873,
+      "expanded_bytes": 65473566,
+      "largest_files": [
+        {
+          "path": "nvidia/curand/bin/curand64_10.dll",
+          "bytes": 63279104,
+          "compressed": 55270955
+        },
+        {
+          "path": "nvidia/curand/include/curand_precalc.h",
+          "bytes": 1395941,
+          "compressed": 357348
+        },
+        {
+          "path": "nvidia/curand/include/curand_mtgp32dc_p_11213.h",
+          "bytes": 288599,
+          "compressed": 60727
+        },
+        {
+          "path": "nvidia/curand/include/curand_mrg32k3a.h",
+          "bytes": 174017,
+          "compressed": 22489
+        }
+      ]
+    },
+    {
+      "platform": "win_amd64",
+      "name": "nvidia-cusolver-cu12",
+      "version": "11.7.1.2",
+      "url": "https://files.pythonhosted.org/packages/d4/53/fff50a0808df7113d77e3bbc7c2b7eaed6f57d5eb80fbe93ead2aea1e09a/nvidia_cusolver_cu12-11.7.1.2-py3-none-win_amd64.whl",
+      "sha256": "6813f9d8073f555444a8705f3ab0296d3e1cb37a16d694c5fc8b862a0d8706d7",
+      "wheel_bytes": 149287877,
+      "expanded_bytes": 223282198,
+      "largest_files": [
+        {
+          "path": "nvidia/cusolver/bin/cusolver64_11.dll",
+          "bytes": 138290688,
+          "compressed": 95465899
+        },
+        {
+          "path": "nvidia/cusolver/bin/cusolverMg64_11.dll",
+          "bytes": 84664320,
+          "compressed": 53780791
+        },
+        {
+          "path": "nvidia/cusolver/include/cusolverDn.h",
+          "bytes": 157039,
+          "compressed": 8678
+        },
+        {
+          "path": "nvidia_cusolver_cu12-11.7.1.2.dist-info/License.txt",
+          "bytes": 59262,
+          "compressed": 14143
+        }
+      ]
+    },
+    {
+      "platform": "win_amd64",
+      "name": "nvidia-cusparse-cu12",
+      "version": "12.5.4.2",
+      "url": "https://files.pythonhosted.org/packages/45/ef/876ad8e4260e1128e6d4aac803d9d51baf3791ebdb4a9b8d9b8db032b4b0/nvidia_cusparse_cu12-12.5.4.2-py3-none-win_amd64.whl",
+      "sha256": "4acb8c08855a26d737398cba8fb6f8f5045d93f82612b4cfd84645a2332ccf20",
+      "wheel_bytes": 213712630,
+      "expanded_bytes": 288008066,
+      "largest_files": [
+        {
+          "path": "nvidia/cusparse/bin/cusparse64_12.dll",
+          "bytes": 287642112,
+          "compressed": 213677455
+        },
+        {
+          "path": "nvidia/cusparse/include/cusparse.h",
+          "bytes": 301313,
+          "compressed": 16816
+        },
+        {
+          "path": "nvidia_cusparse_cu12-12.5.4.2.dist-info/License.txt",
+          "bytes": 59262,
+          "compressed": 14143
+        },
+        {
+          "path": "nvidia/cusparse/include/cusparse_v2.h",
+          "bytes": 2641,
+          "compressed": 1231
+        }
+      ]
+    }
+  ],
+  "method": "HTTPS range ZIP directory and METADATA inventory; sizes are official wheel entries, not a completed installed runtime. NVIDIA SHA256 values published by PyPI; Paddle index has no published SHA256 anchor, per-entry RECORD verified separately. No GPU present and no real GPU inference pass.",
+  "scope_note": "Paddle direct NVIDIA dependencies only. Windows additionally requires transitive NVJitLink via cuFFT/cuSolver/cuSparse. See windows-nvjitlink-development-2026-10-25.json and audit report; do not treat Windows direct totals as complete closure."
+}
