@@ -136,6 +136,18 @@ def vc_runtime(directory, license_file, stage, required, acknowledged=False):
             'scope': 'Caller-supplied licensed redistributable source; final PE/ownership audit remains required.'}
 
 
+def write_size_audit(stage, report):
+    """Count and write identical UTF-8 bytes, without host newline translation."""
+    for _ in range(8):
+        encoded = (json.dumps(report, indent=2) + '\n').encode('utf-8')
+        total = report['runtime_payload_bytes'] + len(encoded)
+        if report['assembled_total_bytes'] == total:
+            (stage / 'size-audit.json').write_bytes(encoded)
+            return
+        report['assembled_total_bytes'] = total
+    raise RuntimeError('Size audit byte count did not converge')
+
+
 def inventory(stage, target, provenance):
     files = [{'path': p.relative_to(stage).as_posix(), 'bytes': p.stat().st_size, 'sha256': sha256(p)}
              for p in sorted(stage.rglob('*')) if p.is_file() and not p.is_symlink()]
@@ -146,9 +158,7 @@ def inventory(stage, target, provenance):
               'files': files, 'runtime_payload_bytes': payload, 'python_runtime_bytes': 0,
               'model_bytes': sum(r['bytes'] for r in files if r['path'].startswith('models/')),
               'provenance': provenance, 'assembled_total_bytes': payload}
-    for _ in range(8):
-        report['assembled_total_bytes'] = payload + len((json.dumps(report, indent=2) + '\n').encode())
-    (stage / 'size-audit.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+    write_size_audit(stage, report)
     return report
 
 
@@ -260,9 +270,7 @@ def build(a):
         if a.runner_test_only:
             report['runner_test_only'] = True
             report['vc_redistribution_pending'] = True
-            for _ in range(8):
-                report['assembled_total_bytes'] = report['runtime_payload_bytes'] + len((json.dumps(report, indent=2) + '\n').encode())
-            (stage / 'size-audit.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+            write_size_audit(stage, report)
         stage.rename(output)
         return report
     finally:

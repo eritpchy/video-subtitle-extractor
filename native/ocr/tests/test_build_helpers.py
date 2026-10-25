@@ -77,3 +77,24 @@ def test_windows_toolhelp_header_follows_win32_definitions():
     assert source.index('#define NOMINMAX') < source.index('#include <windows.h>')
     # Windows RPC headers define the legacy `small` token as a macro.
     assert 'cv::Mat small;' not in source
+
+
+@pytest.mark.parametrize('target', ['linux-x64', 'windows-x64', 'macos-arm64'])
+@pytest.mark.parametrize('runner_test_only', [False, True])
+def test_size_audit_writes_counted_bytes_without_text_translation(tmp_path, target, runner_test_only):
+    (tmp_path / 'native-ocr').write_bytes(b'executable\r\n')
+    # Text-mode writes translate LF to CRLF on Windows. Forbid that route on
+    # every host, so Linux CI also catches the original Windows-only failure.
+    with patch.object(Path, 'write_text', side_effect=AssertionError('audit must use binary I/O')):
+        report = build.inventory(tmp_path, target, {'host': 'Windows\n路径'})
+        if runner_test_only:
+            report['runner_test_only'] = True
+            report['vc_redistribution_pending'] = True
+            build.write_size_audit(tmp_path, report)
+    encoded = (tmp_path / 'size-audit.json').read_bytes()
+    assert encoded == (json.dumps(report, indent=2) + '\n').encode('utf-8')
+    assert b'\r\n' not in encoded
+    assert json.loads(encoded) == report
+    assert report['assembled_total_bytes'] == sum(p.stat().st_size for p in tmp_path.iterdir())
+    assert report['runtime_payload_bytes'] == len(b'executable\r\n')
+    assert report['files'][0]['sha256'] == hashlib.sha256(b'executable\r\n').hexdigest()
