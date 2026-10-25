@@ -176,6 +176,22 @@ class WindowThemeTests(ThemeTestCase):
         self.window.show()
         self.app.processEvents()
 
+    def switch_to_settled_page(self, interface):
+        # FluentWindow.switchTo starts a 300 ms position animation. Waiting
+        # only for the 120 ms theme animation can capture a moving translucent
+        # card, especially with Cocoa. Await navigation itself, not a guessed
+        # screenshot delay, and retain exact round-trip color assertions.
+        view = self.window.stackedWidget.view
+        finished = QtTest.QSignalSpy(view.aniFinished)
+        needs_navigation = self.window.stackedWidget.currentWidget() is not interface
+        self.window.switchTo(interface)
+        if needs_navigation:
+            self.assertTrue(finished.count() or finished.wait(2000),
+                            "Page navigation animation did not finish")
+        self.app.processEvents()
+        self.assertIs(self.window.stackedWidget.currentWidget(), interface)
+        self.assertTrue(interface.isVisible())
+
     def test_open_window_selector_updates_all_pages_and_persists(self):
         combo = self.window.advancedSettingInterface.theme_mode.comboBox
         self.assertEqual(combo.count(), 3)
@@ -188,14 +204,13 @@ class WindowThemeTests(ThemeTestCase):
                 self.assertEqual(qconfig.theme, mode)
             for interface in (self.window.homeInterface, self.window.timelineSyncInterface,
                               self.window.advancedSettingInterface):
-                self.window.switchTo(interface)
-                self.app.processEvents()
+                self.switch_to_settled_page(interface)
                 self.assertFalse(self.window.grab().isNull())
         self.assertFalse(hasattr(self.window, "check_update_timer"))
 
     def test_timeline_card_renders_dark_and_light_backgrounds(self):
         card = self.window.timelineSyncInterface.findChild(QtWidgets.QWidget, "timelineButtons")
-        self.window.switchTo(self.window.timelineSyncInterface)
+        self.switch_to_settled_page(self.window.timelineSyncInterface)
         brightness = []
         for mode in (Theme.LIGHT, Theme.DARK, Theme.LIGHT):
             self.set_mode(mode)
