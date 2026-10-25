@@ -78,6 +78,23 @@ msacm32.drv midimap explorerframe dataexchange twinapi.appcore twinapi
 LINUX_BASE = re.compile(r"^(?:ld-linux[^/]*\.so(?:\.\d+)*|lib(?:c|m|dl|pthread|rt|util|resolv|anl|BrokenLocale|nss_(?:files|dns|compat|hesiod))\.so(?:\.\d+)*)$")
 
 
+# Apple OS Cryptex overlays can supply frameworks such as WebKit. Only the
+# corresponding OS library subtrees are trusted, never the whole Preboot
+# volume, Cryptexes directory, or even the OS mount (which has other content).
+MACOS_OS_LIBRARY_ROOTS = (
+    '/System/Library', '/usr/lib',
+    '/System/Volumes/Preboot/Cryptexes/OS/System/Library',
+    '/System/Volumes/Preboot/Cryptexes/OS/usr/lib',
+)
+
+
+def _macos_os_library(path: str) -> bool:
+    # Keep the original spelling until _inside resolves symlinks on macOS:
+    # normalizing away '..' first could hide a symlink escape. On other hosts,
+    # _inside uses target-POSIX lexical containment, not host path semantics.
+    return any(_inside(path, base, 'Darwin') for base in MACOS_OS_LIBRARY_ROOTS)
+
+
 def library_violation(path: str, root: str, system: str, windows_root: str = r'C:\Windows') -> str | None:
     """Classify only ACTUALLY loaded images; optional unused plugins do not count."""
     if _inside(path, root, system):
@@ -93,7 +110,7 @@ def library_violation(path: str, root: str, system: str, windows_root: str = r'C
             if stem in WINDOWS_OS_DLLS or name.startswith(('api-ms-win-', 'ext-ms-win-')):
                 return None
     elif system == 'Darwin':
-        if any(_inside(normalized, base, system) for base in ('/System/Library', '/usr/lib')):
+        if _macos_os_library(path):
             return None
     elif system == 'Linux':
         if LINUX_BASE.fullmatch(posixpath.basename(normalized)) and any(_inside(normalized, base, system) for base in ('/lib', '/lib64', '/usr/lib', '/usr/lib64')):
@@ -435,7 +452,7 @@ def audit_macos_executables(bundle_root: Path, report_dir: Path, executables: li
             for dependency in dependencies:
                 # Mach-O load names use POSIX syntax even in cross-OS fixture
                 # inspection. Shared-cache OS dylibs may have no disk file.
-                if posixpath.isabs(dependency) and any(_inside(dependency, base, 'Darwin') for base in ('/usr/lib', '/System/Library')):
+                if posixpath.isabs(dependency) and _macos_os_library(dependency):
                     mapped[dependency] = 'macOS base OS'
                     continue
                 if posixpath.isabs(dependency) and os.name == 'nt':
@@ -451,7 +468,7 @@ def audit_macos_executables(bundle_root: Path, report_dir: Path, executables: li
                     errors.append(f'{binary.relative_to(root)} has unresolved native dependency: {dependency}')
                     continue
                 resolved = located.resolve()
-                if any(_inside(str(resolved), base, 'Darwin') for base in ('/usr/lib', '/System/Library')):
+                if _macos_os_library(str(resolved)):
                     mapped[dependency] = 'macOS base OS'
                 elif resolved.is_relative_to(root) and resolved.is_file():
                     mapped[dependency] = resolved.relative_to(root).as_posix()

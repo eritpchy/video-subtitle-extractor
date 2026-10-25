@@ -4,6 +4,7 @@ import platform
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 import scripts.standalone_runtime_probe as probe
@@ -51,6 +52,93 @@ def test_mac_base_os_allowed(path):
 @pytest.mark.parametrize('path', ['/opt/homebrew/lib/libomp.dylib', '/usr/local/lib/libpython3.12.dylib', '/Library/Frameworks/Python.framework/Python', '/usr/lib-other/libX.dylib'])
 def test_mac_external_dependency_rejected(path):
     assert library_violation(path, '/Applications/VSE.app', 'Darwin')
+
+
+MACOS_CRYPTEX = '/System/Volumes/Preboot/Cryptexes/OS'
+MACOS_CRYPTEX_CASES = [
+    # Actual framework paths reported by the packaged Cocoa GUI workload.
+    (f'{MACOS_CRYPTEX}/System/Library/Frameworks/{name}.framework/Versions/A/{name}', True)
+    for name in ('AuthenticationServices', 'WebKit', 'SafariServices')
+] + [
+    (f'{MACOS_CRYPTEX}/usr/lib/libobjc-trampolines.dylib', True),
+    (f'{MACOS_CRYPTEX}/usr/lib/swift/libswiftWebKit.dylib', True),
+    (f'{MACOS_CRYPTEX}/System/Library/../Library/Frameworks/WebKit.framework/WebKit', True),
+    (f'{MACOS_CRYPTEX}/tmp/libbad.dylib', False),
+    (f'{MACOS_CRYPTEX}/opt/homebrew/lib/libomp.dylib', False),
+    (f'{MACOS_CRYPTEX}/usr/local/lib/libpython3.12.dylib', False),
+    (f'{MACOS_CRYPTEX}/Users/example/libbad.dylib', False),
+    (f'{MACOS_CRYPTEX}/Library/Frameworks/Python.framework/Python', False),
+    (f'{MACOS_CRYPTEX}/System/Library-other/libbad.dylib', False),
+    (f'{MACOS_CRYPTEX}/usr/lib-other/libbad.dylib', False),
+    (f'{MACOS_CRYPTEX}-other/System/Library/libbad.dylib', False),
+    ('/System/Volumes/Preboot-other/Cryptexes/OS/System/Library/libbad.dylib', False),
+    ('/System/Volumes/Preboot/Cryptexes/Incoming/OS/System/Library/libbad.dylib', False),
+    ('/System/Volumes/Data/System/Library/libbad.dylib', False),
+    (f'{MACOS_CRYPTEX}/System/Library/../../tmp/libbad.dylib', False),
+    (f'{MACOS_CRYPTEX}/usr/lib/../../tmp/libbad.dylib', False),
+    ('/opt/homebrew/lib/libomp.dylib', False),
+    ('/usr/local/lib/libpython3.12.dylib', False),
+    ('/Users/example/libbad.dylib', False),
+]
+
+
+@pytest.mark.parametrize('path,allowed', MACOS_CRYPTEX_CASES)
+def test_mac_cryptex_loaded_library_boundaries(path, allowed):
+    assert (library_violation(path, '/Applications/VSE.app', 'Darwin') is None) == allowed
+
+
+@pytest.mark.parametrize('path,allowed', MACOS_CRYPTEX_CASES)
+def test_macho_cryptex_dependency_boundaries(tmp_path, monkeypatch, path, allowed):
+    exe = tmp_path / 'VideoSubFinderCli'
+    exe.touch()
+    monkeypatch.setattr(probe, 'macho_load_commands', lambda _: ([path], []))
+    if allowed:
+        result = probe.audit_macos_executables(tmp_path, tmp_path / 'reports', [exe])
+        assert result['executables'][exe.name][exe.name][path] == 'macOS base OS'
+    else:
+        with pytest.raises(RuntimeError, match='external/missing dependency'):
+            probe.audit_macos_executables(tmp_path, tmp_path / 'reports', [exe])
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX symlink resolution fixture')
+def test_mac_cryptex_canonical_alias_and_symlink_escape(tmp_path, monkeypatch):
+    # Exercise native POSIX resolution without writing to the real OS roots.
+    monkeypatch.setattr(probe, 'sys', SimpleNamespace(platform='darwin'))
+    cryptex = tmp_path / 'System/Volumes/Preboot/Cryptexes/OS'
+    mounted = tmp_path / 'mounted-os'
+    frameworks = mounted / 'System/Library/Frameworks'
+    frameworks.mkdir(parents=True)
+    (mounted / 'usr/lib').mkdir(parents=True)
+    cryptex.parent.mkdir(parents=True)
+    cryptex.symlink_to(mounted, target_is_directory=True)
+    monkeypatch.setattr(probe, 'MACOS_OS_LIBRARY_ROOTS',
+                        tuple(str(tmp_path / base.lstrip('/')) for base in probe.MACOS_OS_LIBRARY_ROOTS))
+    bundle = str(tmp_path / 'bundle')
+    for image in (frameworks / 'WebKit', cryptex / 'System/Library/Frameworks/WebKit'):
+        assert library_violation(str(image), bundle, 'Darwin') is None
+
+    outside = tmp_path / 'homebrew'
+    (outside / 'nested').mkdir(parents=True)
+    (outside / 'libbad.dylib').touch()
+    (frameworks / 'escape').symlink_to(outside / 'nested', target_is_directory=True)
+    (mounted / 'usr/lib/libbad.dylib').symlink_to(outside / 'libbad.dylib')
+    escaped = [cryptex / 'usr/lib/libbad.dylib',
+               cryptex / 'System/Library/Frameworks/escape/../libbad.dylib']
+    for image in escaped:
+        assert library_violation(str(image), bundle, 'Darwin')
+
+    # Both the direct-load and resolved @loader_path audit routes must reject
+    # symlinks even when their unexpanded spelling appears to be trusted.
+    exe = tmp_path / 'bundle/VideoSubFinderCli'
+    exe.parent.mkdir()
+    exe.touch()
+    dependencies = [str(image) for image in escaped]
+    dependencies += ['@loader_path/../' + str(image.relative_to(tmp_path)) for image in escaped]
+    monkeypatch.setattr(probe, 'macho_load_commands', lambda _: (dependencies, []))
+    with pytest.raises(RuntimeError, match='external/missing dependency'):
+        probe.audit_macos_executables(exe.parent, tmp_path / 'reports', [exe])
+    result = json.loads((tmp_path / 'reports/macos-native-imports.json').read_text())
+    assert len(result['errors']) == len(dependencies)
 
 
 def test_no_reports_fails_closed(tmp_path):

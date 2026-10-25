@@ -5,11 +5,175 @@ import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
+import zipfile
 
 from scripts import bundle_linux_runtime_libs as native
+from scripts.package_release import extract_checked
 
 
 class NativeClosureTests(unittest.TestCase):
+    def test_package_license_names_are_portable_deterministic_and_distinct(self):
+        packages = ['libatk-bridge2.0-0t64:amd64', 'libatk-bridge2.0-0t64-amd64',
+                    'libfoo+bar:amd64', 'libfoo-bar:amd64', 'libfoo:arm64',
+                    'con', 'aux', 'nul', 'package.', 'p' * 300]
+        names = [native.package_license_directory(package) for package in packages]
+        self.assertEqual(len(set(names)), len(packages))
+        for package, name in zip(packages, names):
+            with self.subTest(package=package):
+                self.assertEqual(name, native.package_license_directory(package))
+                self.assertRegex(name, r'^pkg-[a-z0-9.-]+-[a-f0-9]{64}$')
+                self.assertLess(len(name), 256)
+                self.assertNotIn(':', name)
+                self.assertFalse(name.endswith(('.', ' ')))
+
+    def test_unsafe_package_ids_are_rejected_before_reading_attribution(self):
+        packages = ['', '.', '..', '../escape', '/tmp/package', 'a\\b', '--help',
+                    'pkg:amd64:stream', 'pkg:../amd64', 'pkg:amd64/escape',
+                    'pkg_name', 'pkg name', 'pkg\x00name', 'PKG:amd64', 'pkg:']
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / 'libfixture.so'
+            for package in packages:
+                with self.subTest(package=package), patch.object(native, 'run', return_value=f'{package}: {source}\n'), patch.object(native, 'attribution_source') as attribution:
+                    with self.assertRaises((ValueError, RuntimeError)):
+                        native.package_provenance(source, Path(tmp) / 'dest')
+                    attribution.assert_not_called()
+
+    def test_multiarch_attribution_roundtrips_through_strict_archive_checks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            docs, common = root / 'doc', root / 'common-licenses'
+            common.mkdir()
+            package = 'libatk-bridge2.0-0t64:amd64'
+            copyright_file = docs / 'libatk-bridge2.0-0t64/copyright'
+            copyright_file.parent.mkdir(parents=True)
+            copyright_bytes = b'Original attribution\r\nSee /usr/share/common-licenses/GPL-2.\n\xff\x00'
+            license_bytes = b'Complete GPL-2 fixture\r\n\xff\x00'
+            copyright_file.write_bytes(copyright_bytes)
+            (common / 'GPL-2').write_bytes(license_bytes)
+            source = root / 'libatk-bridge-2.0.so.0'
+            dest = root / 'bundle/native-libs'
+            def query(*args):
+                if args[1] == '-S':
+                    return f'{package}: {args[2]}\n'
+                self.assertEqual(args[-1], package)
+                return package + '\n2.52.0\nat-spi2-core\n2.52.0\nhttps://example.test\n'
+            with patch.object(native, 'DOC_ROOT', docs), patch.object(native, 'COMMON_LICENSES_ROOT', common), patch.object(native, 'run', side_effect=query):
+                provenance = native.package_provenance(source, dest)
+                # Multiple library records from the same dpkg ID share attribution.
+                self.assertEqual(native.package_provenance(source, dest), provenance)
+            self.assertEqual(provenance['package'], package)
+            self.assertEqual(provenance['package_metadata'][0], package)
+            self.assertEqual(provenance['copyright_source'], str(copyright_file))
+            self.assertEqual(len(list((dest / 'licenses').iterdir())), 1)
+            license_dir = dest / 'licenses' / native.package_license_directory(package)
+            self.assertEqual((license_dir / 'copyright').read_bytes(), copyright_bytes)
+            self.assertEqual((license_dir / 'GPL-2').read_bytes(), license_bytes)
+            self.assertEqual((license_dir / 'package-id.txt').read_text(), package + '\n')
+            manifest = {'libraries': {}, 'attribution_hashes': {name: native.sha256(dest / name) for name in provenance['license_files']}}
+            (dest / 'manifest.json').write_text(json.dumps(manifest))
+            archive = root / 'bundle.zip'
+            with zipfile.ZipFile(archive, 'w') as output:
+                for path in dest.rglob('*'):
+                    if path.is_file():
+                        output.write(path, path.relative_to(root).as_posix())
+            extracted = extract_checked(archive, root / 'extracted')
+            self.assertEqual(native.verify_linux_libraries(extracted), manifest)
+            for name in provenance['license_files']:
+                self.assertEqual((extracted / 'native-libs' / name).read_bytes(), (dest / name).read_bytes())
+            # The old multiarch path must still fail; do not weaken ADS protection.
+            with zipfile.ZipFile(archive, 'w') as output:
+                output.writestr(f'bundle/native-libs/licenses/{package}/GPL-2', license_bytes)
+            with self.assertRaisesRegex(RuntimeError, 'Unsafe release archive member'):
+                extract_checked(archive, root / 'unsafe-extracted')
+
+    def test_package_directory_collision_fails_without_overwriting_attribution(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            docs, dest = root / 'doc', root / 'native-libs'
+            for package in ('libfoo+bar', 'libfoo-bar'):
+                copyright_file = docs / package / 'copyright'
+                copyright_file.parent.mkdir(parents=True)
+                copyright_file.write_text(package)
+            source = root / 'library.so'
+            with patch.object(native, 'DOC_ROOT', docs), patch.object(native, 'package_license_directory', return_value='forced-collision'), patch.object(native, 'run', return_value=f'libfoo+bar: {source}\n'):
+                native.package_provenance(source, dest)
+                with patch.object(native, 'run', return_value=f'libfoo-bar: {source}\n'):
+                    with self.assertRaisesRegex(ValueError, 'directory collision'):
+                        native.package_provenance(source, dest)
+            self.assertEqual((dest / 'licenses/forced-collision/copyright').read_text(), 'libfoo+bar')
+
+    def test_attribution_source_and_destination_symlink_escapes_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            docs, outside, dest = root / 'doc', root / 'outside', root / 'native-libs'
+            docs.mkdir()
+            outside.mkdir()
+            (outside / 'copyright').write_bytes(b'must not copy or overwrite')
+            (docs / 'libfixture').symlink_to(outside, target_is_directory=True)
+            source = root / 'library.so'
+            with patch.object(native, 'DOC_ROOT', docs), patch.object(native, 'run', return_value=f'libfixture:amd64: {source}\n'):
+                with self.assertRaisesRegex(ValueError, 'Escaping attribution source'):
+                    native.package_provenance(source, dest)
+                self.assertFalse(dest.exists())
+                (docs / 'libfixture').unlink()
+                (docs / 'libfixture').mkdir()
+                (docs / 'libfixture/copyright').write_bytes(b'valid attribution')
+                dest.mkdir()
+                (dest / 'licenses').symlink_to(outside, target_is_directory=True)
+                with self.assertRaisesRegex(ValueError, 'Escaping license destination'):
+                    native.package_provenance(source, dest)
+            self.assertEqual(list(outside.iterdir()), [outside / 'copyright'])
+            self.assertEqual((outside / 'copyright').read_bytes(), b'must not copy or overwrite')
+
+    def test_attribution_symlinks_stay_inside_document_or_license_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            licenses = root / 'common-licenses'
+            licenses.mkdir()
+            (licenses / 'GPL-2').write_bytes(b'complete license')
+            (licenses / 'GPL').symlink_to('GPL-2')
+            resolved = native.attribution_source(licenses, Path('GPL'))
+            self.assertEqual(resolved.read_bytes(), b'complete license')
+            outside = root / 'outside'
+            outside.write_bytes(b'private')
+            (licenses / 'escape').symlink_to(outside)
+            for name in ('escape', '../outside', str(outside)):
+                with self.subTest(name=name), self.assertRaises(ValueError):
+                    native.attribution_source(licenses, Path(name))
+
+    def test_copyright_may_link_to_allowlisted_common_license(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            docs, common = root / 'doc', root / 'common-licenses'
+            (docs / 'libfixture').mkdir(parents=True)
+            common.mkdir()
+            license_bytes = b'Full copyright and license attribution\r\n\xff'
+            (common / 'GPL-2').write_bytes(license_bytes)
+            (docs / 'libfixture/copyright').symlink_to('../../common-licenses/GPL-2')
+            source, dest = root / 'library.so', root / 'native-libs'
+            with patch.object(native, 'DOC_ROOT', docs), patch.object(native, 'COMMON_LICENSES_ROOT', common), patch.object(native, 'run', return_value=f'libfixture:amd64: {source}\n'):
+                record = native.package_provenance(source, dest)
+            copied = dest / next(name for name in record['license_files'] if name.endswith('/copyright'))
+            self.assertFalse(copied.is_symlink())
+            self.assertEqual(copied.read_bytes(), license_bytes)
+
+    def test_attribution_dedup_rejects_changed_bytes_and_symlink_targets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source, target = root / 'original', root / 'copied'
+            source.write_bytes(b'original license\x00\xff')
+            native.copy_attribution(source, target)
+            native.copy_attribution(source, target)
+            self.assertEqual(target.read_bytes(), source.read_bytes())
+            source.write_bytes(b'different license')
+            with self.assertRaisesRegex(ValueError, 'destination collision'):
+                native.copy_attribution(source, target)
+            self.assertEqual(target.read_bytes(), b'original license\x00\xff')
+            target.unlink()
+            target.symlink_to(source)
+            with self.assertRaisesRegex(ValueError, 'destination collision'):
+                native.copy_attribution(source, target)
+
     def test_origin_needed_resolves_within_staged_runtime(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / 'stage'

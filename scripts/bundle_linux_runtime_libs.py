@@ -19,6 +19,9 @@ import shutil
 import subprocess
 
 BASE = re.compile(r"^(?:ld-linux[^/]*\.so(?:\.\d+)*|lib(?:c|m|dl|pthread|rt|util|resolv|anl|BrokenLocale|nss_(?:files|dns|compat|hesiod))\.so(?:\.\d+)*)$")
+PACKAGE_ID = re.compile(r'[a-z0-9][a-z0-9+.-]+(?::[a-z0-9][a-z0-9-]*)?')
+DOC_ROOT = Path('/usr/share/doc')
+COMMON_LICENSES_ROOT = Path('/usr/share/common-licenses')
 
 
 def sha256(path: Path) -> str:
@@ -42,6 +45,40 @@ def safe_name(name: str) -> str:
     if not name or Path(name).name != name or name in {'.', '..'} or '\\' in name:
         raise ValueError(f'Unsafe library/package name: {name!r}')
     return name
+
+
+def package_license_directory(package: str) -> str:
+    """Keep dpkg IDs in provenance, never use them as portable path components.
+
+    The readable prefix is bounded; the full original ID's digest distinguishes
+    multiarch IDs and names that normalize alike (including '+' versus '-').
+    The fixed prefix/suffix also avoid Windows device names and trailing dots.
+    """
+    if not PACKAGE_ID.fullmatch(package):
+        raise ValueError(f'Unsafe Debian package ID: {package!r}')
+    label = re.sub(r'[^a-z0-9.-]', '-', package)[:64]
+    digest = hashlib.sha256(package.encode('ascii')).hexdigest()
+    return f'pkg-{label}-{digest}'
+
+
+def attribution_source(root: Path, relative: Path, *, allowed_roots: tuple[Path, ...] = ()) -> Path:
+    """Allow distribution doc/license symlinks only within known source roots."""
+    candidate = root / relative
+    if relative.is_absolute() or '..' in relative.parts:
+        raise ValueError(f'Unsafe attribution source: {candidate}')
+    resolved = candidate.resolve(strict=True)
+    if not any(resolved.is_relative_to(allowed.resolve(strict=True)) for allowed in (root, *allowed_roots)):
+        raise ValueError(f'Escaping attribution source: {candidate}')
+    if not resolved.is_file():
+        raise RuntimeError(f'Missing copyright/license attribution: {candidate}')
+    return candidate
+
+
+def copy_attribution(source: Path, target: Path) -> None:
+    """Deduplicate identical attribution without ever replacing other bytes."""
+    if target.is_symlink() or (target.exists() and sha256(target) != sha256(source)):
+        raise ValueError(f'Attribution destination collision: {target}')
+    shutil.copyfile(source, target)
 
 
 def staged_origin_dependency(name: str, binary: Path, root: Path) -> Path | None:
@@ -95,20 +132,28 @@ def package_provenance(source: Path, destination: Path) -> dict:
             break
     if not package:
         raise RuntimeError(f'No Debian package/license provenance for {source}')
-    safe_name(package)
-    copyright_file = Path('/usr/share/doc') / package.split(':')[0] / 'copyright'
-    if not copyright_file.is_file():
-        raise RuntimeError(f'Missing copyright attribution: {copyright_file}')
-    license_dir = destination / 'licenses' / package
+    directory = package_license_directory(package)
+    copyright_file = attribution_source(DOC_ROOT, Path(package.split(':')[0]) / 'copyright',
+                                        allowed_roots=(COMMON_LICENSES_ROOT,))
+    license_dir = destination / 'licenses' / directory
+    if (destination.is_symlink() or (destination / 'licenses').is_symlink()
+            or license_dir.is_symlink() or not license_dir.resolve().is_relative_to(destination.resolve())):
+        raise ValueError(f'Escaping license destination: {license_dir}')
     license_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(copyright_file, license_dir / 'copyright')
+    # Repeated libraries from the same package reuse one directory. Check the
+    # exact ID before reusing it, even in the unlikely event of a digest collision.
+    identity = license_dir / 'package-id.txt'
+    identity_bytes = (package + '\n').encode('ascii')
+    if identity.is_symlink() or (identity.exists() and identity.read_bytes() != identity_bytes):
+        raise ValueError(f'Package license directory collision: {package!r}')
+    identity.write_bytes(identity_bytes)
+    copy_attribution(copyright_file, license_dir / 'copyright')
     copyright_text = copyright_file.read_text(errors='replace')
-    for name in set(re.findall(r'/usr/share/common-licenses/([A-Za-z0-9.+_-]+)', copyright_text)):
-        common = Path('/usr/share/common-licenses') / name.rstrip('.')
-        if common.is_file():
-            shutil.copyfile(common, license_dir / common.name)
-        else:
-            raise RuntimeError(f'Attribution refers to missing common license {common}')
+    for name in sorted(set(re.findall(r'/usr/share/common-licenses/([A-Za-z0-9.+_-]+)', copyright_text))):
+        common = attribution_source(COMMON_LICENSES_ROOT, Path(safe_name(name.rstrip('.'))))
+        if common.name.casefold() in {'copyright', 'package-id.txt'}:
+            raise ValueError(f'Attribution destination collision: {common.name}')
+        copy_attribution(common, license_dir / common.name)
     metadata = run('dpkg-query', '-W', '-f=${binary:Package}\n${Version}\n${source:Package}\n${source:Version}\n${Homepage}\n', package).splitlines()
     return {'package': package, 'package_metadata': metadata, 'copyright_source': str(copyright_file),
             'license_files': [str(p.relative_to(destination)) for p in sorted(license_dir.iterdir())]}
