@@ -14,7 +14,12 @@ def test_committed_icon_matches_export_of_unchanged_rounded_source(tmp_path):
     output = tmp_path / "vse.ico"
     export_icon(source, output)
     assert source.read_bytes() == before
-    assert output.read_bytes() == (ROOT / "design/vse.ico").read_bytes()
+    # Native zlib encoders may compress identical PNG frames differently.
+    # Compare every decoded RGBA pixel, not platform-specific compressed bytes.
+    with Image.open(output) as actual, Image.open(ROOT / "design/vse.ico") as expected:
+        assert actual.ico.sizes() == expected.ico.sizes() == set(ICON_SIZES)
+        for size in ICON_SIZES:
+            assert actual.ico.getimage(size).convert("RGBA").tobytes() == expected.ico.getimage(size).convert("RGBA").tobytes()
 
 
 def test_all_packaged_icon_sizes_preserve_transparent_rounded_corners():
