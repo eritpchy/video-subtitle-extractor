@@ -55,4 +55,46 @@ class Assets(unittest.TestCase):
    with self.assertRaises(ValueError):m.extract_sources(archive,{'files':{'inference.json':'a'*64}},root/'out')
  def test_canonical_json(self):
   self.assertEqual(m.canonical({'z':'字幕','a':1}),m.canonical({'a':1,'z':'字幕'}));self.assertTrue(m.canonical({}).endswith(b'\n'))
+class PreflightTests(unittest.TestCase):
+ def pins(self):return m.load_pins(m.HERE/'model-source-pins.json')
+ def version(self,name):return m.declared_build_versions()[name.lower().replace('_','-').replace('.','-')]
+ def test_explicit_runtime_closure(self):
+  versions=m.declared_build_versions()
+  for name in ['packaging','polygraphy','httpx','httpcore','anyio','certifi','idna','h11','pillow','opt-einsum','networkx','typing-extensions','safetensors','setuptools']:
+   self.assertIn(name,versions)
+  self.assertEqual(versions['packaging'],'26.3')
+ def test_preflight_runs_real_cli_import_in_isolated_interpreter(self):
+  from subprocess import CompletedProcess
+  with patch.object(m.importlib.metadata,'version',side_effect=self.version),patch.object(m.subprocess,'run',return_value=CompletedProcess([],0,stdout='ok')) as run:
+   self.assertEqual(m.preflight_tools(self.pins())['packaging'],'26.3')
+  args,kw=run.call_args
+  self.assertEqual(args[0][:3],[m.sys.executable,'-I','-c'])
+  self.assertIn('paddle2onnx.command',args[0][3]);self.assertIn('paddle2onnx.paddle2onnx_cpp2py_export',args[0][3])
+  self.assertEqual(kw['env']['PIP_NO_INDEX'],'1');self.assertEqual(kw['env']['POLYGRAPHY_AUTOINSTALL_DEPS'],'0')
+ def test_missing_packaging_fails_before_import_probe(self):
+  def version(name):
+   if name=='packaging':raise m.importlib.metadata.PackageNotFoundError(name)
+   return self.version(name)
+  with patch.object(m.importlib.metadata,'version',side_effect=version),patch.object(m.subprocess,'run') as run:
+   with self.assertRaisesRegex(RuntimeError,'Missing conversion dependency packaging==26.3'):m.preflight_tools(self.pins())
+   run.assert_not_called()
+ def test_metadata_present_but_broken_import_is_caught(self):
+  from subprocess import CompletedProcess
+  with patch.object(m.importlib.metadata,'version',side_effect=self.version),patch.object(m.subprocess,'run',return_value=CompletedProcess([],1,stdout='ModuleNotFoundError: packaging')):
+   with self.assertRaisesRegex(RuntimeError,'preflight failed before downloading models'):m.preflight_tools(self.pins())
+ def test_preflight_timeout_is_actionable(self):
+  with patch.object(m.importlib.metadata,'version',side_effect=self.version),patch.object(m.subprocess,'run',side_effect=m.subprocess.TimeoutExpired('test',120)):
+   with self.assertRaisesRegex(RuntimeError,'preflight timed out'):m.preflight_tools(self.pins())
+ def test_preflight_failure_precedes_archive_access(self):
+  from types import SimpleNamespace
+  with patch.object(m,'check_versions'),patch.object(m,'preflight_tools',side_effect=RuntimeError('dependency failure')),patch.object(m,'get_archive') as archive:
+   with self.assertRaisesRegex(RuntimeError,'dependency failure'):m.prepare(SimpleNamespace(pins=m.HERE/'model-source-pins.json'))
+   archive.assert_not_called()
+ def test_dependency_environment_cannot_enable_autoinstall(self):
+  env=m.conversion_environment(PIP_NO_INDEX='0',POLYGRAPHY_AUTOINSTALL_DEPS='1')
+  self.assertEqual(env['PIP_NO_INDEX'],'1');self.assertEqual(env['POLYGRAPHY_AUTOINSTALL_DEPS'],'0')
+ def test_loose_requirements_rejected(self):
+  with tempfile.TemporaryDirectory() as t:
+   p=Path(t)/'r.txt';p.write_text('packaging>=24\n')
+   with self.assertRaises(ValueError):m.declared_build_versions(p)
 if __name__=='__main__':unittest.main()

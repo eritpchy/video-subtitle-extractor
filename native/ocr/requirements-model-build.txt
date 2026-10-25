@@ -5,3 +5,19 @@ onnx==1.17.0
 numpy==2.3.5
 PyYAML==6.0.2
 protobuf==7.36.2
+# Explicit converter/runtime closure. Paddle2ONNX 2.1.0 imports packaging but
+# omits it from Requires-Dist; do not rely on a pre-populated CI environment.
+packaging==26.3
+polygraphy==0.53.6
+httpx==0.28.1
+httpcore==1.0.9
+anyio==4.15.1
+certifi==2026.10.23
+idna==3.20
+h11==0.16.0
+Pillow==10.4.0
+opt_einsum==3.3.0
+networkx==3.7
+typing_extensions==4.16.0
+safetensors==0.8.0
+setuptools==80.10.2

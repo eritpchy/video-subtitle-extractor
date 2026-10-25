@@ -100,14 +100,18 @@ def test_native_bundle_omits_paddle_weights_and_selects_backend(tmp_path):
         assert 'native-cpu' in output.name
 
 
-def test_clean_container_direct_gui_uses_native_manifest(tmp_path):
+def test_clean_container_direct_gui_uses_native_manifest(tmp_path, monkeypatch):
     from scripts.verify_clean_linux_bundle import container_command
+    # This tests the Linux command contract on every CI host, including Windows.
+    # Production continues to read the actual Linux caller's UID/GID.
+    monkeypatch.setattr('scripts.verify_clean_linux_bundle.linux_identity', lambda: (1000, 1000))
     bundle=tmp_path/'bundle';bundle.mkdir()
     (bundle/'bundle-manifest.json').write_text(json.dumps({'ocr_backend':'native'}))
     command=container_command(bundle,tmp_path/'evidence','sha256:'+'a'*64,'runtime/bin/python3.12',['gui.py','--smoke-test'],'xcb-gui')
     assert 'VSE_OCR_BACKEND=native' in command
     assert 'VSE_NATIVE_OCR_ROOT=/bundle/native-ocr' in command
     assert 'ORT_DISABLE_TELEMETRY=1' in command
+    assert '1000:1000' in command
     (bundle/'bundle-manifest.json').write_text(json.dumps({'ocr_backend':'unknown'}))
     with pytest.raises(ValueError,match='Unknown'):
         container_command(bundle,tmp_path/'evidence','sha256:'+'a'*64,'runtime/bin/python3.12',['gui.py'],'xcb-gui')

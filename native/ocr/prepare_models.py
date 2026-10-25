@@ -39,6 +39,52 @@ def check_versions(pins):
   actual=importlib.metadata.version(package)
   if actual!=expected:raise RuntimeError(f'Tool version mismatch: {package} expected {expected}, got {actual}')
 
+def conversion_environment(**overrides):
+ # No converter path may invoke pip/automatic optimizer installation. -I below
+ # additionally prevents PYTHONPATH/user-site from masking missing dependencies.
+ env=dict(os.environ);env.update(overrides)
+ env.update(POLYGRAPHY_AUTOINSTALL_DEPS='0',PIP_NO_INDEX='1',
+            PYTHONNOUSERSITE='1',PYTHONHASHSEED='0',ORT_DISABLE_TELEMETRY='1')
+ return env
+
+def declared_build_versions(requirements=None):
+ versions={}
+ for raw in Path(requirements or HERE/'requirements-model-build.txt').read_text(encoding='utf-8').splitlines():
+  line=raw.strip()
+  if not line or line.startswith('#'):continue
+  match=re.fullmatch(r'([A-Za-z0-9_.-]+)==([A-Za-z0-9_.+-]+)',line)
+  if not match:raise ValueError('Conversion dependencies must all be explicit exact pins: '+line)
+  package,version=match.groups();key=package.lower().replace('_','-').replace('.','-')
+  if key in versions:raise ValueError('Duplicate conversion dependency: '+package)
+  versions[key]=version
+ return versions
+
+def preflight_tools(pins):
+ if sys.version_info[:2]!=(3,12):raise RuntimeError('Deterministic conversion requires Python 3.12')
+ declared=declared_build_versions()
+ for package,expected in declared.items():
+  try:actual=importlib.metadata.version(package)
+  except importlib.metadata.PackageNotFoundError as error:
+   raise RuntimeError(f'Missing conversion dependency {package}=={expected}; install requirements-model-build.txt in the isolated build environment') from error
+  if actual!=expected:raise RuntimeError(f'Conversion dependency mismatch: {package} expected {expected}, got {actual}')
+ for package,version in pins['tool_versions'].items():
+  if declared.get(package.lower().replace('_','-').replace('.','-'))!=version:
+   raise RuntimeError('Requirements conflict with model source tool pin: '+package)
+ # Metadata checks alone missed the upstream undeclared packaging import. Run
+ # the real command/C++ extension import under the exact isolated interpreter.
+ code="""import importlib,json
+modules=('packaging.version','numpy','yaml','google.protobuf','paddle','paddle2onnx.command','paddle2onnx.paddle2onnx_cpp2py_export','onnx','polygraphy')
+for name in modules: importlib.import_module(name)
+from paddle2onnx.command import arg_parser
+assert arg_parser().parse_args(['--optimize_tool','None']).optimize_tool == 'None'
+print(json.dumps({'imports':list(modules),'optimizer':'None','autoinstall':False}))
+"""
+ try:result=subprocess.run([sys.executable,'-I','-c',code],env=conversion_environment(),
+                           stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=120)
+ except subprocess.TimeoutExpired as error:raise RuntimeError('Conversion dependency preflight timed out before downloading models') from error
+ if result.returncode:raise RuntimeError('Conversion dependency preflight failed before downloading models; no packages were auto-installed:\n'+result.stdout[-6000:])
+ return declared
+
 def get_archive(row,cache,offline):
  destination=cache/(row['archive_sha256']+'.tar')
  if destination.exists():
@@ -86,7 +132,7 @@ def extract_sources(archive,row,destination):
  return destination
 
 def prepare(args):
- pins=load_pins(args.pins);check_versions(pins)
+ pins=load_pins(args.pins);check_versions(pins);preflight_tools(pins)
  import yaml,onnx
  output=args.output.resolve();output.parent.mkdir(parents=True,exist_ok=True)
  if output.exists() and (not output.is_dir() or any(output.iterdir())):raise ValueError('Output must be absent or empty; refusing replacement')
@@ -97,8 +143,8 @@ def prepare(args):
    archive=get_archive(row,cache,args.offline);source=extract_sources(archive,row,work/'source'/row['name']);cfg=yaml.safe_load((source/'inference.yml').read_text(encoding='utf-8'))
    if cfg.get('Global',{}).get('model_name')!=row['name']:raise ValueError('YAML model identity mismatch')
    configs[row['name']]=cfg;target=stage/'models'/(row['name']+'_infer.onnx')
-   command=[sys.executable,'-c','from paddle2onnx.command import main; main()','--model_dir',str(source),'--model_filename','inference.json','--params_filename','inference.pdiparams','--save_file',str(target),'--opset_version','17','--enable_auto_update_opset','False','--enable_onnx_checker','True','--optimize_tool','None']
-   env=dict(os.environ,POLYGRAPHY_AUTOINSTALL_DEPS='0',PIP_NO_INDEX='1',PYTHONNOUSERSITE='1',PYTHONHASHSEED='0',ORT_DISABLE_TELEMETRY='1',TMPDIR=str(work/'tmp'))
+   command=[sys.executable,'-I','-c','from paddle2onnx.command import main; main()','--model_dir',str(source),'--model_filename','inference.json','--params_filename','inference.pdiparams','--save_file',str(target),'--opset_version','17','--enable_auto_update_opset','False','--enable_onnx_checker','True','--optimize_tool','None']
+   env=conversion_environment(TMPDIR=str(work/'tmp'))
    result=subprocess.run(command,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
    if result.returncode:raise RuntimeError(f"Conversion failed: {row['name']}\n{result.stdout[-6000:]}")
    if target.stat().st_size!=row['onnx_bytes'] or digest(target)!=row['onnx_sha256']:raise ValueError(f"Converted model differs from pinned no-optimizer output: {row['name']}")
