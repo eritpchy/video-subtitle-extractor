@@ -62,3 +62,11 @@ frozen CPU parity cases: boxes/text identical, maximum confidence difference
 `2.384185791015625e-7` against the unchanged `1e-5` threshold. Actual Windows DML execution, GPU accuracy /
 performance and the final no-network portable Windows package remain independent
 Server-CI gates; no test on the user's computer is required or authorized.
+
+Source-level integration evidence also includes real Qt/Pillow/font and Chinese
+OCR checks; all `fast`/`accurate`/`auto` video-to-SRT modes using verified
+VideoSubFinder 6.10.7; and multiline/AV1/timeline regressions. These ran with
+explicit CPU selection, separately from default-DML GUI-only launch (which does
+not initialize inference sessions). The Windows evidence recorder accepts the
+DirectML profile but continues to label its Server acceptance as CPU-only and
+does not inherit the experimental native-worker SDK license gate.

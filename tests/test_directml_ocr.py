@@ -240,3 +240,19 @@ def test_native_version_cannot_hide_behind_old_python_metadata(monkeypatch):
     sys.modules['onnxruntime'].get_version_string = lambda: '1.24.4'
     with pytest.raises(RuntimeError, match='native 1.24.4'):
         module.OnnxSession('fixture.onnx', 'directml')
+
+
+def test_explicit_cpu_ignores_inapplicable_dml_device_selection(monkeypatch):
+    fake_ort(monkeypatch, available=[module.CPU_PROVIDER])
+    monkeypatch.setenv('VSE_DIRECTML_DEVICE_ID', 'not-a-gpu-index')
+    session = module.OnnxSession('fixture.onnx', 'cpu')
+    assert session.run('tensor') == 'tensor'
+    session.close()
+
+
+def test_bad_dml_device_is_rejected_before_profile_temp_creation(monkeypatch):
+    fake_ort(monkeypatch)
+    monkeypatch.setenv('VSE_DIRECTML_DEVICE_ID', '-1')
+    monkeypatch.setattr(module.tempfile, 'TemporaryDirectory', lambda **kwargs: pytest.fail('unexpected profile allocation'))
+    with pytest.raises(ValueError, match='non-negative'):
+        module.OnnxSession('fixture.onnx', 'directml')

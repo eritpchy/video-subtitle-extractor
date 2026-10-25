@@ -112,14 +112,14 @@ class OnnxSession:
         options.intra_op_num_threads = int(os.environ.get('VSE_OCR_CPU_THREADS', min(4, os.cpu_count() or 1)))
         if not 1 <= options.intra_op_num_threads <= 128:
             raise ValueError('VSE_OCR_CPU_THREADS must be in 1..128')
+        device = int(os.environ.get('VSE_DIRECTML_DEVICE_ID', '0')) if provider == 'directml' else 0
+        if device < 0:
+            raise ValueError('VSE_DIRECTML_DEVICE_ID must be non-negative')
         self._profile = tempfile.TemporaryDirectory(prefix='vse-directml-profile-') if provider == 'directml' else None
         self.evidence = {'requested_provider': requested, 'verified': provider == 'cpu', 'cpu_explicit': provider == 'cpu'}
         if self._profile:
             options.enable_profiling = True
             options.profile_file_prefix = str(Path(self._profile.name) / 'execution')
-        device = int(os.environ.get('VSE_DIRECTML_DEVICE_ID', '0'))
-        if device < 0:
-            raise ValueError('VSE_DIRECTML_DEVICE_ID must be non-negative')
         providers = [(DML_PROVIDER, {'device_id': str(device)})] if provider == 'directml' else [CPU_PROVIDER]
         try:
             self.session = ort.InferenceSession(str(path), sess_options=options, providers=providers)

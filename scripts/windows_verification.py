@@ -21,6 +21,7 @@ RUNNERS = {
     'windows-2022': {'product_type': 3, 'build': 20348, 'caption': 'Windows Server 2022'},
     'windows-2025': {'product_type': 3, 'build': 26100, 'caption': 'Windows Server 2025'},
 }
+PROFILES = ('paddle', 'native', 'directml')
 MACHINES = {0x014C: 'x86', 0x8664: 'x64', 0xAA64: 'arm64'}
 COMMON_STAGES = {
     'identity': 'Measured OS/build and native x64 process',
@@ -31,7 +32,7 @@ COMMON_STAGES = {
     'cli': 'CLI entrypoint',
     'ordinary': 'Ordinary video -> OCR -> SRT text and timing',
     'issues': 'Multiline, AV1 and timeline end-to-end regressions',
-    'package-build': 'Self-contained CPU archive build',
+    'package-build': 'Self-contained archive build (explicit CPU acceptance)',
     'package-verify': 'Extracted archive GUI, ordinary/multiline/AV1/timeline and runtime/PE isolation',
     'portable-environment': 'Actual launcher full regressions with clean PATH and simulated contaminated host',
 }
@@ -107,6 +108,8 @@ def write_json(path: Path, value: dict) -> None:
 
 
 def capture(path: Path, runner: str, profile: str) -> dict:
+    if profile not in PROFILES:
+        raise ValueError(f'Unknown Windows verification profile: {profile}')
     identity = {'schema': 1, 'captured_at': datetime.now(timezone.utc).isoformat(),
                 'runner_label': runner, 'profile': profile, 'validated': False,
                 'commit': os.environ.get('GITHUB_SHA'),
@@ -176,6 +179,8 @@ def system_theme_status(evidence: dict, identity: dict) -> str:
 
 
 def coverage(identity: dict, outcomes: dict, profile: str, system_theme=None) -> dict:
+    if profile not in PROFILES:
+        raise ValueError(f'Unknown Windows verification profile: {profile}')
     stages = dict(COMMON_STAGES)
     if profile == 'native':
         stages = {'native-toolchain': 'Verify installed x64 MSVC/CRT source compatibility and pinned Ninja',
@@ -191,12 +196,14 @@ def coverage(identity: dict, outcomes: dict, profile: str, system_theme=None) ->
         if key == 'system-theme':
             status = system_theme_status(system_theme, identity)
         records.append({'stage': key, 'scope': scope, 'outcome': outcome, 'status': status})
+    license_gate = outcomes.get('license-gate', 'not-run') if profile == 'native' else 'not-applicable'
     passed = (all(record['status'] == 'passed' for record in records)
-              and outcomes.get('license-gate') not in ('failure', 'cancelled'))
+              and license_gate not in ('failure', 'cancelled'))
     return {'schema': 1, 'profile': profile, 'execution_status': 'passed' if passed else 'incomplete-or-failed',
             'identity': identity, 'stages': records, 'limitations': LIMITS,
             'system_theme_evidence': system_theme or {'status': 'not-run'},
-            'customer_package_license_gate': outcomes.get('license-gate', 'not-applicable'),
+            'customer_package_license_gate': license_gate,
+            'directml_execution': 'not-verified-by-explicit-cpu-acceptance' if profile == 'directml' else 'not-applicable',
             'coverage_policy': 'server-ci-only-no-client-machine-access',
             'gpu_execution': 'outside-ci-only-scope', 'client_windows_execution': 'outside-ci-only-scope',
             'windows_arm_execution': 'outside-ci-only-scope',
@@ -206,7 +213,8 @@ def coverage(identity: dict, outcomes: dict, profile: str, system_theme=None) ->
 def dependency_versions() -> dict:
     versions = {}
     for name in ('PySide6', 'PySide6-Essentials', 'shiboken6', 'numpy', 'paddlepaddle',
-                 'paddleocr', 'paddlex', 'opencv-contrib-python', 'opencv-contrib-python-headless'):
+                 'paddlepaddle-gpu', 'paddleocr', 'paddlex', 'onnxruntime-directml',
+                 'opencv-contrib-python', 'opencv-contrib-python-headless'):
         try:
             versions[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
@@ -236,6 +244,9 @@ def markdown(report: dict) -> str:
     if report['profile'] == 'native':
         lines += ['', 'Customer-package VC license gate outcome: '
                   + report['customer_package_license_gate'] + ' (runner execution does not grant redistribution rights).']
+    if report['profile'] == 'directml':
+        lines += ['', 'Original DirectML runtime: this report covers explicit CPU acceptance only, '
+                  'not DirectML kernel execution or GPU hardware verification.']
     lines += ['', 'Coverage boundaries:', *('- ' + limit for limit in LIMITS), '']
     return '\n'.join(lines)
 
@@ -244,7 +255,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=('capture', 'summarize'))
     parser.add_argument('--runner', required=True, choices=tuple(RUNNERS))
-    parser.add_argument('--profile', required=True, choices=('paddle', 'native'))
+    parser.add_argument('--profile', required=True, choices=PROFILES)
     parser.add_argument('--output', type=Path, default=Path('test-results/windows'))
     parser.add_argument('--system-theme-report', type=Path)
     args = parser.parse_args(argv)
