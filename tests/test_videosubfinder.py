@@ -198,7 +198,7 @@ def test_verify_version_legacy_crash_and_mismatch(monkeypatch):
         vsf.verify_binary("fake")
 
 
-@pytest.mark.parametrize("reported", ["6.10", "6.10.5", "6.10.6", "6.10.7"])
+@pytest.mark.parametrize("reported", ["6.10", "6.10.5", "6.10.6", "6.10.7", "6.10.8"])
 def test_patch_release_version_must_match_exactly(monkeypatch, reported):
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw:
                         subprocess.CompletedProcess(a, 0, f"VideoSubFinderCli {reported}\n"))

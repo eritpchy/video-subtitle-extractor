@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Real video -> VideoSubFinder -> PP-OCRv6 -> SRT smoke regression.
 
-Requires installed runtime dependencies, a verified VSF 6.10.6 runtime, and real
+Requires installed runtime dependencies, a verified VSF 6.10.7 runtime, and real
 PP-OCRv6 small models. No network or mocks are used by the fixture itself.
 """
 import argparse

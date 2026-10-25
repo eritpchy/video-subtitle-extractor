@@ -14,7 +14,7 @@ import re
 import subprocess
 from typing import Callable, Optional
 
-VSF_VERSION = "6.10.6"
+VSF_VERSION = "6.10.7"
 VSF_RELEASE_BASE = "https://github.com/eritpchy/videosubfinder-cli/releases/download"
 _FRAME_RE = re.compile(r"\bFrame:\s+(\d+)_(\d+)_(\d+)_(\d+)__")
 _PROGRESS_RE = re.compile(r"\bProgress:\s*(\d+(?:\.\d+)?)%")

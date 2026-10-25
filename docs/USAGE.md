@@ -2,7 +2,7 @@
 
 This fork integrates upstream `YaoFANGUK/video-subtitle-extractor` through
 `85746f7`, genuine PP-OCRv6 small/medium inference models, and the pinned
-`eritpchy/videosubfinder-cli` v6.10.6 release. A version string in source is not
+`eritpchy/videosubfinder-cli` v6.10.7 release. A version string in source is not
 evidence that a GitHub release or all platform checks have completed.
 
 ## Run a one-click package

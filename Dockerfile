@@ -39,7 +39,7 @@ COPY gui.py ./
 COPY scripts ./scripts
 COPY LICENSE ./
 
-ARG VSF_VERSION=6.10.6
+ARG VSF_VERSION=6.10.7
 RUN python scripts/install_videosubfinder.py --version "$VSF_VERSION" \
     && python scripts/install_videosubfinder.py --verify-only \
     && python -m backend.tools.model_download --tiers small medium --output backend/models/V6 \

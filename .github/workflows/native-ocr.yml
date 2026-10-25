@@ -9,6 +9,7 @@ on:
         default: false
         type: boolean
   push:
+    branches: ['**']
     paths:
       - 'native/ocr/**'
       - 'requirements*.txt'
@@ -331,7 +332,7 @@ jobs:
         run: >-
           python -c "import pathlib,subprocess,sys; subprocess.run([sys.executable,'-m','pip','install','--no-index','--no-deps','--no-compile',*map(str,sorted(pathlib.Path('build/wheelhouse').glob('*.whl')))],check=True)"
       - name: Install and verify fixed VideoSubFinder release
-        run: python scripts/install_videosubfinder.py --version 6.10.6
+        run: python scripts/install_videosubfinder.py --version 6.10.7
       - name: Native adapter and packaging regression tests
         id: source-tests
         env:

@@ -9,7 +9,7 @@ CI and native package verification for the exact release commit.
 - Merge upstream changes through `85746f7`.
 - Genuine PP-OCRv6 small and medium models, with pinned archive/file checksums,
   verified offline bundles and explicit legacy recognizers for other languages.
-- VideoSubFinder CLI v6.10.6 on Linux, Windows and macOS, using verified portable
+- VideoSubFinder CLI v6.10.7 on Linux, Windows and macOS, using verified portable
   downloads and preserved VSE settings.
 - Persistent light, dark and system appearance, including live updates, task
   status colors, logs and timeline controls.
@@ -24,6 +24,10 @@ CI and native package verification for the exact release commit.
   and avoid hanging during error shutdown.
 - Read VSF stderr through completion, validate exit status, order frame events
   correctly, and handle paths containing spaces or Unicode.
+- Prevent intermittent subtitle loss when concurrent VSF progress/diagnostic
+  writes surround a frame event: preserve complete embedded records in VSE and
+  ship the v6.10.7 producer-side record-framing fix. Keep strict two-caption
+  AV1 text and timing checks; no OCR thresholds or fixtures are weakened.
 - Protect existing/concurrently created output files unless overwrite is
   explicit. Keep original subtitles intact after failed extraction.
 - Work around a verified Paddle 3.3.1 CPU oneDNN/PIR incompatibility by disabling

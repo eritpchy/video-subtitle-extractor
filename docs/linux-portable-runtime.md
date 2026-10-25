@@ -141,8 +141,9 @@ Retain the entire output directory on CI success **or failure**. A local unit-te
 pass only proves command construction/log validation, not this container gate.
 
 The clean container deliberately retains `PATH=/usr/bin:/bin` **after** its
-no-Python/no-Qt baseline assertion. The verified VSF 6.10.6 shell wrapper requires
-the base OS `dirname` utility; shell/coreutils are OS facilities, not inference
+no-Python/no-Qt baseline assertion. VSF 6.10.7 retains the same `dirname`-based
+shell launcher previously verified for 6.10.6; the new checksum-verified wrapper
+has also been inspected and run on Linux. Shell/coreutils are OS facilities, not inference
 dependencies. The Paddle profile additionally uses the OS ldd/Bash/awk pipeline
 described above; the non-glibc libraries used by these subprocesses are **not**
 exempt from the loader audit. The bundled interpreter is always invoked by its

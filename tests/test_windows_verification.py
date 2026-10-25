@@ -191,6 +191,23 @@ class CoverageTests(unittest.TestCase):
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_native_push_covers_all_branches_but_not_release_tags(self):
+        text = (ROOT / '.github/workflows/native-ocr.yml').read_text()
+        push = text.split('  push:\n', 1)[1].split('  pull_request:\n', 1)[0]
+        # An explicit branches filter excludes tag pushes while '**' keeps
+        # slash-containing branches such as release/2.3.0 in the existing CI.
+        self.assertIn("    branches: ['**']\n", push)
+        self.assertNotRegex(push, r'(?m)^    (?:tags|tags-ignore|branches-ignore):')
+        expected_paths = ['native/ocr/**', 'requirements*.txt', 'backend/**', 'ui/**',
+                          'gui.py', 'scripts/**', 'tests/**', '.github/workflows/native-ocr.yml']
+        pull_request = text.split('  pull_request:\n', 1)[1].split('\npermissions:', 1)[0]
+        for section in (push, pull_request):
+            self.assertEqual(re.findall(r"^      - '(.+)'$", section, re.M), expected_paths)
+        dispatch = text.split('  workflow_dispatch:\n', 1)[1].split('  push:\n', 1)[0]
+        self.assertIn('acknowledge_vc_redistribution_license:', dispatch)
+        self.assertIn('        default: false\n', dispatch)
+        self.assertIn('        type: boolean\n', dispatch)
+
     def test_both_cpu_profiles_run_both_real_server_versions_in_parallel(self):
         for name in ('ci.yml', 'native-ocr.yml'):
             text = (ROOT / '.github/workflows' / name).read_text()

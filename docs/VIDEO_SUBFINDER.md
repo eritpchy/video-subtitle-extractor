@@ -1,6 +1,6 @@
 # VideoSubFinder CLI integration
 
-VSE 2.3.0 uses the official `eritpchy/videosubfinder-cli` **v6.10.6** release on
+VSE 2.3.0 uses the official `eritpchy/videosubfinder-cli` **v6.10.7** release on
 Linux, Windows and macOS. The CLI's version was aligned with upstream, so older
 fork tags with a higher-looking version must not be selected by sorting tags.
 The old bundled Windows GUI executable is not used as a CLI fallback.
@@ -13,7 +13,7 @@ python scripts/install_videosubfinder.py --verify-only
 ```
 
 The installer selects the native x64/arm64 release and downloads `SHA256SUMS`
-from the same official release. The default v6.10.6 manifest is itself pinned
+from the same official release. The default v6.10.7 manifest is itself pinned
 by SHA-256 in `backend/tools/videosubfinder_release.json`; that locks every
 archive listed in the manifest, rather than trusting a mutable download alone.
 It then checks the archive, rejects unsafe archive paths and links, and validates
@@ -22,14 +22,16 @@ installation. Missing releases, changed manifests and checksum/version
 mismatches fail without selecting a different release or replacing the old
 installation. It does not use the GitHub API or require a GitHub token.
 
-The selected [stable v6.10.6 release](https://github.com/eritpchy/videosubfinder-cli/releases/tag/v6.10.6)
-was published on 2026-10-25 at 09:35:45 UTC from tag commit
-`71b309c8ab39c49c226c145dcbbca04c00ec9ce1`. Its 17 archive digests were checked
-against the official manifest and GitHub asset digests. This release includes
-the AV1 support and explicit decoder-failure diagnostics. Upstream portable CPU
-and build checks passed; the optional CUDA package's CPU-path/build checks do
-not certify actual GPU execution. Historical v6.10/v6.10.5 evidence stays tied
-to those versions, not relabeled as v6.10.6 verification.
+The selected [stable v6.10.7 release](https://github.com/eritpchy/videosubfinder-cli/releases/tag/v6.10.7)
+was published on 2026-10-25 at 19:51:10 UTC from tag commit
+`43d87622a783229fe5865777e343ced09e21d654`. Its 17 archive digests were checked
+against the official manifest and GitHub asset digests. In addition to AV1
+support and explicit decoder-failure diagnostics, this release serializes
+complete frame/progress records and newline-terminates diagnostics so concurrent
+output cannot hide a subtitle event. Its [tag CI run](https://github.com/eritpchy/videosubfinder-cli/actions/runs/40225772644)
+passed all 60 jobs on attempt 2; the optional CUDA package's CPU-path/build
+checks do not certify actual GPU execution. Historical v6.10/v6.10.5/v6.10.6
+evidence stays tied to those versions, not relabeled as v6.10.7 verification.
 
 Installed files remain together in `backend/subfinder/<platform>/<arch>/`.
 Linux and Windows CPU releases are static; macOS includes its `lib` directory.
@@ -76,6 +78,9 @@ Both output streams are drained so a full pipe cannot deadlock the child.
 and exit code zero. Decoder/startup errors propagate instead of producing a
 false successful extraction. Frame timestamps include zero, are deduplicated and
 sorted, and convert to frame indices using milliseconds × FPS / 1000.
+The consumer also retains complete frame records embedded in legacy mixed
+log/progress lines. This guards the observed v6.10.6 AV1 subtitle-loss case
+without changing OCR models, confidence thresholds or strict E2E assertions.
 
 ## Tests
 
