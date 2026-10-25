@@ -103,14 +103,22 @@ class PackageTests(unittest.TestCase):
                 self.assertIn("backend/subfinder/linux/x64/VideoSubFinderCli", manifest["files"])
 
     def test_archive_rejects_escape_and_symlink(self):
-        for name in ("../escape", "/absolute", "root/../../escape", "C:/escape", "root\\escape"):
+        for name in ("../escape", "/absolute", "root/../../escape", "C:/escape", "root\\escape", "root/file\x00hidden"):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 archive_path = root / "bad.zip"
                 with zipfile.ZipFile(archive_path, "w") as archive:
-                    archive.writestr(name, "bad")
-                with self.assertRaises(RuntimeError):
+                    # ZipInfo(name) normalizes backslashes on Windows. Set the
+                    # actual on-disk member name after construction instead.
+                    info = zipfile.ZipInfo("placeholder")
+                    info.filename = info.orig_filename = name
+                    archive.writestr(info, "bad")
+                self.assertGreaterEqual(archive_path.read_bytes().count(name.encode("ascii")), 2)
+                with zipfile.ZipFile(archive_path) as archive:
+                    self.assertEqual(archive.infolist()[0].orig_filename, name)
+                with self.assertRaisesRegex(RuntimeError, "Unsafe release archive member"):
                     extract_checked(archive_path, root / "out")
+                self.assertFalse((root / "out").exists())
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             archive_path = root / "link.zip"
@@ -121,6 +129,17 @@ class PackageTests(unittest.TestCase):
                 archive.writestr(info, "/tmp/target")
             with self.assertRaises(RuntimeError):
                 extract_checked(archive_path, root / "out")
+
+    def test_archive_checks_raw_name_before_platform_normalization(self):
+        info = zipfile.ZipInfo("placeholder")
+        info.orig_filename = "root\\escape"
+        info.filename = "root/escape"  # Shape returned by zipfile on Windows.
+        with patch("scripts.package_release.zipfile.ZipFile") as archive_type:
+            archive = archive_type.return_value.__enter__.return_value
+            archive.infolist.return_value = [info]
+            with self.assertRaisesRegex(RuntimeError, "Unsafe release archive member"):
+                extract_checked(Path("unused.zip"), Path("unused-output"))
+            archive.extractall.assert_not_called()
 
     @unittest.skipIf(os.name == "nt", "POSIX execute permission is not meaningful on Windows")
     def test_archive_retains_executable_permission(self):

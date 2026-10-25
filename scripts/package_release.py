@@ -132,10 +132,15 @@ def extract_checked(archive_path: Path, destination: Path) -> Path:
     with zipfile.ZipFile(archive_path) as archive:
         roots = set()
         for item in archive.infolist():
-            path = PurePosixPath(item.filename)
+            # ZipInfo.filename is normalized on Windows and truncates at NUL.
+            # Validate the original archive bytes' decoded name, not the
+            # already-sanitized path, before extracting any archive member.
+            raw_name = item.orig_filename
+            path = PurePosixPath(raw_name)
             mode = item.external_attr >> 16
-            if path.is_absolute() or ".." in path.parts or "\\" in item.filename or ":" in item.filename or stat.S_ISLNK(mode):
-                raise RuntimeError(f"Unsafe release archive member: {item.filename}")
+            if (raw_name != item.filename or "\x00" in raw_name or path.is_absolute()
+                    or ".." in path.parts or "\\" in raw_name or ":" in raw_name or stat.S_ISLNK(mode)):
+                raise RuntimeError(f"Unsafe release archive member: {raw_name!r}")
             if not path.parts:
                 raise RuntimeError("Empty release archive member")
             roots.add(path.parts[0])

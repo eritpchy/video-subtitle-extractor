@@ -10,8 +10,11 @@
 import sys
 import os
 import configparser
-import cv2
 import multiprocessing
+from ui.qt_runtime import prepare_qt_runtime
+
+# OpenCV's Linux wheel otherwise points Qt 6 at incompatible Qt 5 xcb plugins.
+prepare_qt_runtime()
 
 # Keep package/source smoke runs offline and away from the user's preferences.
 _smoke_config_directory = None

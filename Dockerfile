@@ -10,6 +10,7 @@ ENV PYTHONUNBUFFERED=1 \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        ca-certificates libgl1 libegl1 libglib2.0-0 libdbus-1-3 libxkbcommon0 libgomp1 \
+       libfreetype6 libfontconfig1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -32,6 +33,10 @@ RUN python scripts/install_videosubfinder.py --version "$VSF_VERSION" \
     && mkdir -p /app/output /app/config /data /home/vse/.cache \
     && chown -R vse:vse /app/output /app/config /home/vse /data
 
+# Import and exercise the heavy native runtime as the actual unprivileged user.
+# CLI --help/--version intentionally skip these imports and cannot catch missing
+# Qt/Paddle shared libraries (for example FreeType/fontconfig).
 USER vse
+RUN python scripts/check_runtime.py
 ENTRYPOINT ["python", "-m", "backend.cli"]
 CMD ["--help"]
