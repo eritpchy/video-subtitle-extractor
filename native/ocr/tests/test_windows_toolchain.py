@@ -1,4 +1,4 @@
-"""Windows toolchain policy/command tests; no Windows execution or downloads."""
+"""Pure toolchain policy tests plus Windows-only cmd fixtures; no downloads."""
 import json
 import os
 from pathlib import Path
@@ -14,6 +14,22 @@ import build_opencv
 import windows_toolchain as toolchain
 
 RUNTIME = '14.44.35211.0'
+# Deliberately not a generic path word (macOS legitimately uses /private/var).
+LEAK_SENTINEL = 'VSE_TEST_ONLY_SECRET_8fa6be7d4e2c901b'
+
+
+def fixture_executables(tmp_path):
+    """Use native canonical paths, not POSIX-rooted strings on Windows drives."""
+    root = tmp_path / 'Pinned Build Tools with spaces'
+    root.mkdir()
+    paths = {}
+    for name in ('cmake', 'ninja', 'cl'):
+        path = root / (name + '.exe')
+        path.write_text('test fixture; never executed')
+        paths[name] = str(path.resolve(strict=True))
+        assert Path(paths[name]).is_absolute()
+        assert Path(paths[name]).resolve(strict=True) == Path(paths[name])
+    return paths
 
 
 def header(version=RUNTIME):
@@ -116,14 +132,15 @@ def test_active_environment_rejects_shadowed_or_inconsistent_tools(tmp_path, cha
 def test_prepare_discovers_installed_version_and_preserves_pinned_build_tools(tmp_path):
     installation, directory, environment = fixture_tools(tmp_path)
     fake_os = SimpleNamespace(name='nt', environ={'ProgramFiles(x86)': str(tmp_path), 'ComSpec': 'cmd.exe'})
-    build_tools = {name: {'path': str(tmp_path / 'Pinned Python Scripts' / (name + '.exe')), 'version': value}
+    paths = fixture_executables(tmp_path)
+    build_tools = {name: {'path': paths[name], 'version': value}
                    for name, value in [('cmake', '4.1.2'), ('ninja', '1.13.0')]}
     discovery = json.dumps([{'installationPath': str(installation), 'installationVersion': '17.14.fixture'}])
     def initialize(command, **kwargs):
         marker = re.search(r'echo (VSE_TOOLCHAIN_ENV_[0-9a-f]+)&&', command)[1]
         env_text = '\r\n'.join(key + '=' + value for key, value in environment.items())
         stdout = ('initializing exact toolset\r\n' + marker + '\r\n' + env_text +
-                  '\r\nSECRET_TOKEN=must-not-persist').encode('utf-16-le')
+                  '\r\nSECRET_TOKEN=' + LEAK_SENTINEL).encode('utf-16-le')
         return SimpleNamespace(stdout=stdout, stderr=b'', returncode=0)
     report = {}
     with patch.object(toolchain, 'os', fake_os), \
@@ -141,12 +158,12 @@ def test_prepare_discovers_installed_version_and_preserves_pinned_build_tools(tm
     assert run.call_args.kwargs['executable'] == 'cmd.exe'
     assert run.call_args.kwargs['shell'] is False
     assert run.call_args.kwargs['check'] is False
-    assert result['PATH'].startswith(str(tmp_path / 'Pinned Python Scripts') + ';')
+    assert result['PATH'].startswith(str(Path(paths['cmake']).parent) + ';')
     assert result['CMAKE_GENERATOR'] == 'Ninja'
     assert report['selected']['crt']['version'] == RUNTIME
     assert report['initialization']['stdout_diagnostics'] == 'initializing exact toolset'
     assert report['initialization']['returncode'] == 0
-    assert 'must-not-persist' not in json.dumps(report)
+    assert LEAK_SENTINEL not in json.dumps(report)
     assert 'SECRET_TOKEN' not in result
 
 
@@ -180,33 +197,38 @@ def test_environment_exports_only_required_build_values(tmp_path):
         toolchain.export_environment(output, {'SECRET_TOKEN': 'must not export'})
 
 
-def test_build_tool_versions_must_match_committed_wheels():
-    with patch.object(toolchain.shutil, 'which', return_value='/installed/cmake'), \
+def test_build_tool_versions_must_match_committed_wheels(tmp_path):
+    paths = fixture_executables(tmp_path)
+    with patch.object(toolchain.shutil, 'which', return_value=paths['cmake']), \
             patch.object(toolchain.subprocess, 'check_output', return_value='cmake version 3.31.6\n'), \
             pytest.raises(RuntimeError, match='differs from pinned 4.1.2'):
         toolchain.pinned_build_tools()
 
 
-def test_pinned_ninja_wheel_jobserver_suffix_is_not_version_drift():
-    with patch.object(toolchain.shutil, 'which', side_effect=lambda name: '/pinned/' + name), \
+def test_pinned_ninja_wheel_jobserver_suffix_is_not_version_drift(tmp_path):
+    paths = fixture_executables(tmp_path)
+    with patch.object(toolchain.shutil, 'which', side_effect=paths.__getitem__), \
             patch.object(toolchain.subprocess, 'check_output', side_effect=[
                 'cmake version 4.1.2\n', '1.13.0.git.kitware.jobserver-pipe-1\n']):
         result = toolchain.pinned_build_tools()
     assert result['ninja']['package_version'] == '1.13.0'
     assert result['ninja']['version'] == '1.13.0.git.kitware.jobserver-pipe-1'
+    assert result['ninja']['path'] == paths['ninja']
+    assert result['cmake']['path'] == paths['cmake']
 
 
 def test_opencv_explicit_ninja_and_shared_crt_for_static_libraries(tmp_path):
+    paths = fixture_executables(tmp_path)
     with patch.object(build_opencv.platform, 'system', return_value='Windows'), \
-            patch.object(toolchain, 'validate_environment', return_value={'compiler': {'path': 'C:/verified/cl.exe'}}), \
-            patch.object(toolchain, 'pinned_build_tools', return_value={'ninja': {'path': 'C:/pinned/ninja.exe'}}), \
+            patch.object(toolchain, 'validate_environment', return_value={'compiler': {'path': paths['cl']}}), \
+            patch.object(toolchain, 'pinned_build_tools', return_value={'ninja': {'path': paths['ninja']}}), \
             patch.object(build_opencv.subprocess, 'run') as run:
         build_opencv.build(tmp_path / 'src', tmp_path / 'build', tmp_path / 'prefix', generator='Ninja')
     command = run.call_args_list[0].args[0]
     assert command[command.index('-G') + 1] == 'Ninja'
     for flag in ('-DBUILD_WITH_STATIC_CRT=OFF', '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL',
-                 '-DCMAKE_C_COMPILER=C:/verified/cl.exe', '-DCMAKE_CXX_COMPILER=C:/verified/cl.exe',
-                 '-DCMAKE_MAKE_PROGRAM=C:/pinned/ninja.exe'):
+                 '-DCMAKE_C_COMPILER=' + paths['cl'], '-DCMAKE_CXX_COMPILER=' + paths['cl'],
+                 '-DCMAKE_MAKE_PROGRAM=' + paths['ninja']):
         assert flag in command
 
 
@@ -218,32 +240,41 @@ def test_windows_build_requires_explicit_ninja_before_model_or_network_work():
         build.build(args)
 
 
-def test_worker_configuration_uses_the_same_verified_compiler_ninja_and_dll_crt(tmp_path, monkeypatch):
+@pytest.mark.parametrize('matching_cmake', [True, False])
+def test_worker_configuration_uses_the_same_verified_compiler_ninja_and_dll_crt(tmp_path, monkeypatch, matching_cmake):
     monkeypatch.setenv('TMPDIR', str(tmp_path))
+    paths = fixture_executables(tmp_path)
+    alternate_cmake = tmp_path / 'Unverified CMake.exe'
+    alternate_cmake.write_text('another fixture; never executed')
     args = SimpleNamespace(platform='windows', arch='x64', runner_test_only=True,
                            acknowledge_vc_redistribution_license=False, vc_runtime_dir=None,
                            vc_license=None, generator='Ninja', models=tmp_path, output=tmp_path / 'output',
                            cmake='cmake', work_dir=tmp_path / 'work', cache=tmp_path / 'cache', offline=True, jobs=3)
-    build_tools = {'cmake': {'path': '/pinned/cmake'}, 'ninja': {'path': '/pinned/ninja'}}
+    build_tools = {name: {'path': paths[name]} for name in ('cmake', 'ninja')}
     class StopAfterConfigure(Exception):
         pass
     with patch.object(build, 'native_target'), patch.object(build, 'verify_models', return_value=[]), \
-            patch.object(toolchain, 'validate_environment', return_value={'compiler': {'path': 'C:/verified/cl.exe'}}), \
+            patch.object(toolchain, 'validate_environment', return_value={'compiler': {'path': paths['cl']}}), \
             patch.object(toolchain, 'pinned_build_tools', return_value=build_tools), \
-            patch.object(build.shutil, 'which', return_value='/pinned/cmake'), \
+            patch.object(build.shutil, 'which', return_value=paths['cmake'] if matching_cmake else str(alternate_cmake.resolve(strict=True))), \
             patch.object(build, 'fetch_sources', return_value=tmp_path / 'source'), \
             patch.object(build, 'fetch_ort', return_value=tmp_path / 'sdk'), \
             patch.object(build, 'build_opencv') as opencv, \
             patch.object(build, 'opencv_config', return_value=tmp_path / 'opencv'), \
             patch.object(build.subprocess, 'run', side_effect=StopAfterConfigure) as run, \
-            pytest.raises(StopAfterConfigure):
+            pytest.raises(StopAfterConfigure if matching_cmake else ValueError,
+                          match=None if matching_cmake else '--cmake must select the verified pinned CMake executable'):
         build.build(args)
+    if not matching_cmake:
+        opencv.assert_not_called()
+        run.assert_not_called()
+        return
     assert opencv.call_args.args[-1] == 'Ninja'
     command = run.call_args.args[0]
     assert command[command.index('-G') + 1] == 'Ninja'
-    assert '-DCMAKE_CXX_COMPILER=C:/verified/cl.exe' in command
+    assert '-DCMAKE_CXX_COMPILER=' + paths['cl'] in command
     assert '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL' in command
-    assert '-DCMAKE_MAKE_PROGRAM=/pinned/ninja' in command
+    assert '-DCMAKE_MAKE_PROGRAM=' + paths['ninja'] in command
 
 
 def test_workflow_initializes_both_server_toolchains_and_records_outcome():
@@ -280,35 +311,37 @@ def test_cmd_rejects_untrusted_expansion_and_control_characters(bad):
 
 
 def test_failed_initialization_preserves_diagnostics_without_environment_secrets(tmp_path):
-    installation, _, _ = fixture_tools(tmp_path)
+    # Legitimate paths containing these words must not trip leak assertions.
+    installation, _, _ = fixture_tools(tmp_path / 'private' / 'var' / 'secret')
     selected = {'installation': str(installation), 'toolset': '14.44.35207'}
     report = {}
-    failed = SimpleNamespace(returncode=7, stdout='[ERROR] Could not initialize VC\r\nPRIVATE_TOKEN=secret'.encode('utf-16-le'),
-                             stderr=b'initializer diagnostic: secret')
-    with patch.object(toolchain, 'os', SimpleNamespace(environ={'ComSpec': 'cmd.exe', 'PRIVATE_TOKEN': 'secret'})), \
+    failed = SimpleNamespace(returncode=7, stdout=('[ERROR] Could not initialize VC\r\nPRIVATE_TOKEN=' + LEAK_SENTINEL).encode('utf-16-le'),
+                             stderr=('initializer diagnostic: ' + LEAK_SENTINEL).encode())
+    with patch.object(toolchain, 'os', SimpleNamespace(environ={'ComSpec': 'cmd.exe', 'PRIVATE_TOKEN': LEAK_SENTINEL})), \
             patch.object(toolchain.subprocess, 'run', return_value=failed), \
             pytest.raises(RuntimeError, match='exit 7'):
         toolchain.initialize_environment(selected, report)
     assert report['initialization']['returncode'] == 7
     assert 'Could not initialize VC' in report['initialization']['stdout_diagnostics']
-    assert 'secret' not in json.dumps(report).replace('secret value omitted', '')
+    assert LEAK_SENTINEL not in json.dumps(report)
+    assert report['initialization']['script'] == str(installation / 'Common7/Tools/VsDevCmd.bat')
     assert 'PRIVATE_TOKEN=' not in json.dumps(report)
     assert len(report['initialization']['script_sha256']) == 64
 
 
-@pytest.mark.parametrize('line', ['CHILD_ONLY=private', 'set CHILD_ONLY=private',
-                                 'set "CHILD_ONLY=private"', '@set "CHILD_ONLY=private"'])
+@pytest.mark.parametrize('line', [f'CHILD_ONLY={LEAK_SENTINEL}', f'set CHILD_ONLY={LEAK_SENTINEL}',
+                                 f'set "CHILD_ONLY={LEAK_SENTINEL}"', f'@set "CHILD_ONLY={LEAK_SENTINEL}"'])
 def test_initialization_diagnostics_omit_even_child_created_quoted_assignments(line):
     with patch.object(toolchain, 'os', SimpleNamespace(environ={})):
         assert toolchain.diagnostic_text(line.encode('utf-16-le')) == '[environment assignment omitted]'
 
 
 def test_initialization_timeout_preserves_prefix_but_not_partial_environment(tmp_path):
-    installation, _, _ = fixture_tools(tmp_path)
+    installation, _, _ = fixture_tools(tmp_path / 'private' / 'var' / 'secret')
     report = {}
     def timeout(command, **kwargs):
         marker = re.search(r'echo (VSE_TOOLCHAIN_ENV_[0-9a-f]+)&&', command)[1]
-        data = ('still initializing\r\n' + marker + '\r\nSECRET_TOKEN=private').encode('utf-16-le')
+        data = ('still initializing\r\n' + marker + '\r\nSECRET_TOKEN=' + LEAK_SENTINEL).encode('utf-16-le')
         raise subprocess.TimeoutExpired(command, 120, output=data, stderr=b'timeout diagnostic')
     with patch.object(toolchain, 'os', SimpleNamespace(environ={'ComSpec': 'cmd.exe'})), \
             patch.object(toolchain.subprocess, 'run', side_effect=timeout), \
@@ -316,18 +349,19 @@ def test_initialization_timeout_preserves_prefix_but_not_partial_environment(tmp
         toolchain.initialize_environment({'installation': str(installation), 'toolset': '14.44.35207'}, report)
     assert report['initialization']['timed_out']
     assert report['initialization']['stdout_diagnostics'] == 'still initializing'
-    assert 'private' not in json.dumps(report)
+    assert LEAK_SENTINEL not in json.dumps(report)
+    assert report['initialization']['script'] == str(installation / 'Common7/Tools/VsDevCmd.bat')
 
 
 def test_success_without_delimiter_never_persists_unknown_output(tmp_path):
     installation, _, _ = fixture_tools(tmp_path)
     report = {}
-    result = SimpleNamespace(returncode=0, stdout=b'unknown possibly private output', stderr=b'')
+    result = SimpleNamespace(returncode=0, stdout=LEAK_SENTINEL.encode(), stderr=b'')
     with patch.object(toolchain, 'os', SimpleNamespace(environ={'ComSpec': 'cmd.exe'})), \
             patch.object(toolchain.subprocess, 'run', return_value=result), \
             pytest.raises(RuntimeError, match='delimiter'):
         toolchain.initialize_environment({'installation': str(installation), 'toolset': '14.44.35207'}, report)
-    assert 'possibly private' not in json.dumps(report)
+    assert LEAK_SENTINEL not in json.dumps(report)
 
 
 @pytest.mark.parametrize('changed', ['toolset', 'directory', 'compiler', 'linker', 'crt'])
@@ -348,11 +382,14 @@ def test_real_windows_cmd_initialization_with_spaces_ampersand_and_parentheses(t
     installation = tmp_path / 'Build Tools & SDK (reviewed)'
     script = installation / 'Common7/Tools/VsDevCmd.bat'
     script.parent.mkdir(parents=True)
+    include = tmp_path / 'exact header fixture'
+    include.mkdir()
+    include = str(include.resolve(strict=True))
     script.write_text('@echo off\n'
                       'if not "%*"=="-no_logo -arch=x64 -host_arch=x64 -vcvars_ver=14.44.35207" exit /b 9\n'
                       'echo real fixture initialization\n'
-                      'set "INCLUDE=C:\\exact header fixture"\n'
-                      'set "PRIVATE_TOOLCHAIN_TEST=must-not-persist"\n'
+                      f'set "INCLUDE={include}"\n'
+                      f'set "PRIVATE_TOOLCHAIN_TEST={LEAK_SENTINEL}"\n'
                       f'exit /b {returncode}\n', encoding='utf-8')
     report = {}
     selected = {'installation': str(installation), 'toolset': '14.44.35207'}
@@ -361,8 +398,8 @@ def test_real_windows_cmd_initialization_with_spaces_ampersand_and_parentheses(t
             toolchain.initialize_environment(selected, report)
     else:
         env = toolchain.initialize_environment(selected, report)
-        assert env['INCLUDE'] == r'C:\exact header fixture'
+        assert env['INCLUDE'] == include
         assert 'PRIVATE_TOOLCHAIN_TEST' not in env
     assert report['initialization']['returncode'] == returncode
     assert 'real fixture initialization' in report['initialization']['stdout_diagnostics']
-    assert 'must-not-persist' not in json.dumps(report)
+    assert LEAK_SENTINEL not in json.dumps(report)
