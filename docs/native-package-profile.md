@@ -53,7 +53,10 @@ not certification; the final target-platform runtime gates still decide readines
 ## Native CI and platform limits
 
 The dedicated `native-ocr.yml` builds models once on Linux and then compiles and
-verifies Linux x64, Windows x64 and macOS arm64 independently. It uploads test
+verifies Linux x64, Windows Server 2022/2025 x64 and macOS arm64 independently.
+The [Windows matrix](windows-verification.md) distinguishes measured server
+coverage from Windows 10/11 client and ARM/emulation execution outside the chosen
+Server CI-only scope. It uploads test
 candidates only, never tags or releases. All adapter parity fixture variables are
 set so legacy/detector/Kannada checks cannot silently skip for missing evidence.
 Native macOS bundles advertise **macOS 14.0 minimum**, matching the ORT SDK;

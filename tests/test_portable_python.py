@@ -60,7 +60,7 @@ def test_launcher_without_host_python_or_tools(tmp_path):
     (root / 'bootstrap.py').touch()
     result = subprocess.run([str(root / 'Start-VSE.sh'), '参数 with space'], cwd='/', env={'PATH': '/nonexistent', 'LD_LIBRARY_PATH': '/untrusted/inherited'}, text=True, capture_output=True, check=True)
     lines = result.stdout.splitlines()
-    assert Path(lines[2]).samefile(root / 'bootstrap.py')
+    assert Path(lines[4]).samefile(root / 'bootstrap.py')
     assert '参数 with space' in result.stdout
     assert Path(lines[-1]).resolve() == (root / 'native-libs').resolve()
     assert '/untrusted/inherited' not in result.stdout
@@ -97,7 +97,7 @@ def test_mac_app_alone_can_move(tmp_path):
     moved.parent.mkdir()
     app.rename(moved)
     result = subprocess.run([str(moved / 'Contents/MacOS/VSE'), '参数'], cwd='/', env={'PATH': '/nonexistent'}, text=True, capture_output=True, check=True)
-    assert Path(result.stdout.splitlines()[2]).samefile(moved / 'Contents/Resources/bootstrap.py')
+    assert Path(result.stdout.splitlines()[4]).samefile(moved / 'Contents/Resources/bootstrap.py')
     assert '参数' in result.stdout
     assert str(app) not in result.stdout
 
@@ -106,7 +106,7 @@ def test_linux_launcher_construction_is_isolated(tmp_path):
     write_launchers(tmp_path, 'linux', 'x64')
     content = (tmp_path / 'Start-VSE.sh').read_text()
     assert 'export LD_LIBRARY_PATH="$ROOT/native-libs"' in content
-    assert 'exec "$ROOT/runtime/bin/python3.12" -s -B "$ROOT/bootstrap.py" "$@"' in content
+    assert 'exec "$ROOT/runtime/bin/python3.12" -I -B -X utf8 "$ROOT/bootstrap.py" "$@"' in content
     assert 'unset PYTHONHOME PYTHONPATH' in content
 
 

@@ -23,27 +23,36 @@ env:
 
 jobs:
   native:
-    name: CPU / ${{ matrix.name }}
+    name: Paddle CPU / ${{ matrix.name }}
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         include:
           - os: ubuntu-24.04
             name: Linux x64
           - os: windows-2022
-            name: Windows x64
+            name: Windows Server 2022 x64
+          - os: windows-2025
+            name: Windows Server 2025 x64
           - os: macos-15
             name: macOS arm64
     runs-on: ${{ matrix.os }}
     env:
       QT_QPA_PLATFORM: ${{ matrix.os == 'macos-15' && 'cocoa' || 'offscreen' }}
-    timeout-minutes: 45
+    # Each native platform repeats full launcher acceptance under two host environments.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: pip
+          architecture: ${{ runner.os == 'macOS' && 'arm64' || 'x64' }}
+      - name: Record actual Windows OS build and process architecture
+        id: windows-identity
+        if: runner.os == 'Windows'
+        run: python scripts/windows_verification.py capture --runner ${{ matrix.os }} --profile paddle
       - name: Install Linux Qt libraries
         if: runner.os == 'Linux'
         run: >-
@@ -66,6 +75,7 @@ jobs:
       - name: Download and verify small and medium PP-OCRv6 models
         run: python -m backend.tools.model_download --tiers small medium --output backend/models/V6
       - name: Unit, GUI, model and real CPU OCR tests
+        id: source-tests
         timeout-minutes: 12
         run: python -m pytest tests -vv --capture=tee-sys -o faulthandler_timeout=120 --durations=20 --junitxml=test-results/native.xml
       - name: Launch actual GUI with platform-safe Qt backend
@@ -88,32 +98,73 @@ jobs:
           xvfb-run -a -s "-screen 0 1280x1024x24" -e test-results/xvfb.log \
             env QT_QPA_PLATFORM=xcb python gui.py --smoke-test 2>&1 | tee test-results/gui-native.log
       - name: Windows or macOS native GUI backend smoke
+        id: windows-gui
         if: runner.os != 'Linux'
         env:
           QT_QPA_PLATFORM: ${{ runner.os == 'macOS' && 'cocoa' || 'windows' }}
           VSE_SMOKE_SCREENSHOT_DIR: test-results/gui-native
         run: python gui.py --smoke-test
+      - name: Windows native-backend light, dark and system-theme flows
+        id: windows-theme
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        env:
+          QT_QPA_PLATFORM: windows
+        run: >-
+          python -m pytest tests/test_theme.py tests/test_theme_system_flows.py -vv
+          --junitxml=test-results/windows-theme.xml
       - name: CLI entrypoint
+        id: cli
         run: python -m backend.cli --help
       - name: Native video-to-SRT end-to-end regression
+        id: ordinary
         env:
           VSE_OFFLINE: '1'
         run: python scripts/e2e_smoke.py --output test-results/e2e
       - name: Issue-targeted multiline, AV1 and timeline end-to-end regressions
+        id: issues
         env:
           VSE_OFFLINE: '1'
         run: python scripts/e2e_issues.py --output test-results/issues
       - name: Resolve native inference bundle wheels
         run: python -m pip wheel -r requirements.txt -r requirements-inference.txt pytest==8.3.5 --wheel-dir build/wheelhouse
       - name: Build self-contained inference distribution
+        id: package-build
         run: python scripts/package_release.py --wheelhouse build/wheelhouse --output dist-ci
       - name: Verify self-contained Linux distribution with native X11
         if: runner.os == 'Linux'
         shell: bash
         run: xvfb-run -a -s "-screen 0 1280x1024x24" env QT_QPA_PLATFORM=xcb python scripts/package_release.py --verify dist-ci --smoke
       - name: Verify self-contained Windows or macOS distribution
+        id: package-verify
         if: runner.os != 'Linux'
+        env:
+          QT_QPA_PLATFORM: ${{ runner.os == 'macOS' && 'cocoa' || 'windows' }}
         run: python scripts/package_release.py --verify dist-ci --smoke
+      - name: Windows actual launcher with clean PATH and contaminated host environment
+        id: portable-environment
+        if: success() && runner.os == 'Windows'
+        timeout-minutes: 35
+        env:
+          QT_QPA_PLATFORM: windows
+          VSE_WINDOWS_RUNNER_LABEL: ${{ matrix.os }}
+        run: python scripts/verify_portable_environment.py --archives dist-ci --output test-results/windows/portable-environment
+      - name: Linux actual launcher with clean PATH and contaminated host environment under X11
+        id: portable-environment-linux
+        if: success() && runner.os == 'Linux'
+        timeout-minutes: 35
+        shell: bash
+        run: >-
+          xvfb-run -a -s "-screen 0 1280x1024x24" env QT_QPA_PLATFORM=xcb
+          python scripts/verify_portable_environment.py --archives dist-ci
+          --output test-results/linux/portable-environment
+      - name: macOS command and app launchers with clean PATH and contaminated host environment
+        id: portable-environment-macos
+        if: success() && runner.os == 'macOS'
+        timeout-minutes: 35
+        env:
+          QT_QPA_PLATFORM: cocoa
+        run: python scripts/verify_portable_environment.py --archives dist-ci --output test-results/macos/portable-environment
       - name: Verify Linux package without host Python or native libraries
         if: runner.os == 'Linux'
         shell: bash
@@ -121,18 +172,33 @@ jobs:
           for archive in dist-ci/*linux-x64-cpu*.zip; do
             python scripts/verify_clean_linux_bundle.py --archive "$archive" --output test-results/clean-linux
           done
+      - name: Report Windows coverage including failed and skipped stages
+        if: always() && runner.os == 'Windows'
+        env:
+          VSE_WINDOWS_STEP_OUTCOMES: >-
+            {"identity":"${{ steps.windows-identity.outcome }}",
+             "source-tests":"${{ steps.source-tests.outcome }}",
+             "gui":"${{ steps.windows-gui.outcome }}",
+             "theme":"${{ steps.windows-theme.outcome }}",
+             "cli":"${{ steps.cli.outcome }}",
+             "ordinary":"${{ steps.ordinary.outcome }}",
+             "issues":"${{ steps.issues.outcome }}",
+             "package-build":"${{ steps.package-build.outcome }}",
+             "package-verify":"${{ steps.package-verify.outcome }}",
+             "portable-environment":"${{ steps.portable-environment.outcome }}"}
+        run: python scripts/windows_verification.py summarize --runner ${{ matrix.os }} --profile paddle
       - name: Preserve inference distribution evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: inference-package-results-${{ matrix.os }}
+          name: paddle-inference-package-results-${{ matrix.os }}-${{ runner.arch }}
           path: dist-ci/test-results/
           if-no-files-found: warn
       - name: Publish test evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.os }}
+          name: paddle-test-results-${{ matrix.os }}-${{ runner.arch }}
           path: test-results/
           if-no-files-found: warn
 

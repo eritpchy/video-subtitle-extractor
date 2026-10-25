@@ -1,7 +1,8 @@
 """Verification-only loaded-library audit, inherited by bundled Python children.
 
-No third-party packages. The generated sitecustomize lives in an external
-verification evidence directory, not in the shipped interpreter. Native non-Python executables need separate audits.
+No third-party packages. Isolated bootstrap imports the in-bundle probe, then
+byte-validates the external evidence-directory sitecustomize inherited by its
+Python children. Native non-Python executables need separate audits.
 """
 from __future__ import annotations
 
@@ -240,6 +241,16 @@ def install_probe() -> None:
                       'prefix': str(Path(sys.prefix).resolve()), 'bundle_root': root,
                       'windows_root': os.environ.get('SystemRoot', r'C:\Windows'),
                       'argv': sys.argv, 'images': sorted(images), 'modules': modules,
+                      'sys_path': sys.path, 'no_user_site': sys.flags.no_user_site, 'utf8_mode': sys.flags.utf8_mode,
+                      'user_site_enabled': __import__('site').ENABLE_USER_SITE,
+                      'environment': {key: os.environ[key] for key in (
+                          'PATH', 'PYTHONHOME', 'PYTHONPATH', 'PYTHONUSERBASE', 'PYTHONUTF8', 'PYTHONIOENCODING', 'CONDA_PREFIX',
+                          'VIRTUAL_ENV', 'QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH',
+                          'QML2_IMPORT_PATH', 'LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH',
+                          'OPENCV_VIDEOIO_PLUGIN_PATH', 'OPENCV_CORE_PLUGIN_PATH', 'OPENCV_DNN_PLUGIN_PATH',
+                          'OPENCV_UI_PLUGIN_PATH', 'OPENCV_OPENCL_RUNTIME', 'OPENCV_FFMPEG_DLL_DIR', 'OPENCV_DNN_IE_EXTRA_PLUGIN_PATH',
+                          'OPENCV_VIDEOIO_PLUGIN_FFMPEG', 'OPENCV_CORE_PARALLEL_PLUGIN_TBB', 'VSE_VSF_BINARY', 'VSE_VSF_DIR', 'IMAGEIO_FFMPEG_EXE',
+                          'VSE_CONFIG_FILE', 'VSE_WORK_DIR', 'VSE_OCR_BACKEND', 'VSE_NATIVE_OCR_ROOT') if key in os.environ},
                       'snapshots': snapshots, 'probe_errors': sorted(errors)}
             destination = directory / f'process-{os.getpid()}.json'
             temporary = destination.with_suffix('.tmp')

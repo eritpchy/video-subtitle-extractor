@@ -138,8 +138,10 @@ class PackageTests(unittest.TestCase):
                 (stage / 'runtime/bin/python3.12').write_bytes(b'portable Python')
                 return {'python': 'runtime/bin/python3.12', 'provider': 'test'}
             outputs = ["a" * 40 + "\n", "", b"backend/config.py\0scripts/bundle_bootstrap.py\0"]
-            with patch("scripts.package_release.host_platform", return_value=("linux", "x64")), patch("scripts.package_release.subprocess.check_output", side_effect=outputs), patch("scripts.package_release.subprocess.run"), patch("scripts.package_release.runtime_wheels", return_value=([root / "wheelhouse/sample-1.0-py3-none-any.whl"], ["sample==1.0"])), patch("scripts.package_release.build_runtime", side_effect=fake_runtime), patch("scripts.package_release.portable_launchers"), patch("scripts.bundle_linux_runtime_libs.bundle_linux_libraries", return_value={}):
+            with patch("scripts.package_release.host_platform", return_value=("linux", "x64")), patch("scripts.package_release.subprocess.check_output", side_effect=outputs), patch("scripts.package_release.subprocess.run"), patch("scripts.package_release.runtime_wheels", return_value=([root / "wheelhouse/sample-1.0-py3-none-any.whl"], ["sample==1.0"])), patch("scripts.package_release.build_runtime", side_effect=fake_runtime), patch("scripts.package_release.portable_launchers"), patch("scripts.bundle_linux_runtime_libs.bundle_linux_libraries", return_value={}) as native_closure:
                 archive_path = create_bundle(root / "wheelhouse", root / "dist", root)
+                self.assertEqual(native_closure.call_args.kwargs, {"profile": "paddle"})
+                self.assertEqual(native_closure.call_count, 1)
             verify_bundle(archive_path, smoke=False)
             with zipfile.ZipFile(archive_path) as archive:
                 names = archive.namelist()
@@ -201,7 +203,13 @@ class PackageTests(unittest.TestCase):
             (root / 'runtime').mkdir()
             python = root / 'runtime/python'
             python.write_bytes(b'portable interpreter')
-            manifest = {'format': 2, 'distribution': 'self-contained CPU inference runtime', 'platform': 'linux', 'arch': 'x64', 'runtime_python': 'runtime/python', 'files': {}}
+            media_files = {}
+            for name in ('backend/subfinder/linux/x64/VideoSubFinderCli', 'runtime/lib/python3.12/site-packages/imageio_ffmpeg/binaries/ffmpeg-linux-fixture'):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b'fixture media executable')
+                media_files[name] = sha256(path)
+            manifest = {'format': 2, 'distribution': 'self-contained CPU inference runtime', 'platform': 'linux', 'arch': 'x64', 'runtime_python': 'runtime/python', 'files': media_files}
             (root / 'bundle-manifest.json').write_text(json.dumps(manifest))
             with patch('scripts.bundle_bootstrap.__file__', str(root / 'bootstrap.py')), patch('scripts.bundle_bootstrap.host_platform', return_value=('linux', 'x64')), patch('scripts.bundle_bootstrap.sys.executable', str(python)), patch('scripts.bundle_bootstrap.os.chdir'), patch.dict(os.environ, {'VSE_CONFIG_FILE': str(root.parent / 'user-config.json'), 'VSE_WORK_DIR': str(root.parent / 'user-work')}), patch('scripts.bundle_bootstrap.subprocess.run') as run, patch('scripts.bundle_bootstrap.subprocess.call', return_value=0) as launch:
                 self.assertEqual(bootstrap_main([]), 0)

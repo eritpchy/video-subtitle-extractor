@@ -7,8 +7,115 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import platform
+import site
 import subprocess
 import sys
+
+
+# Language and native *search* settings only. Do not erase application options,
+# themes, display sessions, locale, HOME/XDG/LOCALAPPDATA or explicit VSE paths.
+NATIVE_SEARCH_VARIABLES = (
+    'LD_LIBRARY_PATH', 'LD_PRELOAD', 'LD_AUDIT',
+    'DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH', 'DYLD_FRAMEWORK_PATH',
+    'DYLD_FALLBACK_FRAMEWORK_PATH', 'DYLD_INSERT_LIBRARIES', 'DYLD_ROOT_PATH',
+    'DYLD_VERSIONED_LIBRARY_PATH', 'DYLD_VERSIONED_FRAMEWORK_PATH',
+    'QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH', 'QML_IMPORT_PATH', 'QML2_IMPORT_PATH',
+    'OPENCV_VIDEOIO_PLUGIN_PATH', 'OPENCV_CORE_PLUGIN_PATH', 'OPENCV_DNN_PLUGIN_PATH',
+    'OPENCV_UI_PLUGIN_PATH', 'OPENCV_OPENCL_RUNTIME', 'OPENCV_FFMPEG_DLL_DIR',
+    'OPENCV_DNN_IE_EXTRA_PLUGIN_PATH',
+)
+
+
+RUNTIME_SELECTOR_PREFIXES = ('PYTHON', 'CONDA_', '_CONDA_', 'VSE_RUNTIME_AUDIT_',
+                             'OPENCV_VIDEOIO_PLUGIN_', 'OPENCV_DNN_PLUGIN_',
+                             'OPENCV_UI_PLUGIN_', 'OPENCV_CORE_PARALLEL_PLUGIN_')
+
+
+def sanitize_environment(root: Path, environment: dict[str, str], target_platform: str) -> dict[str, str]:
+    """Return a child-only environment; never alter the caller's OS/installation."""
+    env = {key: value for key, value in environment.items()
+           if not key.upper().startswith(RUNTIME_SELECTOR_PREFIXES)
+           and key.upper() not in {*NATIVE_SEARCH_VARIABLES, 'VIRTUAL_ENV', 'VIRTUAL_ENV_PROMPT', '_CE_CONDA', '_CE_M', '__PYVENV_LAUNCHER__'}}
+    root = root.resolve()
+    if target_platform == 'windows':
+        windows = Path(env.get('SystemRoot') or env['SYSTEMROOT'])
+        paths = (root / 'runtime', root / 'runtime/DLLs', windows / 'System32', windows)
+        separator = ';'
+    else:
+        paths = (root / 'runtime/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin')
+        separator = ':'
+    env['PATH'] = separator.join(map(str, paths))
+    if target_platform == 'linux':
+        env['LD_LIBRARY_PATH'] = str(root / 'native-libs')
+    env.update(PYTHONNOUSERSITE='1', PYTHONDONTWRITEBYTECODE='1', PYTHONUTF8='1')
+    return env
+
+
+def enable_trusted_audit(root: Path, directory: Path) -> None:
+    """Restore only byte-validated verification hooks AFTER isolated startup.
+
+    -I deliberately ignores inherited PYTHONPATH/sitecustomize. The initial
+    process imports its probe from the checksum-verified bundle; descendants
+    inherit the exact verified copy, never arbitrary original PYTHONPATH.
+    """
+    directory = directory.resolve()
+    if directory.is_relative_to(root):
+        raise RuntimeError('Runtime audit evidence must be outside the application')
+    from scripts.standalone_runtime_probe import _trusted_hooks, install_probe
+    for path, expected in _trusted_hooks(root, directory).values():
+        if not path.is_file() or path.is_symlink() or path.read_bytes() != expected:
+            raise RuntimeError(f'Missing or modified trusted runtime audit hook: {path}')
+    os.environ.update(PYTHONPATH=str(directory / 'hook'), VSE_RUNTIME_AUDIT_ROOT=str(root),
+                      VSE_RUNTIME_AUDIT_REPORTS=str(directory))
+    install_probe()
+
+
+def configure_runtime_tools(root: Path, manifest: dict) -> None:
+    """Pin portable media executables; source-mode manual overrides are unchanged.
+
+    Do not call imageio's finder: it can fall back to Conda/system FFmpeg. Only
+    explicit inventory entries qualify, and ambiguous/missing binaries fail.
+    """
+    files = manifest['files']
+    directory = f"backend/subfinder/{manifest['platform']}/{manifest['arch']}"
+    names = ('VideoSubFinderCli.exe',) if manifest['platform'] == 'windows' else ('VideoSubFinderCli.run', 'VideoSubFinderCli')
+    # .run is the reviewed upstream sibling-library wrapper, not ambiguity with
+    # its underlying binary. Never fall back to another architecture/install.
+    vsf = next((f'{directory}/{name}' for name in names if f'{directory}/{name}' in files), None)
+    ffmpeg = [name for name in files
+              if PurePosixPath(name).parts[:1] == ('runtime',)
+              and PurePosixPath(name).parts[-3:-1] == ('imageio_ffmpeg', 'binaries')
+              and PurePosixPath(name).name.startswith('ffmpeg-')]
+    if not vsf or len(ffmpeg) != 1:
+        raise RuntimeError('Bundle requires its manifest VideoSubFinder and exactly one bundled FFmpeg executable')
+
+    def checked(relative: str) -> Path:
+        parts = PurePosixPath(relative)
+        path = root / relative
+        if (relative not in files or parts.is_absolute() or '..' in parts.parts or '\\' in relative or ':' in relative
+                or str(parts) != relative or not path.is_file() or path.is_symlink()
+                or not path.resolve().is_relative_to(root.resolve()) or sha256(path) != files[relative]):
+            raise RuntimeError(f'Missing or invalid bundled media executable: {relative}')
+        return path.resolve()
+
+    binary, encoder = checked(vsf), checked(ffmpeg[0])
+    # The wrapper must not refer to a missing/uninventoried underlying binary.
+    if binary.name.endswith('.run'):
+        checked(f'{directory}/VideoSubFinderCli')
+    os.environ.update(VSE_VSF_BINARY=str(binary), VSE_VSF_DIR=str(binary.parent), IMAGEIO_FFMPEG_EXE=str(encoder))
+
+
+def environment_report(root: Path, manifest: dict) -> dict:
+    selected = ('PATH', *NATIVE_SEARCH_VARIABLES, 'PYTHONHOME', 'PYTHONPATH', 'PYTHONUSERBASE',
+                'PYTHONNOUSERSITE', 'PYTHONUTF8', 'PYTHONIOENCODING', 'CONDA_PREFIX', 'CONDA_DEFAULT_ENV', 'VIRTUAL_ENV',
+                'VSE_CONFIG_FILE', 'VSE_WORK_DIR', 'VSE_OCR_BACKEND', 'VSE_NATIVE_OCR_ROOT',
+                'VSE_VSF_BINARY', 'VSE_VSF_DIR', 'IMAGEIO_FFMPEG_EXE')
+    return {'schema': 1, 'bundle_root': str(root), 'executable': sys.executable,
+            'prefix': sys.prefix, 'base_prefix': sys.base_prefix, 'sys_path': sys.path,
+            'isolated': sys.flags.isolated, 'ignore_environment': sys.flags.ignore_environment, 'utf8_mode': sys.flags.utf8_mode,
+            'no_user_site': sys.flags.no_user_site, 'user_site_enabled': site.ENABLE_USER_SITE,
+            'profile': manifest.get('ocr_backend', 'paddle'),
+            'environment': {key: os.environ[key] for key in selected if key in os.environ}}
 
 
 def host_platform() -> tuple[str, str]:
@@ -101,8 +208,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--verify', action='store_true', help='Audit the included runtime and run real GUI/OCR/video regressions; no installation')
     parser.add_argument('--results-dir', type=Path, help='Writable verification evidence directory outside the application')
+    parser.add_argument('--runtime-audit-dir', type=Path, help='Prepared trusted verification hooks/evidence outside application')
     parser.add_argument('--cli', action='store_true', help='Pass remaining arguments to the subtitle CLI instead of the GUI')
-    args, forwarded = parser.parse_known_args(argv)
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    # Once --cli is selected, even --help belongs to the application CLI. Do
+    # not let argparse exit before launching/auditing the requested backend.
+    if '--cli' in arguments:
+        index = arguments.index('--cli')
+        args = parser.parse_args(arguments[:index + 1])
+        forwarded = arguments[index + 1:]
+    else:
+        args, forwarded = parser.parse_known_args(arguments)
     root = Path(__file__).resolve().parent
     manifest_path = root / 'bundle-manifest.json'
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
@@ -118,7 +234,14 @@ def main(argv: list[str] | None = None) -> int:
     if sys.version_info[:2] != (3, 12):
         raise RuntimeError('Unexpected bundled Python version; re-extract the original release archive')
     os.chdir(root)
+    # -I omits the application directory. Add only the known bundle, not cwd.
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    clean_environment = sanitize_environment(root, dict(os.environ), manifest['platform'])
+    os.environ.clear()
+    os.environ.update(clean_environment)
     configure_user_paths()
+    configure_runtime_tools(root, manifest)
     backend = manifest.get('ocr_backend', 'paddle')
     if backend not in ('paddle', 'native'):
         raise RuntimeError('Unknown bundled OCR backend')
@@ -127,17 +250,26 @@ def main(argv: list[str] | None = None) -> int:
         os.environ['VSE_NATIVE_OCR_ROOT'] = str(root / 'native-ocr')
         # Do not override a requested unsupported GPU provider: adapter rejects it.
         os.environ['ORT_DISABLE_TELEMETRY'] = '1'
+    else:
+        # A fixed Paddle profile must not retain an unrelated foreign worker.
+        os.environ.pop('VSE_NATIVE_OCR_ROOT', None)
     os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
     os.environ['PYTHONNOUSERSITE'] = '1'
     os.environ['PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK'] = 'True'
     if (root / 'wheelhouse').exists() or (root / '.venv').exists():
         raise RuntimeError('Unexpected installer cache/venv in self-contained release')
+    if args.runtime_audit_dir:
+        verify_payload(root, manifest)
+        enable_trusted_audit(root, args.runtime_audit_dir)
     if args.verify:
         results = (args.results_dir or Path(os.environ['VSE_WORK_DIR']).parent / 'verification').expanduser().resolve()
         if results.is_relative_to(root.resolve()):
             raise RuntimeError('Verification results must be outside the application directory')
         results.mkdir(parents=True, exist_ok=True)
         verify_payload(root, manifest)
+        (results / 'environment-report.json').write_text(json.dumps(environment_report(root, manifest), indent=2) + '\n', encoding='utf-8')
+        if manifest['platform'] == 'windows' and os.environ.get('VSE_WINDOWS_RUNNER_LABEL'):
+            subprocess.run([str(python), 'scripts/windows_verification.py', 'capture', '--runner', os.environ['VSE_WINDOWS_RUNNER_LABEL'], '--profile', backend, '--output', str(results / 'bundled-windows-identity')], check=True)
         subprocess.run([str(python), 'scripts/prune_inference_runtime.py', '--verify', '--manifest', str(root / 'runtime/inference-prune.json')], check=True)
         subprocess.run([str(python), 'scripts/runtime_dependencies.py', '--manifest', str(manifest_path)], check=True)
         subprocess.run([str(python), 'scripts/install_videosubfinder.py', '--verify-only'], check=True)

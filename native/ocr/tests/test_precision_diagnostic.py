@@ -4,6 +4,7 @@ from pathlib import Path
 import struct
 import subprocess
 import sys
+import builtins
 
 import pytest
 
@@ -91,3 +92,89 @@ def test_capture_refuses_existing_output(tmp_path):
     worker.write_bytes(b'not executed')
     with pytest.raises(FileExistsError):
         diagnostic.capture(tmp_path, worker, tmp_path)
+
+
+def geometry_fixture(tmp_path):
+    pixels = tmp_path / 'geometry-0-pre-resize.u8'
+    pixels.write_bytes(bytes(range(18)))
+    record = {'schema_version': 1, 'det_quad': [[0, 0], [3, 0], [3, 2], [0, 2]],
+              'crop_min_area_rect': [[0., 0.], [3., 0.], [3., 2.], [0., 2.]],
+              'warp_perspective_matrix': [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+              'warp_size': [2, 3], 'rotated_90_counterclockwise': False,
+              'pre_resize': {'file': pixels.name, 'shape': [2, 3, 3], 'dtype': 'uint8', 'channel_order': 'BGR'}}
+    metadata = tmp_path / 'geometry-0.json'
+    metadata.write_text(json.dumps(record))
+    return metadata, record
+
+
+def test_geometry_raw_pixels_hash_and_rotation_shape(tmp_path):
+    path, record = geometry_fixture(tmp_path)
+    validated = diagnostic.validate_geometry(tmp_path, path)
+    assert len(validated['pre_resize']['sha256']) == 64
+    record['rotated_90_counterclockwise'] = True
+    record['pre_resize']['shape'] = [3, 2, 3]
+    path.write_text(json.dumps(record))
+    diagnostic.validate_geometry(tmp_path, path)
+
+
+@pytest.mark.parametrize('kind', ['noninteger-quad', 'nonfinite-matrix', 'bad-corners', 'bad-rotation',
+                                 'bad-shape', 'bad-type', 'traversal', 'truncated', 'hash'])
+def test_geometry_invalid_or_corrupt_evidence_rejected(tmp_path, kind):
+    path, record = geometry_fixture(tmp_path)
+    if kind == 'noninteger-quad':
+        record['det_quad'][0][0] = .25
+    elif kind == 'nonfinite-matrix':
+        record['warp_perspective_matrix'][0][0] = float('nan')
+    elif kind == 'bad-corners':
+        record['crop_min_area_rect'].pop()
+    elif kind == 'bad-rotation':
+        record['rotated_90_counterclockwise'] = 1
+    elif kind == 'bad-shape':
+        record['pre_resize']['shape'] = [2, 2, 3]
+    elif kind == 'bad-type':
+        record['pre_resize']['dtype'] = '<f4'
+    elif kind == 'traversal':
+        record['pre_resize']['file'] = '../outside.u8'
+    elif kind == 'truncated':
+        (tmp_path / record['pre_resize']['file']).write_bytes(b'short')
+    else:
+        record['pre_resize']['sha256'] = '0' * 64
+    path.write_text(json.dumps(record))
+    with pytest.raises(ValueError):
+        diagnostic.validate_geometry(tmp_path, path)
+
+
+def test_source_artifact_checked_before_importing_reference_frameworks(tmp_path, monkeypatch):
+    source = tmp_path / 'sources'
+    source.mkdir()
+    original_import = builtins.__import__
+    def guarded_import(name, *args, **kwargs):
+        if name.split('.')[0] in ('paddle', 'numpy'):
+            pytest.fail('reference framework imported before source verification')
+        return original_import(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, '__import__', guarded_import)
+    monkeypatch.setattr(diagnostic, 'get_archive', lambda *_a, **_k: pytest.fail('artifact path must never download'))
+    with pytest.raises(ValueError, match='artifact model/file set'):
+        diagnostic.reference(tmp_path / 'capture', tmp_path / 'cache', sources_dir=source)
+
+
+def test_ci_reference_sources_are_separate_offline_and_not_cache_hit_conditional():
+    text = (diagnostic.ROOT.parents[1] / '.github/workflows/native-ocr.yml').read_text()
+    models, remaining = text.split('\n  models:\n', 1)[1].split('\n  precision-reference-sources:\n', 1)
+    sources, native = remaining.split('\n  native:\n', 1)
+    assert 'precision-reference' not in models
+    assert 'needs:' not in sources and 'timeout-minutes: 15' in sources
+    assert 'runs-on: ubuntu-24.04' in sources
+    assert 'needs: models\n' in native
+    export = text.split('- name: Export three verified original models for build-only Mac reference', 1)[1].split('- name:', 1)[0]
+    assert 'if:' not in export
+    assert '--seed-cache' not in export
+    assert 'name: native-ocr-precision-reference-sources-${{ github.sha }}' in text
+    assert '--sources build/precision-reference-sources --offline' in text
+    assert 'path: build/precision-reference-sources/' in text
+    assert '--output build/native-models --cache build/model-cache' in text
+    assert 'actions: read' in native
+    assert "steps.precision-source-status.outputs.available == 'true'" in native
+    assert "steps.precision-source-download.outcome == 'success'" in native
+    assert 'precision-reference-source-status.json' in native
+    assert 'continue-on-error:' not in sources

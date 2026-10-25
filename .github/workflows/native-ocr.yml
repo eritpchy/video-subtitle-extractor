@@ -85,11 +85,50 @@ jobs:
           compression-level: 0
           retention-days: 7
 
+  precision-reference-sources:
+    name: Pinned original Paddle sources / diagnostics only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Independent diagnostic preparation must never block the native matrix.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Restore independent pinned Paddle reference source archives
+        id: precision-source-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build/precision-reference-archive-cache
+          # Deliberately independent of converted-model cache hits and of commit SHA.
+          key: native-ocr-paddle-reference-source-v1-${{ hashFiles('native/ocr/model-source-pins.json', 'native/ocr/prepare_models.py', 'native/ocr/prepare_precision_reference_sources.py') }}
+      - name: Export three verified original models for build-only Mac reference
+        run: >-
+          python -S native/ocr/prepare_precision_reference_sources.py
+          --output build/precision-reference-sources --cache build/precision-reference-archive-cache
+      - name: Cache only independently verified reference archives
+        if: steps.precision-source-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/precision-reference-archive-cache
+          key: ${{ steps.precision-source-cache.outputs.cache-primary-key }}
+      - name: Preserve separate build-only Paddle reference sources (never customer models)
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-ocr-precision-reference-sources-${{ github.sha }}
+          path: build/precision-reference-sources/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
   native:
     name: Native CPU / ${{ matrix.name }}
     needs: models
+    permissions:
+      contents: read
+      actions: read
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         include:
           - os: ubuntu-24.04
@@ -97,7 +136,11 @@ jobs:
             platform: linux
             arch: x64
           - os: windows-2022
-            name: Windows x64
+            name: Windows Server 2022 x64
+            platform: windows
+            arch: x64
+          - os: windows-2025
+            name: Windows Server 2025 x64
             platform: windows
             arch: x64
           - os: macos-15
@@ -105,7 +148,8 @@ jobs:
             platform: macos
             arch: arm64
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    # Each native platform repeats full launcher acceptance under two host environments.
+    timeout-minutes: 90
     env:
       QT_QPA_PLATFORM: ${{ matrix.platform == 'macos' && 'cocoa' || 'offscreen' }}
       VSE_OCR_BACKEND: native
@@ -116,6 +160,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          architecture: ${{ matrix.arch }}
+      - name: Record actual Windows OS build and process architecture
+        id: windows-identity
+        if: runner.os == 'Windows'
+        run: python scripts/windows_verification.py capture --runner ${{ matrix.os }} --profile native
       - uses: actions/download-artifact@v4
         with:
           name: native-ocr-fp32-models-${{ github.sha }}
@@ -136,6 +185,7 @@ jobs:
           python -m pip install --only-binary=:all: --require-hashes -r native/ocr/requirements-build.txt
           python -m pip install packaging pytest==8.3.5
       - name: Compile target worker and stage verified CPU libraries/models
+        id: native-build
         run: >-
           python native/ocr/build.py --platform ${{ matrix.platform }}
           --arch ${{ matrix.arch }} --models build/native-models --output build/native-ocr
@@ -155,14 +205,104 @@ jobs:
           cp build/native-ocr/size-audit.json test-results/precision-stage-size-audit.json
           xcrun --show-sdk-version > test-results/precision-macos-sdk.txt
           python -S native/ocr/precision_diagnostic.py capture --artifact build/native-ocr --worker build/native-build/worker-build/native-ocr-precision --output test-results/native-precision
-      - name: Same-Mac independent Paddle reference (isolated build-side venv)
+      - name: Wait read-only for same-run diagnostic source preparation
+        id: precision-source-status
         if: failure() && matrix.platform == 'macos' && steps.native-smoke.outcome == 'failure' && hashFiles('test-results/native-precision/capture.json') != ''
+        timeout-minutes: 25
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'test-results/precision-reference-source-status.json';
+            const jobName = 'Pinned original Paddle sources / diagnostics only';
+            const report = {schema_version: 1, run_id: context.runId, job_name: jobName,
+              status: 'pending', available: false, scope: 'Read-only observation of this workflow run.'};
+            const save = () => {
+              report.observed_at = new Date().toISOString();
+              fs.mkdirSync('test-results', {recursive: true});
+              fs.writeFileSync(path, JSON.stringify(report, null, 2) + '\n');
+            };
+            core.setOutput('available', 'false');
+            save();
+            // Leave one minute for terminal evidence before the CI step's limit.
+            const deadline = Date.now() + 24 * 60 * 1000;
+            try {
+              while (Date.now() < deadline) {
+                const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+                  ...context.repo, run_id: context.runId, filter: 'latest', per_page: 100
+                });
+                const matches = jobs.filter(job => job.name === jobName);
+                if (matches.length > 1) throw new Error('Ambiguous diagnostic source jobs in this run');
+                if (matches.length === 1) {
+                  const job = matches[0];
+                  report.source_job_id = job.id;
+                  report.source_job_status = job.status;
+                  report.source_job_conclusion = job.conclusion;
+                  report.status = job.status;
+                  if (job.status === 'completed') {
+                    report.available = job.conclusion === 'success';
+                    if (!report.available) report.status = 'unavailable';
+                    save();
+                    core.setOutput('available', String(report.available));
+                    if (!report.available) core.setFailed('Diagnostic source preparation ended: ' + job.conclusion);
+                    return;
+                  }
+                }
+                save();
+                await new Promise(resolve => setTimeout(resolve, 15000));
+              }
+              throw new Error('Diagnostic source job did not reach a terminal state within the CI observation window');
+            } catch (error) {
+              report.status = 'unavailable';
+              report.available = false;
+              report.reason = String(error.message || error);
+              save();
+              core.setFailed(report.reason);
+            }
+      - name: Download pinned original sources for offline Mac reference
+        id: precision-source-download
+        if: failure() && matrix.platform == 'macos' && steps.precision-source-status.outputs.available == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: native-ocr-precision-reference-sources-${{ github.sha }}
+          path: build/precision-reference-sources
+      - name: Same-Mac independent Paddle reference (isolated build-side venv)
+        id: precision-reference
+        if: failure() && matrix.platform == 'macos' && steps.precision-source-status.outputs.available == 'true' && steps.precision-source-download.outcome == 'success'
         shell: bash
         run: |
-          python -m venv build/precision-reference-venv
-          build/precision-reference-venv/bin/python -m pip install --only-binary=:all: -r native/ocr/requirements-precision-reference.txt
-          build/precision-reference-venv/bin/python -m pip check
-          build/precision-reference-venv/bin/python native/ocr/precision_diagnostic.py reference --output test-results/native-precision > test-results/precision-reference.log 2>&1
+          python -S native/ocr/prepare_precision_reference_sources.py --verify build/precision-reference-sources > test-results/precision-reference-setup.log 2>&1
+          python -m venv build/precision-reference-venv >> test-results/precision-reference-setup.log 2>&1
+          build/precision-reference-venv/bin/python -m pip install --only-binary=:all: -r native/ocr/requirements-precision-reference.txt >> test-results/precision-reference-setup.log 2>&1
+          build/precision-reference-venv/bin/python -m pip check >> test-results/precision-reference-setup.log 2>&1
+          build/precision-reference-venv/bin/python native/ocr/precision_diagnostic.py reference --output test-results/native-precision --sources build/precision-reference-sources --offline > test-results/precision-reference.log 2>&1
+      - name: Record explicit Mac reference availability and failure evidence
+        if: always() && matrix.platform == 'macos' && steps.native-smoke.outcome == 'failure'
+        uses: actions/github-script@v7
+        env:
+          PRECISION_SOURCE_WAIT: ${{ steps.precision-source-status.outcome }}
+          PRECISION_SOURCE_DOWNLOAD: ${{ steps.precision-source-download.outcome }}
+          PRECISION_REFERENCE: ${{ steps.precision-reference.outcome }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'test-results/precision-reference-source-status.json';
+            const report = fs.existsSync(path) ? JSON.parse(fs.readFileSync(path, 'utf8')) :
+              {schema_version: 1, run_id: context.runId, available: false};
+            report.wait_outcome = process.env.PRECISION_SOURCE_WAIT || 'not-run';
+            report.download_outcome = process.env.PRECISION_SOURCE_DOWNLOAD || 'not-run';
+            report.reference_outcome = process.env.PRECISION_REFERENCE || 'not-run';
+            report.reference_available = report.reference_outcome === 'success';
+            if (!report.reference_available) {
+              report.status = 'unavailable';
+              report.available = false;
+              report.reason = report.reason || ('Reference unavailable: source wait=' + report.wait_outcome +
+                ', artifact download=' + report.download_outcome + ', verification/install/replay=' + report.reference_outcome);
+              core.setFailed(report.reason);
+            }
+            report.observed_at = new Date().toISOString();
+            fs.mkdirSync('test-results', {recursive: true});
+            fs.writeFileSync(path, JSON.stringify(report, null, 2) + '\n');
       - name: Resolve GUI/media wheels (no Paddle framework roots)
         run: python -m pip wheel -r requirements-native-inference.txt --wheel-dir build/all-wheels
       - name: Select minimal dependency closure with exact meta substitutions
@@ -175,6 +315,7 @@ jobs:
       - name: Install and verify fixed VideoSubFinder release
         run: python scripts/install_videosubfinder.py --version 6.10.6
       - name: Native adapter and packaging regression tests
+        id: source-tests
         env:
           VSE_RUN_NATIVE_INTEGRATION: '1'
           VSE_NATIVE_LEGACY_EVIDENCE: ${{ github.workspace }}/native/ocr/tests/evidence/legacy
@@ -184,14 +325,48 @@ jobs:
           python -m pytest native/ocr/tests tests/test_native_ocr.py tests/test_native_ocr_integration.py
           tests/test_native_package.py tests/test_release_packaging.py
           tests/test_runtime_dependencies.py tests/test_prune_inference_runtime.py
-          tests/test_standalone_runtime_probe.py -vv --junitxml=test-results/native-profile.xml
+          tests/test_portable_environment.py tests/test_portable_python.py
+          tests/test_standalone_runtime_probe.py tests/test_windows_verification.py -vv --junitxml=test-results/native-profile.xml
+      - name: Windows native-backend GUI, light, dark and system-theme flows
+        id: windows-theme
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        env:
+          QT_QPA_PLATFORM: windows
+        run: >-
+          python -m pytest tests/test_theme.py tests/test_theme_system_flows.py
+          tests/test_timeline_sync.py tests/test_video_decode.py tests/test_issue_regressions.py
+          -vv --junitxml=test-results/windows-theme.xml
+      - name: Windows native GUI launch and screenshots
+        id: windows-gui
+        if: runner.os == 'Windows'
+        env:
+          QT_QPA_PLATFORM: windows
+          VSE_SMOKE_SCREENSHOT_DIR: test-results/gui-native
+        run: python gui.py --smoke-test
+      - name: Windows native CLI entrypoint
+        id: cli
+        if: runner.os == 'Windows'
+        run: python -m backend.cli --help
+      - name: Windows native ordinary video-to-SRT regression
+        id: ordinary
+        if: runner.os == 'Windows'
+        timeout-minutes: 12
+        run: python scripts/e2e_smoke.py --output test-results/e2e
+      - name: Windows native multiline, AV1 and timeline regressions
+        id: issues
+        if: runner.os == 'Windows'
+        timeout-minutes: 20
+        run: python scripts/e2e_issues.py --output test-results/issues
       - name: Windows customer-package license gate (runner tests are not release approval)
+        id: license-gate
         if: matrix.platform == 'windows' && !(inputs.acknowledge_vc_redistribution_license || vars.VSE_VC_REDISTRIBUTION_LICENSE_ACK == 'true')
         shell: pwsh
         run: |
           'Windows customer package: PENDING applicable VC redistribution rights confirmation. Native compilation and runner tests above are separate evidence; no VC redistributable/customer candidate uploaded.' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           throw 'PENDING: customer packaging requires VC redistribution license acknowledgment; runner tests do not grant redistribution rights.'
       - name: Build self-contained native CPU package
+        id: package-build
         run: >-
           python scripts/package_release.py --profile native --native-ocr build/native-ocr
           --wheelhouse build/wheelhouse --output dist-native
@@ -200,10 +375,35 @@ jobs:
         shell: bash
         run: xvfb-run -a -s "-screen 0 1280x1024x24" env QT_QPA_PLATFORM=xcb python scripts/package_release.py --verify dist-native --smoke
       - name: Verify packaged Windows/macOS GUI, SRT and native imports
+        id: package-verify
         if: runner.os != 'Linux'
         env:
           QT_QPA_PLATFORM: ${{ runner.os == 'macOS' && 'cocoa' || 'windows' }}
         run: python scripts/package_release.py --verify dist-native --smoke
+      - name: Windows actual launcher with clean PATH and contaminated host environment
+        id: portable-environment
+        if: success() && runner.os == 'Windows'
+        timeout-minutes: 35
+        env:
+          QT_QPA_PLATFORM: windows
+          VSE_WINDOWS_RUNNER_LABEL: ${{ matrix.os }}
+        run: python scripts/verify_portable_environment.py --archives dist-native --output test-results/windows/portable-environment
+      - name: Linux actual launcher with clean PATH and contaminated host environment under X11
+        id: portable-environment-linux
+        if: success() && runner.os == 'Linux'
+        timeout-minutes: 35
+        shell: bash
+        run: >-
+          xvfb-run -a -s "-screen 0 1280x1024x24" env QT_QPA_PLATFORM=xcb
+          python scripts/verify_portable_environment.py --archives dist-native
+          --output test-results/linux/portable-environment
+      - name: macOS command and app launchers with clean PATH and contaminated host environment
+        id: portable-environment-macos
+        if: success() && runner.os == 'macOS'
+        timeout-minutes: 35
+        env:
+          QT_QPA_PLATFORM: cocoa
+        run: python scripts/verify_portable_environment.py --archives dist-native --output test-results/macos/portable-environment
       - name: Verify Linux package without host Python/network/native libraries
         if: runner.os == 'Linux'
         shell: bash
@@ -211,11 +411,29 @@ jobs:
           for archive in dist-native/*linux-x64-native-cpu.zip; do
             python scripts/verify_clean_linux_bundle.py --archive "$archive" --output test-results/clean-native-linux
           done
+      - name: Report Windows coverage including failed and skipped stages
+        if: always() && runner.os == 'Windows'
+        env:
+          VSE_WINDOWS_STEP_OUTCOMES: >-
+            {"identity":"${{ steps.windows-identity.outcome }}",
+             "native-build":"${{ steps.native-build.outcome }}",
+             "native-smoke":"${{ steps.native-smoke.outcome }}",
+             "source-tests":"${{ steps.source-tests.outcome }}",
+             "gui":"${{ steps.windows-gui.outcome }}",
+             "theme":"${{ steps.windows-theme.outcome }}",
+             "cli":"${{ steps.cli.outcome }}",
+             "ordinary":"${{ steps.ordinary.outcome }}",
+             "issues":"${{ steps.issues.outcome }}",
+             "license-gate":"${{ steps.license-gate.outcome }}",
+             "package-build":"${{ steps.package-build.outcome }}",
+             "package-verify":"${{ steps.package-verify.outcome }}",
+             "portable-environment":"${{ steps.portable-environment.outcome }}"}
+        run: python scripts/windows_verification.py summarize --runner ${{ matrix.os }} --profile native
       - name: Preserve exact-size, isolation and GUI screenshot evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: native-profile-evidence-${{ matrix.platform }}-${{ matrix.arch }}
+          name: native-profile-evidence-${{ matrix.os }}-${{ matrix.arch }}
           path: |
             test-results/
             dist-native/test-results/
@@ -226,7 +444,7 @@ jobs:
       - name: Preserve test candidate only (never publish release/tag)
         uses: actions/upload-artifact@v4
         with:
-          name: native-profile-candidate-${{ matrix.platform }}-${{ matrix.arch }}
+          name: native-profile-candidate-${{ matrix.os }}-${{ matrix.arch }}
           path: dist-native/*.zip
           if-no-files-found: error
           compression-level: 0

@@ -116,6 +116,11 @@ checks recognized words, timestamp bounds, and non-overlap. It saves the video,
 SRT, extraction log and JSON result. Mock/unit tests alone do not establish OCR
 accuracy, native GUI support, or a successful release.
 
-CI runs native Linux x64, Windows x64 and macOS ARM64 CPU checks plus Docker;
-consult the exact commit's Actions run for actual results. ARM Linux, Intel
-macOS, GPU acceleration and native Windows ARM are not certified by that matrix.
+CI configures Linux x64, Windows **Server 2022 and Server 2025 x64**, and macOS
+ARM64 CPU checks plus Docker; consult the exact commit's completed Actions run
+for actual results. Paddle and native CPU profiles are separate. Windows 10/11
+x64 clients, ARM Linux, Intel macOS, GPU acceleration and Windows ARM/emulation
+are outside the selected verified coverage. Windows verification is deliberately
+Server CI only; client/ARM/GPU machine access is not requested or awaited.
+See the [Windows coverage boundaries and
+evidence guide](windows-verification.md).

@@ -235,7 +235,7 @@ def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT, *, profile:
                 from .bundle_linux_runtime_libs import bundle_linux_libraries
             except ImportError:
                 from bundle_linux_runtime_libs import bundle_linux_libraries
-            runtime_info['native_libraries'] = bundle_linux_libraries(stage, stage / runtime_info['python'])
+            runtime_info['native_libraries'] = bundle_linux_libraries(stage, stage / runtime_info['python'], profile=profile)
         portable_launchers(stage, target_platform, target_arch, runtime_info["python"], profile)
         app_files = {}
         if target_platform == 'macos':
@@ -287,7 +287,7 @@ def extract_checked(archive_path: Path, destination: Path) -> Path:
 
 
 def verification_path(python: Path, evidence: Path, target_platform: str) -> str:
-    """Expose explicit base OS tools, never the host's Python/pip directories."""
+    """Control the incoming test PATH; launchers rebuild their own OS/tool PATH."""
     import os
     tools_dir = evidence / 'base-os-tools'
     tools_dir.mkdir(parents=True, exist_ok=False)
@@ -322,7 +322,9 @@ def verify_bundle(archive_path: Path, smoke: bool) -> None:
             try:
                 import os
                 python = root / manifest['runtime_python']
-                # No system Python, pip or package manager can be found on PATH.
+                # No inherited host Python/package-manager directories on the
+                # incoming PATH. The launcher supplies explicit base-OS paths;
+                # loaded-runtime audits and the stock-OS gate prove isolation.
                 env = dict(os.environ, PATH=verification_path(python, evidence, manifest['platform']), PYTHONDONTWRITEBYTECODE='1', PYTHONNOUSERSITE='1')
                 env.pop('PYTHONPATH', None)
                 env.pop('PYTHONHOME', None)
@@ -340,7 +342,13 @@ def verify_bundle(archive_path: Path, smoke: bool) -> None:
                     audit_windows_executables(root, python, isolation_reports)
                 elif manifest['platform'] == 'macos':
                     audit_macos_executables(root, isolation_reports)
-                subprocess.run([str(python), str(root / 'bootstrap.py'), '--verify', '--results-dir', str(evidence)], check=True, cwd=root, env=env)
+                try:
+                    from .portable_python import launcher_command
+                except ImportError:
+                    from portable_python import launcher_command
+                command = launcher_command(root, manifest['platform'], ['--verify', '--results-dir', str(evidence),
+                                                                         '--runtime-audit-dir', str(isolation_reports)])
+                subprocess.run(command, check=True, cwd=root, env=env)
                 summarize_reports(root, isolation_reports, required_modules=('PySide6.QtWidgets', 'cv2', 'qfluentwidgets') + (('paddle',) if manifest.get('ocr_backend', 'paddle') == 'paddle' else ()), forbidden_modules=('paddle', 'paddleocr', 'paddlex', 'onnxruntime') if manifest.get('ocr_backend') == 'native' else ())
             finally:
                 # Preserve extraction evidence before TemporaryDirectory cleanup,

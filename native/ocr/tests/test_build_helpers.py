@@ -75,3 +75,5 @@ def test_windows_toolhelp_header_follows_win32_definitions():
     source=(Path(build.__file__).parent/'worker.cpp').read_text(encoding='utf-8')
     assert source.index('#include <windows.h>') < source.index('#include <tlhelp32.h>')
     assert source.index('#define NOMINMAX') < source.index('#include <windows.h>')
+    # Windows RPC headers define the legacy `small` token as a macro.
+    assert 'cv::Mat small;' not in source

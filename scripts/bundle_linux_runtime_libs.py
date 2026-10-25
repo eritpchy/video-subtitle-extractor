@@ -22,6 +22,8 @@ BASE = re.compile(r"^(?:ld-linux[^/]*\.so(?:\.\d+)*|lib(?:c|m|dl|pthread|rt|util
 PACKAGE_ID = re.compile(r'[a-z0-9][a-z0-9+.-]+(?::[a-z0-9][a-z0-9-]*)?')
 DOC_ROOT = Path('/usr/share/doc')
 COMMON_LICENSES_ROOT = Path('/usr/share/common-licenses')
+PADDLE_LDD = Path('/usr/bin/ldd')
+PADDLE_LDD_INTERPRETER = Path('/bin/bash')
 
 
 def sha256(path: Path) -> str:
@@ -164,7 +166,37 @@ def linux_os_release() -> str:
     return Path('/etc/os-release').read_text()
 
 
-def bundle_linux_libraries(stage_root: Path, runtime_python: Path | None = None) -> dict:
+def paddle_host_utility_dependencies() -> dict:
+    """Inspect the known Debian/Ubuntu Paddle import helper, without executing it.
+
+    Paddle's get_libc_ver invokes ldd through /bin/sh; ldd is a Bash script.
+    Bash stays OS supplied, but its known non-glibc dependency must be bundled
+    because subprocesses inherit our LD_LIBRARY_PATH and the strict loader audit.
+    An unfamiliar interpreter/dependency set needs review, not arbitrary copying.
+    """
+    with PADDLE_LDD.open('rb') as stream:
+        if stream.readline().rstrip(b'\r\n') != b'#!/bin/bash':
+            raise RuntimeError('Unsupported Paddle ldd interpreter; expected Debian/Ubuntu /bin/bash')
+    if not is_elf(PADDLE_LDD_INTERPRETER):
+        raise RuntimeError('Paddle ldd interpreter must be an ELF /bin/bash')
+    info = elf_info(PADDLE_LDD_INTERPRETER)
+    seeds = sorted({name for name in info['needed'] if not BASE.fullmatch(name)})
+    if seeds != ['libtinfo.so.6'] or info['paths']:
+        raise RuntimeError(f'Unreviewed Paddle ldd interpreter dependencies/search paths: {info}')
+    return {
+        'consumer': 'paddle.base.core.get_libc_ver',
+        'command': "ldd --version | awk '/ldd/{print $NF}'",
+        'os_supplied_not_bundled': ['/bin/sh', '/bin/bash', '/usr/bin/ldd', 'awk'],
+        'build_ldd': {'path': str(PADDLE_LDD), 'sha256': sha256(PADDLE_LDD)},
+        'build_interpreter': {'path': str(PADDLE_LDD_INTERPRETER),
+                              'sha256': sha256(PADDLE_LDD_INTERPRETER), 'needed': info['needed']},
+        'seed_libraries': seeds,
+    }
+
+
+def bundle_linux_libraries(stage_root: Path, runtime_python: Path | None = None, *, profile: str | None = None) -> dict:
+    if profile not in (None, 'paddle', 'native'):
+        raise ValueError(f'Unknown Linux runtime profile: {profile!r}')
     root = Path(stage_root).resolve(strict=True)
     dest = root / 'native-libs'
     if dest.exists():
@@ -195,7 +227,29 @@ def bundle_linux_libraries(stage_root: Path, runtime_python: Path | None = None)
     origins = {}
     abi_requirements = set()
     queue = list(initial)
+
+    def copy_host_library(name: str, candidate: Path) -> None:
+        source = candidate.resolve(strict=True)
+        if not is_elf(source):
+            raise RuntimeError(f'Host dependency is not ELF: {source}')
+        target = dest / safe_name(name)
+        provenance = package_provenance(source, dest)
+        shutil.copyfile(source, target)
+        target.chmod(0o755)
+        records[name] = {'source': str(source), 'sha256': sha256(target), 'bytes': target.stat().st_size, **provenance}
+        origins[target] = source
+        queue.append(target)
+
     try:
+        host_utilities = []
+        if profile == 'paddle':
+            utility = paddle_host_utility_dependencies()
+            host_utilities.append(utility)
+            for name in utility['seed_libraries']:
+                candidate = cache.get(name)
+                if candidate is None or not candidate.is_file():
+                    raise RuntimeError(f'Unresolved Paddle host-utility dependency: {name}')
+                copy_host_library(name, candidate)
         while queue:
             binary = queue.pop()
             real = binary.resolve()
@@ -231,19 +285,13 @@ def bundle_linux_libraries(stage_root: Path, runtime_python: Path | None = None)
                 candidate = next((p for p in candidates if p.is_file()), cache.get(name))
                 if candidate is None or not candidate.is_file():
                     raise RuntimeError(f'Unresolved dependency {name} required by {binary.relative_to(root)}')
-                source = candidate.resolve(strict=True)
-                target = dest / name
-                provenance = package_provenance(source, dest)
-                shutil.copyfile(source, target)
-                target.chmod(0o755)
-                records[name] = {'source': str(source), 'sha256': sha256(target), 'bytes': target.stat().st_size, **provenance}
-                origins[target] = source
-                queue.append(target)
+                copy_host_library(name, candidate)
         floor = max(versions, key=lambda x: tuple(map(int, x.split('.')))) if versions else None
         manifest = {'schema_version': 1, 'base_libraries': sorted(base), 'minimum_glibc': floor, 'glibc_non_numeric_requirements': sorted(abi_requirements),
                     'build_os_release': linux_os_release(),
                     'launch_environment': {'LD_LIBRARY_PATH': '$BUNDLE/native-libs'},
                     'limitations': ['Requires Linux with recorded glibc ABI or newer.', 'Native GUI requires an OS X11 display server. GPU/GL drivers are OS facilities.', 'DT_NEEDED closure does not prove arbitrary dlopen paths; clean-container GUI and OCR E2E are required.'],
+                    'host_utility_dependencies': host_utilities,
                     'libraries': records, 'elf_files_scanned': len(scanned)}
         manifest['attribution_hashes'] = {p.relative_to(dest).as_posix(): sha256(p) for p in sorted(dest.rglob('*'), key=lambda p: p.as_posix()) if p.is_file() and 'licenses' in p.relative_to(dest).parts}
         (dest / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
@@ -285,7 +333,8 @@ def verify_linux_libraries(stage_root: Path) -> dict:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('stage_root', type=Path)
+    parser.add_argument('--profile', choices=('paddle', 'native'), help='Include reviewed profile-specific host-utility dependencies')
     parser.add_argument('--verify', action='store_true')
     args = parser.parse_args()
-    result = verify_linux_libraries(args.stage_root) if args.verify else bundle_linux_libraries(args.stage_root)
+    result = verify_linux_libraries(args.stage_root) if args.verify else bundle_linux_libraries(args.stage_root, profile=args.profile)
     print(json.dumps(result, indent=2))

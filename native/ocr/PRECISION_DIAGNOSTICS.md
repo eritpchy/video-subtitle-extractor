@@ -48,6 +48,11 @@ The existing smoke step remains hard-failing. Only after a macOS smoke failure:
    two fresh baseline diagnostic runs, explicit BF16-off, EXTENDED, BASIC,
    DISABLED and OpenCV-unoptimized variants. Capture responses and exact
    little-endian FP32 detector/recognizer input/output bytes with hashes/shapes.
+   The diagnostic target also saves integer detector quads, the crop's second
+   `minAreaRect` corners, the exact `warpPerspective` matrix and the resulting
+   BGR uint8 crop before recognition resize (raw bytes, shape and verified SHA).
+   This distinguishes geometry changes from warp changes and later resizing;
+   it does not assume which operation caused the current discrepancy.
 3. In a separate venv, install the hash-pinned official macOS arm64 Paddle
    3.3.1 wheel and pinned dependencies. Replay those same recognition tensors
    through the original hash-verified Paddle sources, CPU FP32, four threads,
@@ -76,3 +81,48 @@ Neither the diagnostic executable, Paddle environment nor tensor dumps enter
 
 macOS diagnostic and full packaged GUI/video/SRT results remain pending until
 the real macOS CI run executes. Linux helper/compile checks cannot establish them.
+
+## Round 2: input-level localization, not tolerance relaxation
+
+The `1d965e5` macOS run completed all 96 selected requests (production plus seven
+diagnostic variants, 12 cases each). Default traces reproduced production;
+BF16-off, EXTENDED/BASIC/DISABLED and OpenCV-unoptimized did not remove the four
+confidence failures. The separate Paddle environment installed successfully,
+but the official source archive server returned HTTP 403 on Mac **before any
+Paddle reference inference**. Do not report that stage as a reference pass.
+
+Verified Mac trace tensors were compared with the preserved Linux captures:
+all 12 detector input tensors were byte-identical, and all 12 detector threshold
+masks (`prediction > .3`) were identical. Recognition inputs differed for the
+four failed cases and two passing Tamil-medium controls. Replaying both input
+sets with the same Linux ORT 1.31 CPU session separates input changes from
+recognizer runtime differences:
+
+| Case | Changed FP32 input elements | Confidence delta: input change only, same Linux ORT | Confidence delta: same Mac input, Mac-native vs Linux ORT |
+|---|---:|---:|---:|
+| 31 | 24 | 0.0000720024 | 0.0000004768 |
+| 33 | 27 | 0.0001117587 | 0.0000003576 |
+| 66 | 21 | 0.0000237226 | 0.0000001788 |
+| 72 | 165 | 0.0001828671 | 0.0000001788 |
+
+The largest input differences correspond to 2/3/4/5 uint8 gray levels,
+respectively. Across all 12, replaying the Mac inputs through independent Linux
+Paddle 3.3.1 kept the maximum confidence difference below `2.03e-6`. Linux
+Python ORT reproduced the original Linux native tensors byte-for-byte.
+
+This localizes the dominant four-case discrepancy to the recognition input
+construction path, not recognizer ARM arithmetic. It does **not** yet distinguish
+crop geometry, perspective warping, and resizing, and it is **cross-architecture
+causal evidence, not same-Mac Paddle validation**. Goldens and `1e-5` remain fixed.
+
+To remove the Mac download blocker, a separate Linux diagnostic job exports exactly
+three original Paddle recognizer sources as a separate build-only artifact,
+using the existing official archive and per-file pins. Its independently keyed
+archive cache works even when converted models are a cache hit. Mac verifies
+the files against committed pins again and performs reference inference offline;
+there is no mirror, weaker hash policy, or customer-package dependency change.
+Windows/Linux native jobs depend only on the verified 15-model conversion job,
+not this diagnostic source job. After a Mac smoke failure, only the Mac runner
+waits for the same-run source job's result. Failure or unavailable reference
+evidence is recorded explicitly and never treated as a parity pass; the original
+smoke remains a hard failure.

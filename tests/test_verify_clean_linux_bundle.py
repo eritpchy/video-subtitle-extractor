@@ -95,6 +95,18 @@ class CleanLinuxTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Missing actual'):
                 clean.audit_loader_logs(Path(tmp), ('runtime',))
 
+    def test_bash_tinfo_must_resolve_inside_bundle_not_a_global_os_exception(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'loader').mkdir()
+            log = root / 'loader/runtime.123'
+            prefix = '1: calling init: /bundle/runtime/lib/libpython3.12.so\n'
+            log.write_text(prefix + '1: file=libtinfo.so.6 [0]; needed by /bin/bash [0]\n1: calling init: /lib/x86_64-linux-gnu/libtinfo.so.6\n')
+            with self.assertRaisesRegex(RuntimeError, 'libtinfo.so.6'):
+                clean.audit_loader_logs(root, ('runtime',))
+            log.write_text(prefix + '1: calling init: /bundle/native-libs/libtinfo.so.6\n')
+            self.assertEqual(clean.audit_loader_logs(root, ('runtime',))['result'], 'passed')
+
     def test_workload_evidence_requires_all_screenshots_and_issue_cases(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

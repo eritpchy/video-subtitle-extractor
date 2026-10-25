@@ -2,10 +2,11 @@
 
 ## What is supported by these workflows
 
-- Python 3.12, CPU: Linux x64 (`ubuntu-24.04`), Windows x64 (`windows-2022`), macOS Apple Silicon (`macos-15`).
+- Python 3.12, CPU verification: Linux x64 (`ubuntu-24.04`), Windows **Server 2022 and Server 2025 x64** (`windows-2022`, `windows-2025`), macOS Apple Silicon (`macos-15`). Windows verification is deliberately Server CI only: Windows 10/11 x64 clients, Windows ARM/emulation and physical GPU execution are outside the selected coverage, not gates awaiting machine authorization; see the [Windows verification matrix](windows-verification.md).
 - Docker: headless Linux amd64 CPU image. It is built and exercised in CI, not automatically pushed to a registry.
 - Native jobs install dependencies, run `pip check`, verify VideoSubFinder 6.10.6, download checksum-pinned PP-OCRv6 small/medium models, run unit/real OCR/real VSF tests, launch the actual GUI in light/dark modes using Cocoa on macOS and offscreen on Linux/Windows, then exercise each native Qt platform backend (Linux X11 via Xvfb, Windows, Cocoa), and run video-to-SRT extraction.
 - Package jobs include both verified PP-OCRv6 small and medium tiers, the native VSF binary and its libraries, the application source, a checksum-pinned portable Python interpreter and the preinstalled inference runtime. Each archive is extracted, checksum-checked and tested using its own interpreter with host Python removed from PATH. No client installation occurs.
+- Both CPU workflows additionally require final-ZIP actual-launcher acceptance with clean PATH and simulated host environment contamination on every native platform: Windows, Linux XCB under Xvfb, and macOS Cocoa `.command` plus audited `.app` CLI. These gates run only after earlier checks succeed; their reports stay in separate OS/profile artifacts. See [portable environment isolation](portable-environment-isolation.md).
 
 **A workflow definition is not a test result.** Read the completed run for the exact commit before claiming a platform passed. Offscreen rendering and hosted-runner native GUI checks do not prove display-driver/window-manager behavior on every desktop. CUDA, DirectML, Intel macOS, Windows ARM, Linux ARM and GPU Docker are not certified by this CPU release. The old QPT/CUDA/DirectML workflows were removed: they ran on obsolete Windows runners and could publish or mutate the same prerelease on every branch push.
 

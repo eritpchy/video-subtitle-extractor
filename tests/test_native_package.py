@@ -86,8 +86,10 @@ def test_native_bundle_omits_paddle_weights_and_selects_backend(tmp_path):
         (stage/'runtime/bin/python3.12').write_text('portable CPython')
         return {'python':'runtime/bin/python3.12'}
     tracked=b'backend/config.py\0backend/models/V6/PP-OCRv6_small_rec_infer/model.json\0scripts/bundle_bootstrap.py\0'
-    with patch('scripts.package_release.host_platform',return_value=('linux','x64')), patch('scripts.package_release.subprocess.check_output',side_effect=['a'*40+'\n','',tracked]), patch('scripts.package_release.subprocess.run') as run, patch('scripts.package_release.runtime_wheels',return_value=([wheel],['sample==1.0'])), patch('scripts.package_release.build_runtime',side_effect=runtime), patch('scripts.package_release.portable_launchers'), patch('scripts.bundle_linux_runtime_libs.bundle_linux_libraries',return_value={}):
+    with patch('scripts.package_release.host_platform',return_value=('linux','x64')), patch('scripts.package_release.subprocess.check_output',side_effect=['a'*40+'\n','',tracked]), patch('scripts.package_release.subprocess.run') as run, patch('scripts.package_release.runtime_wheels',return_value=([wheel],['sample==1.0'])), patch('scripts.package_release.build_runtime',side_effect=runtime), patch('scripts.package_release.portable_launchers'), patch('scripts.bundle_linux_runtime_libs.bundle_linux_libraries',return_value={}) as native_closure:
         output=create_bundle(root/'wheelhouse',root/'dist',root,profile='native',native_ocr=artifact)
+        assert native_closure.call_count == 1
+        assert native_closure.call_args.kwargs == {'profile': 'native'}
         assert not any('backend.tools.model_download' in str(call) for call in run.call_args_list)
     verify_bundle(output,False)
     with zipfile.ZipFile(output) as archive:

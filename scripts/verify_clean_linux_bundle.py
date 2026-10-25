@@ -98,6 +98,10 @@ def container_command(bundle: Path, evidence: Path, image: str, python: str,
         environment.update(DISPLAY=display, XAUTHORITY='/xauthority', QT_QPA_PLATFORM='xcb', QT_X11_NO_MITSHM='1')
     command += [image, '/usr/bin/env', '-i']
     command += [f'{key}={value}' for key, value in environment.items()]
+    if arguments and arguments[0] == 'bootstrap.py':
+        # Exercise the actual customer launcher in the no-Python stock OS too;
+        # interpreter startup isolation must not be bypassed by this gate.
+        return command + ['/bundle/Start-VSE.sh', *arguments[1:]]
     return command + [f'/bundle/{python}', *arguments]
 
 

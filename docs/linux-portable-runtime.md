@@ -21,7 +21,8 @@ pruned, but before the final artifact inventory is hashed:
 
 ```python
 from scripts.bundle_linux_runtime_libs import bundle_linux_libraries
-native_metadata = bundle_linux_libraries(stage_root, runtime_python=python_path)
+native_metadata = bundle_linux_libraries(stage_root, runtime_python=python_path,
+                                        profile="paddle")  # or "native"
 ```
 
 This scans ELF inputs without running them, recursively resolves `DT_NEEDED`,
@@ -31,6 +32,24 @@ common licenses. `native-libs/manifest.json` records per-library SHA-256, sizes,
 license hashes, build OS, base libraries, and the **measured** maximum required
 numeric GLIBC symbol version across the actual staged and copied ELF files.
 Do not use the build host’s glibc version as a substitute for this measurement.
+
+The Paddle profile also seeds the reviewed non-glibc dependency of an OS utility
+that its import invokes: Paddle 3.3.1 `paddle.base.core.get_libc_ver()` runs
+`ldd --version | awk ...` through `/bin/sh`. Debian/Ubuntu's `/usr/bin/ldd` is a
+`#!/bin/bash` script, and Bash needs `libtinfo.so.6`. The build verifies that
+shebang and Bash's `DT_NEEDED`/search paths before adding **only this known seed**
+to the normal recursive closure, with the same exact dpkg provenance, copyright,
+license and hash requirements as every other copied library. An unfamiliar
+interpreter or dependency set fails closed for review. The `native` profile does
+not add this Paddle-specific seed; generic scans without a profile do not either.
+
+The manifest's `host_utility_dependencies` explains this cause and records the
+build utility hashes. Bash, ldd, awk and `/bin/sh` themselves are **not bundled**:
+the supported Debian/Ubuntu OS must provide them. The ABI floor includes the
+copied libtinfo and its closure, not the build host's unbundled Bash executable.
+It describes shipped ELF requirements, not a promise that arbitrary distributions
+provide compatible utilities. Do not expand the external-library allowlist for
+libtinfo: the clean gate must observe it loading from `/bundle/native-libs/`.
 
 Unknown libraries, unresolved dependencies, escaping symlinks, and missing package
 or license metadata fail the build. An interrupted closure is not reusable:
@@ -124,6 +143,9 @@ pass only proves command construction/log validation, not this container gate.
 The clean container deliberately retains `PATH=/usr/bin:/bin` **after** its
 no-Python/no-Qt baseline assertion. The verified VSF 6.10.6 shell wrapper requires
 the base OS `dirname` utility; shell/coreutils are OS facilities, not inference
-dependencies. The bundled interpreter is always invoked by its explicit absolute
-path, and external Python/Qt/non-base libraries remain prohibited. Do not patch
-the checksum-verified VSF wrapper or install missing tools inside acceptance.
+dependencies. The Paddle profile additionally uses the OS ldd/Bash/awk pipeline
+described above; the non-glibc libraries used by these subprocesses are **not**
+exempt from the loader audit. The bundled interpreter is always invoked by its
+explicit absolute path, and external Python/Qt/non-base libraries remain
+prohibited. Do not patch the checksum-verified VSF wrapper or install missing
+tools inside acceptance.

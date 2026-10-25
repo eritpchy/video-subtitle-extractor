@@ -269,11 +269,20 @@ cv::Mat crop(const cv::Mat &im, const Quad &q) {
   Quad dst = {cv::Point2f(0, 0), cv::Point2f(w, 0), cv::Point2f(w, h),
               cv::Point2f(0, h)};
   cv::Mat out;
+#ifdef VSE_OCR_PRECISION_DIAGNOSTIC
+  const auto perspective = cv::getPerspectiveTransform(b.data(), dst.data());
+  cv::warpPerspective(im, out, perspective, cv::Size(w, h), cv::INTER_CUBIC,
+                      cv::BORDER_REPLICATE);
+#else
   cv::warpPerspective(im, out,
                       cv::getPerspectiveTransform(b.data(), dst.data()),
                       cv::Size(w, h), cv::INTER_CUBIC, cv::BORDER_REPLICATE);
+#endif
   if (h / double(w) >= 1.5)
     cv::rotate(out, out, cv::ROTATE_90_COUNTERCLOCKWISE);
+#ifdef VSE_OCR_PRECISION_DIAGNOSTIC
+  precision_diagnostic::geometry(q, b, perspective, w, h, h / double(w) >= 1.5, out);
+#endif
   return out;
 }
 struct Entry {
@@ -506,12 +515,12 @@ struct Engine {
         int rw = rec_h * std::max(rec_w / double(rec_h), wh) > 3200
                      ? 3200
                      : std::min(widths[b], int(ceil(rec_h * wh)));
-        cv::Mat small;
-        cv::resize(image, small, cv::Size(rw, rec_h));
+        cv::Mat resized_crop;
+        cv::resize(image, resized_crop, cv::Size(rw, rec_h));
         for (int y = 0; y < rec_h; ++y)
           for (int xx = 0; xx < rw; ++xx)
             for (int c = 0; c < 3; ++c) {
-              float v = small.at<cv::Vec3b>(y, xx)[c];
+              float v = resized_crop.at<cv::Vec3b>(y, xx)[c];
               v /= 255.f;
               v -= .5f;
               v /= .5f;

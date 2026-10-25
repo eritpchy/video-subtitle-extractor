@@ -211,7 +211,7 @@ class NativeClosureTests(unittest.TestCase):
     def test_base_policy_keeps_cpp_xcb_and_gomp(self):
         for name in ['libc.so.6', 'libpthread.so.0', 'ld-linux-x86-64.so.2', 'libm.so.6']:
             self.assertTrue(native.BASE.fullmatch(name))
-        for name in ['libstdc++.so.6', 'libgcc_s.so.1', 'libxcb.so.1', 'libgomp.so.1']:
+        for name in ['libstdc++.so.6', 'libgcc_s.so.1', 'libxcb.so.1', 'libgomp.so.1', 'libtinfo.so.6']:
             self.assertFalse(native.BASE.fullmatch(name))
 
     def test_library_name_traversal_rejected(self):
@@ -314,6 +314,126 @@ class NativeClosureTests(unittest.TestCase):
             (root / 'native-libs' / 'injected.so').unlink()
             with self.assertRaisesRegex(ValueError, 'overwrite'):
                 native.bundle_linux_libraries(root)
+
+
+class PaddleHostUtilityTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.parent = Path(temporary.name)
+        self.root = self.parent / 'stage'
+        self.root.mkdir()
+        (self.root / 'python').write_bytes(b'\x7fELFfixture')
+        self.ldd, self.bash = self.parent / 'ldd', self.parent / 'bash'
+        self.ldd.write_bytes(b'#!/bin/bash\n# fixture; never executed\n')
+        self.bash.write_bytes(b'\x7fELFbash-fixture')
+        for name, value in [('PADDLE_LDD', self.ldd), ('PADDLE_LDD_INTERPRETER', self.bash)]:
+            mocked = patch.object(native, name, value)
+            mocked.start()
+            self.addCleanup(mocked.stop)
+        self.bash_info = {'needed': ['libtinfo.so.6', 'libc.so.6'], 'paths': [], 'glibc': ['9.9']}
+
+    def test_inspects_known_ldd_bash_dependency_without_claiming_to_bundle_tools(self):
+        with patch.object(native, 'elf_info', return_value=self.bash_info) as inspect:
+            result = native.paddle_host_utility_dependencies()
+        inspect.assert_called_once_with(self.bash)
+        self.assertEqual(result['seed_libraries'], ['libtinfo.so.6'])
+        self.assertIn('/bin/bash', result['os_supplied_not_bundled'])
+        self.assertEqual(result['build_ldd']['sha256'], native.sha256(self.ldd))
+        self.assertEqual(result['build_interpreter']['needed'], self.bash_info['needed'])
+
+    def test_unreviewed_ldd_interpreter_or_dependencies_fail_closed(self):
+        self.ldd.write_text('#!/usr/bin/env bash\n')
+        with self.assertRaisesRegex(RuntimeError, 'Unsupported Paddle ldd interpreter'):
+            native.paddle_host_utility_dependencies()
+        self.ldd.write_text('#!/bin/bash\n')
+        self.bash.write_bytes(b'not an ELF')
+        with self.assertRaisesRegex(RuntimeError, 'must be an ELF'):
+            native.paddle_host_utility_dependencies()
+        self.bash.write_bytes(b'\x7fELFfixture')
+        for changes in ({'needed': ['libsurprise.so', 'libc.so.6']}, {'needed': ['libc.so.6']}, {'paths': ['/custom']}):
+            with self.subTest(changes=changes), patch.object(native, 'elf_info', return_value={**self.bash_info, **changes}):
+                with self.assertRaisesRegex(RuntimeError, 'Unreviewed Paddle ldd interpreter'):
+                    native.paddle_host_utility_dependencies()
+        self.ldd.unlink()
+        with self.assertRaises(FileNotFoundError):
+            native.paddle_host_utility_dependencies()
+
+    def test_paddle_seed_has_recursive_provenance_and_only_shipped_elf_sets_abi_floor(self):
+        libraries = ['libtinfo.so.6', 'libfixture.so.1']
+        for name in libraries:
+            (self.parent / name).write_bytes(b'\x7fELF' + name.encode())
+        docs, common = self.parent / 'doc', self.parent / 'common-licenses'
+        (docs / 'libfixture').mkdir(parents=True)
+        common.mkdir()
+        copyright_bytes = b'Exact fixture copyright\n/usr/share/common-licenses/MIT\n'
+        license_bytes = b'Exact complete fixture license\r\n'
+        (docs / 'libfixture/copyright').write_bytes(copyright_bytes)
+        (common / 'MIT').write_bytes(license_bytes)
+        package = 'libfixture:amd64'
+        metadata = [package, '1.2.3', 'fixture-source', '1.2.3', 'https://example.test']
+        def run(*args):
+            if args == ('/sbin/ldconfig', '-p'):
+                return '\n'.join(f'{name} (libc6) => {self.parent / name}' for name in libraries)
+            if args[:2] == ('dpkg-query', '-S'):
+                return f'{package}: {args[2]}\n'
+            self.assertEqual(args[0:2], ('dpkg-query', '-W'))
+            self.assertEqual(args[-1], package)
+            return '\n'.join(metadata) + '\n'
+        def inspect(path):
+            if path == self.bash:
+                return self.bash_info
+            needed = ['libfixture.so.1'] if path.name == 'libtinfo.so.6' else ['libc.so.6']
+            return {'needed': needed, 'paths': [], 'glibc': ['2.36' if path.name == 'libtinfo.so.6' else '2.34']}
+        with patch.object(native, 'run', side_effect=run), patch.object(native, 'elf_info', side_effect=inspect), patch.object(native, 'DOC_ROOT', docs), patch.object(native, 'COMMON_LICENSES_ROOT', common), patch.object(native, 'linux_os_release', return_value='fixture OS'):
+            manifest = native.bundle_linux_libraries(self.root, profile='paddle')
+        self.assertEqual(set(manifest['libraries']), set(libraries))
+        self.assertEqual(manifest['minimum_glibc'], '2.36')  # Not the unbundled Bash's 9.9.
+        self.assertEqual(manifest['elf_files_scanned'], 3)
+        self.assertEqual(manifest['host_utility_dependencies'][0]['seed_libraries'], ['libtinfo.so.6'])
+        self.assertFalse((self.root / 'native-libs/bash').exists())
+        for name in libraries:
+            record = manifest['libraries'][name]
+            self.assertEqual(record['package_metadata'], metadata)
+            self.assertEqual(record['source'], str((self.parent / name).resolve()))
+            self.assertEqual((self.root / 'native-libs' / name).read_bytes(), (self.parent / name).read_bytes())
+            for filename, expected in [('copyright', copyright_bytes), ('MIT', license_bytes)]:
+                relative = next(p for p in record['license_files'] if p.endswith('/' + filename))
+                self.assertEqual((self.root / 'native-libs' / relative).read_bytes(), expected)
+                self.assertIn(relative, manifest['attribution_hashes'])
+        self.assertEqual(native.verify_linux_libraries(self.root), manifest)
+
+    def test_native_and_generic_scan_do_not_seed_paddle_dependencies(self):
+        for profile in (None, 'native'):
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / 'python').write_bytes(b'\x7fELFfixture')
+                with patch.object(native, 'paddle_host_utility_dependencies') as utility, patch.object(native, 'run', return_value=''), patch.object(native, 'elf_info', return_value={'needed': ['libc.so.6'], 'paths': [], 'glibc': ['2.34']}), patch.object(native, 'linux_os_release', return_value='fixture OS'):
+                    manifest = native.bundle_linux_libraries(root, profile=profile)
+                utility.assert_not_called()
+                self.assertEqual(manifest['libraries'], {})
+                self.assertEqual(manifest['host_utility_dependencies'], [])
+
+    def test_missing_seed_or_provenance_cannot_write_manifest(self):
+        for with_library in (False, True):
+            with self.subTest(with_library=with_library), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / 'python').write_bytes(b'\x7fELFfixture')
+                source = self.parent / 'libtinfo.so.6'
+                source.write_bytes(b'\x7fELFtinfo-fixture')
+                def run(*args):
+                    if args[0] == '/sbin/ldconfig':
+                        return f'libtinfo.so.6 (libc6) => {source}' if with_library else ''
+                    raise subprocess.CalledProcessError(1, args)
+                with patch.object(native, 'run', side_effect=run), patch.object(native, 'elf_info', return_value=self.bash_info):
+                    with self.assertRaisesRegex(RuntimeError, 'provenance' if with_library else 'Unresolved Paddle'):
+                        native.bundle_linux_libraries(root, profile='paddle')
+                self.assertFalse((root / 'native-libs/manifest.json').exists())
+
+    def test_unknown_profile_fails_before_creating_closure(self):
+        with self.assertRaisesRegex(ValueError, 'Unknown Linux runtime profile'):
+            native.bundle_linux_libraries(self.root, profile='typo')
+        self.assertFalse((self.root / 'native-libs').exists())
 
 
 if __name__ == '__main__':

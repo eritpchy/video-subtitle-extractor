@@ -73,6 +73,42 @@ def validate_trace(root, metadata):
     return record
 
 
+def validate_geometry(root, metadata):
+    record = json.loads(metadata.read_text(encoding='utf-8'))
+    if record.get('schema_version') != 1:
+        raise ValueError('unknown geometry trace schema')
+    def matrix(value, rows, cols, integers=False):
+        return (isinstance(value, list) and len(value) == rows and
+                all(isinstance(row, list) and len(row) == cols and
+                    all(type(n) is int if integers else type(n) in (int, float) and math.isfinite(n)
+                        for n in row) for row in value))
+    if (not matrix(record.get('det_quad'), 4, 2, integers=True) or
+            not matrix(record.get('crop_min_area_rect'), 4, 2) or
+            not matrix(record.get('warp_perspective_matrix'), 3, 3)):
+        raise ValueError('invalid diagnostic geometry coordinates/matrix')
+    size = record['warp_size']
+    if len(size) != 2 or any(type(n) is not int or n <= 0 for n in size):
+        raise ValueError('invalid diagnostic warp size')
+    rotated = record['rotated_90_counterclockwise']
+    if type(rotated) is not bool:
+        raise ValueError('invalid diagnostic rotation flag')
+    tensor = record['pre_resize']
+    expected_shape = [*reversed(size), 3] if rotated else [*size, 3]
+    if tensor['dtype'] != 'uint8' or tensor.get('channel_order') != 'BGR' or tensor['shape'] != expected_shape:
+        raise ValueError('invalid diagnostic pre-resize shape/dtype/channel order')
+    name = tensor['file']
+    if not name or Path(name).name != name or '/' in name or '\\' in name:
+        raise ValueError('invalid diagnostic pre-resize path')
+    path = root / name
+    if path.is_symlink() or path.stat().st_size != math.prod(expected_shape):
+        raise ValueError('diagnostic pre-resize byte count or path mismatch')
+    observed = digest(path)
+    if tensor.get('sha256', observed) != observed:
+        raise ValueError('diagnostic pre-resize hash mismatch')
+    tensor['sha256'] = observed
+    return record
+
+
 def capture(artifact, worker, output, cases=DEFAULT_CASES, modes=MODES):
     artifact, worker, output = artifact.resolve(strict=True), worker.resolve(strict=True), output.resolve()
     if output.exists():
@@ -139,13 +175,20 @@ def capture(artifact, worker, output, cases=DEFAULT_CASES, modes=MODES):
             if mode == 'production':
                 production_results[index] = response
                 traces = []
+                geometry = []
             else:
                 traces = [validate_trace(trace_dir, path) for path in sorted(trace_dir.glob('[0-9]*.json'))]
                 if not traces or not any(row['model'] == case['rec_model'] + '_infer.onnx' for row in traces):
                     raise ValueError('missing diagnostic recognition trace')
+                geometry = [validate_geometry(trace_dir, path) for path in sorted(trace_dir.glob('geometry-*.json'))]
+                expected_crops = sum(row['input']['shape'][0] for row in traces
+                                     if row['model'] == case['rec_model'] + '_infer.onnx')
+                if len(geometry) != expected_crops:
+                    raise ValueError('missing or extra diagnostic crop geometry')
             row = {'mode': mode, 'id': index, 'rec_model': case['rec_model'], 'tier': case['tier'],
                    'trace_directory': str(trace_dir.relative_to(output)), 'response': response,
-                   'same_as_production': response == production_results[index], 'golden_verdict': verdict, 'traces': traces}
+                   'same_as_production': response == production_results[index], 'golden_verdict': verdict,
+                   'traces': traces, 'geometry_traces': geometry}
             if mode == 'baseline':
                 baseline_traces[index] = traces
             if mode not in ('production', 'baseline'):
@@ -197,7 +240,13 @@ def compare_tensors(actual, reference, np):
             'native_ctc': a, 'paddle_ctc': b}
 
 
-def reference(output, cache, offline=False):
+def reference(output, cache, offline=False, sources_dir=None):
+    # CI supplies a separate, Linux-verified source artifact. Verify against the
+    # committed pins again on the consumer; never fetch or fall back from it.
+    if sources_dir is not None:
+        from prepare_precision_reference_sources import verify
+        verify(sources_dir)
+        sources_dir = Path(sources_dir).resolve(strict=True)
     # Import only in the separate build-side reference environment.
     import numpy as np
     import paddle
@@ -217,6 +266,9 @@ def reference(output, cache, offline=False):
     report = {'schema_version': 1, 'diagnostic_complete': False, 'release_ready': False,
               'host': platform.platform(), 'machine': platform.machine(), 'python': sys.version,
               'paddle_version': paddle.__version__, 'numpy_version': np.__version__,
+              'source_delivery': {'kind': 'verified_local_artifact' if sources_dir is not None else 'pinned_archive_cache',
+                                  'network_allowed': False if sources_dir is not None else not offline,
+                                  'artifact_manifest_sha256': digest(sources_dir / 'reference-source-manifest.json') if sources_dir is not None else None},
               'installed_packages': sorted(f'{d.metadata["Name"]}=={d.version}' for d in importlib.metadata.distributions()),
               'reference_settings': {'device': 'cpu', 'threads': 4, 'onednn': False, 'ir_optim_flag': False,
                                      'pir_note': 'Paddle still runs mandatory PIR passes; see the preserved reference log.',
@@ -227,10 +279,10 @@ def reference(output, cache, offline=False):
             name = trace['model'].removesuffix('_infer.onnx')
             if name != case['rec_model']:
                 continue
-            source = cache / name
+            source = (sources_dir if sources_dir is not None else cache) / name
             if name not in predictors:
                 pin = sources[name]
-                if not source.exists():
+                if sources_dir is None and not source.exists():
                     extract_sources(get_archive(pin, cache, offline), pin, source)
                 for filename, expected in pin['files'].items():
                     if digest(source / filename) != expected:
@@ -283,13 +335,14 @@ def main():
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--cache', type=Path, default=Path('build/precision-reference-cache'))
     parser.add_argument('--offline', action='store_true')
+    parser.add_argument('--sources', type=Path, help='Verified original-source artifact; no download/fallback')
     args = parser.parse_args()
     if args.phase == 'capture':
         if args.artifact is None or args.worker is None:
             parser.error('capture requires --artifact and --worker')
         result = capture(args.artifact, args.worker, args.output)
     else:
-        result = reference(args.output, args.cache, args.offline)
+        result = reference(args.output, args.cache, args.offline, args.sources)
     print(json.dumps({key: result[key] for key in ('diagnostic_complete', 'release_ready')}))
     return 0
 

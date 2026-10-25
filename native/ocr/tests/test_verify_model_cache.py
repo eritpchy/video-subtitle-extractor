@@ -161,7 +161,7 @@ def test_incomplete_or_unexpected_cache_rejected(cache, change):
 
 def test_workflow_cache_hit_cannot_skip_verification_or_upload_unverified_bytes():
     workflow = (REPO / '.github/workflows/native-ocr.yml').read_text(encoding='utf-8')
-    models = workflow.split('\n  models:\n', 1)[1].split('\n  native:\n', 1)[0]
+    models = workflow.split('\n  models:\n', 1)[1].split('\n  precision-reference-sources:\n', 1)[0]
     steps = re.split(r'(?=^      - )', models, flags=re.MULTILINE)[1:]
 
     def step(text):
@@ -169,12 +169,17 @@ def test_workflow_cache_hit_cannot_skip_verification_or_upload_unverified_bytes(
         assert len(matches) == 1
         return matches[0]
 
-    restore_i, restore = step('uses: actions/cache/restore@v4')
+    # The separate build-only Paddle reference cache/artifact is intentionally
+    # independent; select this model cache by identity, not by action type.
+    restore_i, restore = step('id: model-cache')
     install_i, install = step('run: python -m pip install')
     convert_i, convert = step('run: python native/ocr/prepare_models.py')
     verify_i, verify = step('run: python -S native/ocr/verify_model_cache.py build/native-models')
-    save_i, save = step('uses: actions/cache/save@v4')
-    upload_i, upload = step('uses: actions/upload-artifact@v4')
+    save_i, save = step('name: Cache only independently verified converted models')
+    upload_i, upload = step('name: native-ocr-fp32-models-${{ github.sha }}')
+    assert 'uses: actions/cache/restore@v4' in restore
+    assert 'uses: actions/cache/save@v4' in save
+    assert 'uses: actions/upload-artifact@v4' in upload
     assert restore_i < install_i < convert_i < verify_i < save_i < upload_i
     assert '        if:' not in verify and 'continue-on-error:' not in verify
     assert verify.split('        run: ', 1)[1].strip() == 'python -S native/ocr/verify_model_cache.py build/native-models'

@@ -135,15 +135,41 @@ def prepare_runtime(destination: Path, target_platform: str, target_arch: str, c
             'aliases': 'internal-file-links-materialized', 'client_install_required': False}
 
 
+try:
+    from .bundle_bootstrap import NATIVE_SEARCH_VARIABLES
+except ImportError:
+    from bundle_bootstrap import NATIVE_SEARCH_VARIABLES
+
+
 def _shell_launcher(relative_python: str, root_expression: str, linux: bool = False) -> str:
     libraries = 'export LD_LIBRARY_PATH="$ROOT/native-libs"\n' if linux else ''
+    # /bin/sh has already been loaded by the OS. This cannot defend a broken or
+    # malicious loader/LD_PRELOAD that prevents the shell itself from starting.
     return f'''#!/bin/sh
 set -eu
 ROOT={root_expression}
-unset PYTHONHOME PYTHONPATH
+unset PYTHONHOME PYTHONPATH PYTHONUSERBASE PYTHONEXECUTABLE __PYVENV_LAUNCHER__
+unset {' '.join(NATIVE_SEARCH_VARIABLES)}
 export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1
-{libraries}exec "$ROOT/{relative_python}" -s -B "$ROOT/bootstrap.py" "$@"
+export PATH="$ROOT/runtime/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd -- "$ROOT"
+{libraries}exec "$ROOT/{relative_python}" -I -B -X utf8 "$ROOT/bootstrap.py" "$@"
 '''
+
+
+def launcher_command(root: Path, target_platform: str, arguments: list[str], *, app: bool = False) -> list[str] | str:
+    """Execute the user-facing launcher, never a substitute system interpreter."""
+    root = Path(root).resolve()
+    if target_platform == 'windows':
+        # Avoid shell=True and inherited COMSPEC. Feed cmd.exe its own quoting,
+        # not MSVC backslash escaping. Every path is quoted (including & and !).
+        values = [str(root / 'Start-VSE.bat'), *arguments]
+        if any(any(c in value for c in '\"%\r\n') for value in values):
+            raise ValueError('Unsafe cmd.exe launcher argument')
+        cmd = str(Path(os.environ['SystemRoot']) / 'System32/cmd.exe')
+        return f'"{cmd}" /d /s /c "' + ' '.join('"' + value + '"' for value in values) + '"'
+    launcher = root.parent / 'MacOS/VSE' if app else root / ('Start-VSE.command' if target_platform == 'macos' else 'Start-VSE.sh')
+    return [str(launcher), *arguments]
 
 
 def write_launchers(root: Path, target_platform: str | None = None, target_arch: str | None = None, runtime_python: str | None = None, *, minimum_macos_version: str = "13.0") -> None:
@@ -155,7 +181,15 @@ def write_launchers(root: Path, target_platform: str | None = None, target_arch:
         raise ValueError('Launcher interpreter must be a safe relative path')
     if target_platform == 'windows':
         python = runtime_python.replace('/', '\\')
-        (root / 'Start-VSE.bat').write_text('@echo off\nsetlocal DisableDelayedExpansion\nset "PYTHONHOME="\nset "PYTHONPATH="\nset "PYTHONNOUSERSITE=1"\nset "PYTHONDONTWRITEBYTECODE=1"\n"%~dp0' + python + '" -s -B "%~dp0bootstrap.py" %*\nexit /b %errorlevel%\n', encoding='utf-8', newline='\r\n')
+        lines = ['@echo off', 'setlocal DisableDelayedExpansion',
+                 'set "PYTHONHOME="', 'set "PYTHONPATH="', 'set "PYTHONUSERBASE="', 'set "PYTHONEXECUTABLE="', 'set "__PYVENV_LAUNCHER__="']
+        lines += [f'set "{name}="' for name in NATIVE_SEARCH_VARIABLES]
+        lines += ['set "PYTHONNOUSERSITE=1"', 'set "PYTHONDONTWRITEBYTECODE=1"',
+                  'set "PATH=%~dp0runtime;%~dp0runtime\\DLLs;%SystemRoot%\\System32;%SystemRoot%"',
+                  'cd /d "%~dp0" || exit /b 1',
+                  '"%~dp0' + python + '" -I -B -X utf8 "%~dp0bootstrap.py" %*',
+                  'exit /b %errorlevel%']
+        (root / 'Start-VSE.bat').write_text('\n'.join(lines) + '\n', encoding='utf-8', newline='\r\n')
         return
     launcher = root / ('Start-VSE.command' if target_platform == 'macos' else 'Start-VSE.sh')
     launcher.write_text(_shell_launcher(runtime_python, '$(CDPATH= cd -- "${0%/*}" && pwd)', target_platform == 'linux'), encoding='utf-8')
