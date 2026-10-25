@@ -191,3 +191,142 @@ def test_real_windows_snapshot_reads_current_process_without_admin():
     assert Path(snapshot['process_executable']).samefile(sys.executable)
     assert any(Path(path).samefile(sys.executable) for path in snapshot['mapped_paths'])
     assert Path(snapshot['windows_root']).is_dir()
+
+
+def signed_os_fixture(tmp_path, monkeypatch, name='directxdatabasehelper.dll'):
+    """Synthetic signature records test policy; only Server CI proves signatures."""
+    from scripts import windows_os_evidence as os_proof
+    exe, snapshot = fixture(tmp_path)
+    windows = Path(snapshot['windows_root'])
+    image = windows / 'System32' / name
+    image.write_bytes(b'OS component fixture ' + name.encode())
+    snapshot['mapped_paths'].append(str(image))
+    digest = hashlib.sha256(image.read_bytes()).hexdigest()
+    proof = {
+        'schema': 1, 'registry_modified': False, 'errors': [], 'amsi_errors': [],
+        'windows_directory_api': str(windows),
+        'roots': {'windows': str(windows), 'system32': str(windows / 'System32'),
+                  'program_data': str(tmp_path / 'ProgramData'), 'program_files': str(tmp_path / 'Program Files')},
+        'amsi_providers': [],
+        'files': [{'requested_path': str(image), 'canonical_path': str(image), 'errors': [],
+                   'reparse_verified': True, 'sha256_before': digest, 'sha256_after': digest,
+                   'version_info': {'original_filename': name},
+                   'signature': {'status': 'Valid', 'signature_type': 'Catalog', 'is_os_binary': True,
+                                 'signer': {'simple_name': 'Microsoft Windows',
+                                            'subject': 'CN=Microsoft Windows, O=Microsoft Corporation, C=US',
+                                            'issuer': 'Microsoft fixture issuer', 'thumbprint': 'fixture-thumbprint'}}}],
+    }
+    # Preserve native filesystem fixture paths. Only this pure Windows policy
+    # parser gets a synthetic drive on POSIX; no global Path/resolve mocking.
+    original_identity = os_proof._identity
+    monkeypatch.setattr(os_proof, '_identity', lambda path:
+                        original_identity('C:' + path.replace('/', '\\') if path.startswith('/') else path))
+    monkeypatch.setattr(worker, '_OS_EVIDENCE_COLLECTOR', None)
+    monkeypatch.setattr(worker, '_system_windows_directory', lambda: windows)
+    monkeypatch.setattr(worker, '_snapshot', lambda pid: dict(snapshot))
+    return exe, snapshot, image, proof
+
+
+@pytest.mark.parametrize('name', ['directxdatabasehelper.dll', 'coloradapterclient.dll'])
+def test_native_signed_os_images_use_existing_proof_and_cached_current_hashes(tmp_path, monkeypatch, name):
+    from scripts import windows_os_evidence as os_proof
+    from scripts.standalone_runtime_probe import library_violation
+    exe, snapshot, image, proof = signed_os_fixture(tmp_path, monkeypatch, name)
+    calls = []
+    monkeypatch.setattr(os_proof, '_collect', lambda paths, timeout: calls.append(paths) or proof)
+    first = worker.collect_native_worker_evidence(123, exe)
+    second = worker.collect_native_worker_evidence(123, exe)
+    assert first['passed'] and second['passed']
+    assert all(row['passed'] for row in first['files'].values())
+    assert first['os_security_evidence']['files'][0]['signature'] == proof['files'][0]['signature']
+    assert first['observed_os_security_components'][0]['category'] == 'signed_windows_os_component'
+    assert worker.validate_native_worker_evidence(first, exe)['passed']
+    assert calls == [[str(image)]]  # First/pre-close/final checks reuse only per-process signature work.
+    assert library_violation(str(image), str(exe.parent), 'Windows', snapshot['windows_root'])
+    image.write_bytes(b'changed after signature verification')
+    failed = worker.collect_native_worker_evidence(123, exe)
+    assert not failed['passed'] and 'hash differs' in '\n'.join(failed['errors'])
+    assert not worker.validate_native_worker_evidence(first, exe)['passed']
+    assert len(calls) == 1  # A changed file fails; cached proof cannot bless it.
+
+
+@pytest.mark.parametrize('change', ['missing', 'signature', 'publisher', 'not-os', 'hash', 'file-changed',
+                                     'filename', 'reparse', 'path', 'collector-error', 'os-root'])
+def test_native_os_proof_fails_closed_without_relaxing_seven_file_checks(tmp_path, monkeypatch, change):
+    exe, snapshot, image, proof = signed_os_fixture(tmp_path, monkeypatch)
+    row = proof['files'][0]
+    if change == 'missing': proof = None
+    elif change == 'signature': row['signature']['status'] = 'NotSigned'
+    elif change == 'publisher': row['signature']['signer']['simple_name'] = 'Unknown publisher'
+    elif change == 'not-os': row['signature']['is_os_binary'] = False
+    elif change == 'hash': row['sha256_after'] = '0' * 64
+    elif change == 'file-changed': image.write_bytes(b'changed after proof')
+    elif change == 'filename': row['version_info']['original_filename'] = 'unrelated.dll'
+    elif change == 'reparse': row['reparse_verified'] = False
+    elif change == 'path': row['canonical_path'] = str(image.parent / 'neighbor.dll')
+    elif change == 'collector-error': proof['errors'] = ['read-only proof unavailable']
+    elif change == 'os-root': proof['windows_directory_api'] = str(tmp_path / 'other-Windows')
+    snapshot['os_security_evidence'] = proof
+    report = worker.validate_native_worker_snapshot(123, exe, snapshot)
+    assert report['available'] and not report['passed']
+    assert all(record['passed'] for record in report['files'].values())
+    assert report['unverified_os_security_components'] and not report['observed_os_security_components']
+    assert 'Unverified OS/security component' in '\n'.join(report['errors'])
+
+
+def test_saved_native_proof_requires_independent_current_signature_collection(tmp_path, monkeypatch):
+    import copy
+    from scripts import windows_os_evidence as os_proof
+    exe, snapshot, _, proof = signed_os_fixture(tmp_path, monkeypatch)
+    snapshot['os_security_evidence'] = proof
+    report = worker.validate_native_worker_snapshot(123, exe, snapshot)
+    assert report['passed']
+    failed = copy.deepcopy(proof)
+    failed['files'][0]['signature']['status'] = 'HashMismatch'
+    calls = []
+    monkeypatch.setattr(os_proof, '_collect', lambda paths, timeout: calls.append(paths) or failed)
+    result = worker.validate_native_worker_evidence(report, exe)
+    assert calls and not result['passed']
+    assert 'Current OS signature evidence failed' in '\n'.join(result['errors'])
+
+
+def test_native_collection_keeps_actual_modules_and_failed_os_proof(tmp_path, monkeypatch):
+    from scripts import windows_os_evidence as os_proof
+    exe, snapshot, _, _ = signed_os_fixture(tmp_path, monkeypatch)
+    def denied(*args):
+        raise RuntimeError('signature collector unavailable')
+    monkeypatch.setattr(os_proof, '_collect', denied)
+    report = worker.collect_native_worker_evidence(123, exe)
+    assert report['available'] and not report['passed']
+    assert report['mapped_paths'] == sorted(snapshot['mapped_paths'])
+    assert all(row['passed'] for row in report['files'].values())
+    assert 'signature collector unavailable' in json.dumps(report['os_security_evidence'])
+
+
+def test_worker_without_candidate_never_invokes_os_signature_collector(tmp_path, monkeypatch):
+    from scripts import windows_os_evidence as os_proof
+    exe, snapshot = fixture(tmp_path)
+    monkeypatch.setattr(worker, '_snapshot', lambda pid: snapshot)
+    def forbidden(*args):
+        raise AssertionError('No candidate should launch signature inspection')
+    monkeypatch.setattr(os_proof, 'WindowsOSEvidenceCollector', forbidden)
+    assert worker.collect_native_worker_evidence(123, exe)['passed']
+
+
+def test_os_signature_evidence_cannot_allow_foreign_crt_or_unknown_dll(tmp_path, monkeypatch):
+    from scripts import windows_os_evidence as os_proof
+    exe, snapshot, _, proof = signed_os_fixture(tmp_path, monkeypatch)
+    foreign = Path(snapshot['windows_root']) / 'System32/concrt140.dll'
+    foreign.write_bytes((exe.parent / 'concrt140.dll').read_bytes())
+    snapshot['mapped_paths'].append(str(foreign))
+    unknown = foreign.with_name('unknown-signed-vendor.dll')
+    unknown.write_bytes(b'unknown')
+    snapshot['mapped_paths'].append(str(unknown))
+    calls = []
+    monkeypatch.setattr(os_proof, '_collect', lambda paths, timeout: calls.append(paths) or proof)
+    report = worker.collect_native_worker_evidence(123, exe)
+    assert not report['passed']
+    assert report['observed_os_security_components'][0]['allowed']
+    assert len(calls[0]) == 1 and Path(calls[0][0]).name == 'directxdatabasehelper.dll'
+    assert any('concrt140.dll' in error for error in report['errors'])
+    assert any('unknown-signed-vendor.dll' in error for error in report['errors'])

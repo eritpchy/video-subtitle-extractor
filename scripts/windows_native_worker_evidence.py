@@ -17,6 +17,7 @@ import ntpath
 from pathlib import Path, PurePosixPath
 import re
 import sys
+import threading
 
 
 REQUIRED_FILES = frozenset({
@@ -25,6 +26,48 @@ REQUIRED_FILES = frozenset({
 })
 MAX_MODULES = 4096
 METHOD = 'windows-toolhelp32-querylimited-v1'
+_OS_EVIDENCE_COLLECTOR = None
+_OS_EVIDENCE_LOCK = threading.Lock()
+
+
+def _collect_os_security_evidence(snapshot, executable):
+    """Reuse the existing exact signed-OS/registered-AMSI proof, once per path.
+
+    The existing collector caches signature inspection only within this auditor
+    process. Every use below independently rehashes the currently mapped file;
+    a changed file fails rather than inheriting a stale signature verdict.
+    """
+    from scripts.windows_os_evidence import CANDIDATE_NAMES, WindowsOSEvidenceCollector
+    from scripts.standalone_runtime_probe import library_violation
+    root = _canonical(executable).parent
+    windows = _canonical(snapshot['windows_root'])
+    paths = []
+    for value in snapshot['mapped_paths']:
+        path = _canonical(value)
+        if (path.name.lower() in CANDIDATE_NAMES
+                and library_violation(str(path), str(root), 'Windows', str(windows))):
+            paths.append(str(path))
+    if not paths:
+        return None
+    global _OS_EVIDENCE_COLLECTOR
+    with _OS_EVIDENCE_LOCK:
+        if _OS_EVIDENCE_COLLECTOR is None:
+            _OS_EVIDENCE_COLLECTOR = WindowsOSEvidenceCollector()
+        return _OS_EVIDENCE_COLLECTOR.collect(paths)
+
+
+def _classify_os_security_component(path, proof, windows):
+    from scripts.windows_os_evidence import classify_loaded_windows_component
+    from scripts.standalone_runtime_probe import _identity
+    component = classify_loaded_windows_component(str(path), proof or {})
+    if component.get('allowed'):
+        # Bind the proof's OS root to the live query and its stable signature
+        # hash to the exact mapped file, not just an allowed-looking filename.
+        if _identity(str(proof.get('windows_directory_api', '')), 'Windows') != _identity(str(windows), 'Windows'):
+            return dict(component, allowed=False, reason='Signed component OS root differs from live worker OS root')
+        if _file_hash(path)['sha256'] != component.get('sha256'):
+            return dict(component, allowed=False, reason='Signed component hash differs from current mapped file')
+    return component
 
 
 def _valid_pid(pid):
@@ -88,6 +131,8 @@ def _report(pid, executable):
             'pid': pid, 'executable': str(executable), 'mapped_paths': [], 'files': {},
             'method': METHOD, 'process_query_access': 0x1000,
             'matches_worker': False, 'forbidden_python_paddle_libraries': [],
+            'os_security_evidence': None, 'observed_os_security_components': [],
+            'unverified_os_security_components': [],
             'scope': 'Live worker image paths and on-disk inventory hashes after inference; not process-memory, lifetime or network certification.'}
 
 
@@ -136,6 +181,7 @@ def validate_native_worker_snapshot(pid, executable, snapshot):
             raise ValueError('Empty or unbounded Windows worker module snapshot')
         # Lazy import avoids importing a process probe during ordinary startup.
         from scripts.standalone_runtime_probe import _identity, library_violation
+        from scripts.windows_os_evidence import CANDIDATE_NAMES
         expected_exe = _canonical(executable)
         if expected_exe.name.lower() != 'native-ocr.exe' or Path(executable).is_symlink():
             raise ValueError('Expected the regular native-ocr.exe worker')
@@ -154,6 +200,7 @@ def validate_native_worker_snapshot(pid, executable, snapshot):
         if not report['matches_worker']:
             report['errors'].append('Live process executable differs from expected native worker')
         rows, report['inventory_sha256'] = _inventory(root)
+        report['os_security_evidence'] = snapshot.get('os_security_evidence')
         groups = {}
         for path in canonical:
             name = path.name.lower()
@@ -167,7 +214,15 @@ def validate_native_worker_snapshot(pid, executable, snapshot):
                 else:
                     violation = library_violation(str(path), str(root), 'Windows', str(windows))
                     if violation:
-                        report['errors'].append(violation)
+                        component = (_classify_os_security_component(path, report['os_security_evidence'], windows)
+                                     if name in CANDIDATE_NAMES else None)
+                        if component and component.get('allowed') is True:
+                            report['observed_os_security_components'].append(component)
+                        else:
+                            report['errors'].append(violation)
+                            if component:
+                                report['unverified_os_security_components'].append(component)
+                                report['errors'].append(f"Unverified OS/security component {path}: {component.get('reason')}")
         for name in sorted(REQUIRED_FILES):
             row = rows[name]
             expected = root / row['path']
@@ -298,7 +353,9 @@ def _snapshot(pid):
 def collect_native_worker_evidence(pid, executable):
     """Never hide collection failures or require admin/injection privileges."""
     try:
-        return validate_native_worker_snapshot(pid, executable, _snapshot(pid))
+        snapshot = _snapshot(pid)
+        snapshot['os_security_evidence'] = _collect_os_security_evidence(snapshot, executable)
+        return validate_native_worker_snapshot(pid, executable, snapshot)
     except Exception as error:
         report = _report(pid, executable)
         report['errors'].append(type(error).__name__ + ': ' + str(error))
@@ -325,9 +382,19 @@ def validate_native_worker_evidence(evidence, executable):
         if not result['passed']:
             return result
         for field in ('executable', 'process_executable', 'windows_root', 'matches_worker',
-                      'mapped_paths', 'files', 'inventory_sha256', 'forbidden_python_paddle_libraries'):
+                      'mapped_paths', 'files', 'inventory_sha256', 'forbidden_python_paddle_libraries',
+                      'os_security_evidence', 'observed_os_security_components', 'unverified_os_security_components'):
             if evidence.get(field) != result[field]:
                 raise ValueError('Saved Windows worker evidence mismatch: ' + field)
+        # The final-package auditor independently obtains current OS proof; do
+        # not accept only signature-shaped JSON saved by another process. Its
+        # per-process cache avoids a PowerShell launch for every worker/frame.
+        if result['observed_os_security_components']:
+            fresh = _collect_os_security_evidence(evidence, executable)
+            for component in result['observed_os_security_components']:
+                checked = _classify_os_security_component(Path(component['path']), fresh, result['windows_root'])
+                if checked.get('allowed') is not True or checked.get('sha256') != component.get('sha256'):
+                    raise ValueError('Current OS signature evidence failed: ' + str(checked.get('reason', component['path'])))
     except Exception as error:
         result['passed'] = False
         result['errors'].append(type(error).__name__ + ': ' + str(error))
