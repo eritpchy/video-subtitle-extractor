@@ -14,6 +14,7 @@ from pathlib import Path
 import shutil
 import socket
 import ssl
+import stat
 import tarfile
 import tempfile
 import time
@@ -85,6 +86,9 @@ def _download_file(url, destination):
                 partial = Path(target.name)
                 with urllib.request.urlopen(url, timeout=120) as response:
                     shutil.copyfileobj(response, target)
+            # These are public model assets, not credentials. NamedTemporaryFile
+            # defaults to 0600, which breaks root-build/non-root-runtime images.
+            partial.chmod(0o644)
             os.replace(partial, destination)
             return
         except (urllib.error.URLError, OSError, http.client.HTTPException) as error:
@@ -126,6 +130,22 @@ def _extract_verified_archive(archive, entry, model_name, extracted):
                 shutil.copyfileobj(source, target)
 
 
+def _make_verified_model_readable(model_dir, entry):
+    """Normalize only verified public assets, including old owner-only caches."""
+    paths = [(Path(model_dir), 0o755)] + [
+        (Path(model_dir) / filename, 0o644) for filename in entry['files']]
+    # Do not chmod through a link into unrelated caller-owned paths.
+    if any(path.is_symlink() for path, _ in paths):
+        raise RuntimeError(f'Refusing to change permissions through model symlinks: {model_dir}')
+    for path, mode in paths:
+        try:
+            if stat.S_IMODE(path.stat().st_mode) != mode:
+                path.chmod(mode)
+        except OSError as error:
+            raise RuntimeError(f'Cannot make verified public model readable: {path}. '
+                               'Have the model owner repair its permissions.') from error
+
+
 def download_model(model_name, output=None, archive_dir=None, source='huggingface'):
     from filelock import FileLock
 
@@ -138,6 +158,7 @@ def download_model(model_name, output=None, archive_dir=None, source='huggingfac
     # Never leave half-downloaded models visible to concurrent OCR workers.
     with FileLock(str(output / f'.{model_name}.lock')):
         if verify_model(destination, model_name):
+            _make_verified_model_readable(destination, entry)
             return destination
         if destination.exists():
             raise RuntimeError(f'Incomplete or modified model: {destination}. Move it aside before downloading again.')
@@ -158,6 +179,9 @@ def download_model(model_name, output=None, archive_dir=None, source='huggingfac
                 _extract_verified_archive(archive, entry, model_name, extracted)
             if not verify_model(extracted, model_name):
                 raise RuntimeError(f'Extracted model verification failed: {model_name}')
+            # Publish readable, non-executable public assets regardless of the
+            # build user or umask; never widen permissions on caller directories.
+            _make_verified_model_readable(extracted, entry)
             os.replace(extracted, destination)
     return destination
 

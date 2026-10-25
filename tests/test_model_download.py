@@ -1,5 +1,7 @@
 import hashlib
 import io
+import os
+import stat
 from pathlib import Path
 import tarfile
 import urllib.error
@@ -145,3 +147,78 @@ def test_network_failure_reports_source_without_retry(bundle, monkeypatch):
         model_download.download_model(name, output)
     assert len(requests) == 1
     assert not (output / f'{name}_infer').exists()
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX public model mode contract')
+@pytest.mark.parametrize('source', ['archive', 'huggingface'])
+def test_verified_model_publication_permissions(bundle, monkeypatch, source):
+    name, archives, output = bundle
+    output.mkdir(mode=0o755)
+    with tarfile.open(archives / f'{name}_infer.tar') as archive:
+        content = {Path(member.name).name: archive.extractfile(member).read()
+                   for member in archive.getmembers()}
+    monkeypatch.setattr(model_download.urllib.request, 'urlopen',
+                        lambda url, timeout: io.BytesIO(content[url.rsplit('/', 1)[1]]))
+    # A restrictive build umask must not produce owner-only model assets.
+    old_umask = os.umask(0o077)
+    try:
+        destination = model_download.download_model(
+            name, output, archive_dir=archives if source == 'archive' else None)
+    finally:
+        os.umask(old_umask)
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o755
+    for filename in content:
+        path = destination / filename
+        assert stat.S_IMODE(path.stat().st_mode) == 0o644
+        assert path.read_bytes() == content[filename]
+    assert model_download.verify_model(destination, name)
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX public model mode contract')
+def test_verified_cache_repairs_stale_modes_only_on_manifest_files(bundle, monkeypatch):
+    name, archives, output = bundle
+    destination = model_download.download_model(name, output, archives)
+    for filename in model_download.load_manifest()[name]['files']:
+        (destination / filename).chmod(0o600)
+    destination.chmod(0o700)
+    unrelated = destination / 'user-notes'
+    unrelated.write_bytes(b'private')
+    unrelated.chmod(0o600)
+    archive_path = archives / f'{name}_infer.tar'
+    archive_mode = stat.S_IMODE(archive_path.stat().st_mode)
+    monkeypatch.setenv('VSE_OFFLINE', '1')
+    assert model_download.download_model(name, output) == destination
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o755
+    for filename in model_download.load_manifest()[name]['files']:
+        assert stat.S_IMODE((destination / filename).stat().st_mode) == 0o644
+    assert stat.S_IMODE(unrelated.stat().st_mode) == 0o600
+    assert stat.S_IMODE(archive_path.stat().st_mode) == archive_mode
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX public model mode contract')
+def test_cache_permission_repair_failure_is_actionable(bundle, monkeypatch):
+    name, archives, output = bundle
+    destination = model_download.download_model(name, output, archives)
+    (destination / 'inference.yml').chmod(0o600)
+
+    def fail_chmod(self, mode):
+        raise PermissionError('not the model owner')
+
+    monkeypatch.setattr(Path, 'chmod', fail_chmod)
+    with pytest.raises(RuntimeError, match='Have the model owner repair'):
+        model_download.download_model(name, output)
+    assert model_download.verify_model(destination, name)
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX symlink permissions')
+def test_verified_cache_does_not_chmod_symlink_target(bundle):
+    name, archives, output = bundle
+    destination = model_download.download_model(name, output, archives)
+    path = destination / 'inference.yml'
+    target = output / 'outside-model.yml'
+    path.rename(target)
+    target.chmod(0o600)
+    path.symlink_to(target)
+    with pytest.raises(RuntimeError, match='symlinks'):
+        model_download.download_model(name, output)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600

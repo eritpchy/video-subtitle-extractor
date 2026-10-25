@@ -2,6 +2,8 @@
 import errno
 import http.client
 import io
+import os
+import stat
 import socket
 import ssl
 import urllib.error
@@ -129,3 +131,45 @@ def test_existing_real_models_verify_without_network(monkeypatch, network):
     for name in model_download.load_manifest():
         assert model_download.download_model(name) == root / f'{name}_infer'
     assert calls == sleeps == []
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX public model mode contract')
+def test_public_download_mode_is_set_before_atomic_publish(tmp_path, network, monkeypatch):
+    install, calls, sleeps = network
+    install([io.BytesIO(b'public model')])
+    destination = tmp_path / 'inference.yml'
+    destination.write_bytes(b'old complete file')
+    destination.chmod(0o640)
+    replace = model_download.os.replace
+
+    def assert_replace(source, target):
+        assert stat.S_IMODE(source.stat().st_mode) == 0o644
+        assert destination.read_bytes() == b'old complete file'
+        assert stat.S_IMODE(destination.stat().st_mode) == 0o640
+        replace(source, target)
+
+    monkeypatch.setattr(model_download.os, 'replace', assert_replace)
+    model_download._download_file('https://example.invalid/pinned', destination)
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o644
+    assert destination.read_bytes() == b'public model'
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX public model mode contract')
+def test_chmod_failure_does_not_publish_or_remove_old_file(tmp_path, network, monkeypatch):
+    install, calls, sleeps = network
+    install([io.BytesIO(b'public model')])
+    destination = tmp_path / 'inference.yml'
+    destination.write_bytes(b'old complete file')
+    destination.chmod(0o640)
+
+    def fail_chmod(self, mode):
+        raise PermissionError(errno.EPERM, 'cannot set model permissions')
+
+    monkeypatch.setattr(type(destination), 'chmod', fail_chmod)
+    with pytest.raises(RuntimeError):
+        model_download._download_file('https://example.invalid/pinned', destination)
+    assert destination.read_bytes() == b'old complete file'
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o640
+    assert list(tmp_path.iterdir()) == [destination]
+    assert len(calls) == 1
+    assert sleeps == []
