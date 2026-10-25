@@ -25,7 +25,7 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIRS = ("backend", "ui", "design", "scripts", "docs")
-SOURCE_FILES = ("gui.py", "requirements.txt", "requirements-inference.txt", "LICENSE", "README.md", "README_en.md", "Dockerfile", ".dockerignore")
+SOURCE_FILES = ("gui.py", "requirements.txt", "requirements-inference.txt", "requirements-native-inference.txt", "LICENSE", "README.md", "README_en.md", "Dockerfile", ".dockerignore")
 EXCLUDED_PARTS = {"__pycache__", ".pytest_cache", ".venv", ".git"}
 
 
@@ -134,7 +134,7 @@ def finalize_portable_runtime(stage: Path, python: Path, env: dict) -> dict:
     return {'removed_bytes': sum(entry['size'] for entry in removed), 'alias_bytes_avoided': sum(entry['original_size'] for entry in aliases)}
 
 
-def build_runtime(stage: Path, wheels: list[Path], runtime_requirements: list[str], target_platform: str, target_arch: str) -> dict:
+def build_runtime(stage: Path, wheels: list[Path], runtime_requirements: list[str], target_platform: str, target_arch: str, profile: str = "paddle") -> dict:
     try:
         from .portable_python import prepare_runtime
     except ImportError:
@@ -147,26 +147,28 @@ def build_runtime(stage: Path, wheels: list[Path], runtime_requirements: list[st
     env = dict(__import__('os').environ, PYTHONDONTWRITEBYTECODE='1', PYTHONNOUSERSITE='1')
     subprocess.run([sys.executable, '-m', 'pip', '--python', str(python), 'install', '--no-cache-dir', '--no-index', '--no-deps', '--no-compile', *map(str, wheels)], check=True, env=env)
     info['build_tools'] = finalize_portable_runtime(stage, python, env)
-    profile = stage / 'runtime/runtime-profile.json'
-    profile.write_text(json.dumps({'runtime_requirements': runtime_requirements}), encoding='utf-8')
-    prune = [str(python), str(stage / 'scripts/prune_inference_runtime.py'), '--apply', '--manifest', str(stage / 'runtime/inference-prune.json')]
-    if (target_platform, target_arch) == ('linux', 'x64'):
+    profile_manifest = stage / 'runtime/runtime-profile.json'
+    profile_manifest.write_text(json.dumps({'runtime_requirements': runtime_requirements, 'ocr_backend': profile}), encoding='utf-8')
+    prune = [str(python), str(stage / 'scripts/prune_inference_runtime.py'), '--engine', profile, '--apply', '--manifest', str(stage / 'runtime/inference-prune.json')]
+    if profile == 'paddle' and (target_platform, target_arch) == ('linux', 'x64'):
         prune.append('--include-unused-openvino')
     subprocess.run(prune, check=True, env=env)
-    subprocess.run([str(python), str(stage / 'scripts/runtime_dependencies.py'), '--manifest', str(profile)], check=True, env=env)
+    subprocess.run([str(python), str(stage / 'scripts/runtime_dependencies.py'), '--manifest', str(profile_manifest)], check=True, env=env)
     info = dict(info, python=python.relative_to(stage.resolve()).as_posix())
     return info
 
 
-def portable_launchers(stage: Path, target_platform: str, target_arch: str, runtime_python: str) -> None:
+def portable_launchers(stage: Path, target_platform: str, target_arch: str, runtime_python: str, profile: str = "paddle") -> None:
     try:
         from .portable_python import write_launchers
     except ImportError:
         from portable_python import write_launchers
-    write_launchers(stage, target_platform, target_arch, runtime_python)
+    write_launchers(stage, target_platform, target_arch, runtime_python, minimum_macos_version="14.0" if profile == "native" else "13.0")
 
 
-def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT) -> Path:
+def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT, *, profile: str = "paddle", native_ocr: Path | None = None) -> Path:
+    if profile not in ("paddle", "native") or (profile == "native") != (native_ocr is not None):
+        raise ValueError("Select native profile together with --native-ocr; Paddle remains default")
     target_platform, target_arch = host_platform()
     version = read_version(root)
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
@@ -179,15 +181,23 @@ def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT) -> Path:
     native = root / "backend/subfinder" / target_platform / target_arch
     if not native.is_dir() or not any(native.iterdir()):
         raise RuntimeError("Install the verified native VideoSubFinder release before packaging")
-    if not (root / "backend/models/V6").is_dir():
-        raise RuntimeError("Download PP-OCRv6 small and medium models before packaging")
-    subprocess.run([sys.executable, "-m", "backend.tools.model_download", "--tiers", "small", "medium", "--verify-only"], cwd=root, check=True)
+    if profile == 'paddle':
+        if not (root / "backend/models/V6").is_dir():
+            raise RuntimeError("Download PP-OCRv6 small and medium models before packaging")
+        subprocess.run([sys.executable, "-m", "backend.tools.model_download", "--tiers", "small", "medium", "--verify-only"], cwd=root, check=True)
     subprocess.run([sys.executable, "scripts/install_videosubfinder.py", "--verify-only"], cwd=root, check=True)
-    wheels, runtime_requirements = runtime_wheels(wheelhouse, root / "requirements-inference.txt")
+    requirements = 'requirements-native-inference.txt' if profile == 'native' else 'requirements-inference.txt'
+    wheels, runtime_requirements = runtime_wheels(wheelhouse, root / requirements)
     # Resolve the dependency graph first, then lock only the selected untouched wheels.
     lock = wheel_lock(wheelhouse, selected=wheels)
+    if profile == 'native':
+        try:
+            from .native_package import assert_native_requirements, stage_native_artifact
+        except ImportError:
+            from native_package import assert_native_requirements, stage_native_artifact
+        assert_native_requirements(lock)
     output.mkdir(parents=True, exist_ok=True)
-    name = f"vse-{version}-{target_platform}-{target_arch}-cpu"
+    name = f"vse-{version}-{target_platform}-{target_arch}-{'native-' if profile == 'native' else ''}cpu"
     archive_path = output / f"{name}.zip"
     with tempfile.TemporaryDirectory(prefix="vse-package-") as temporary:
         archive_root = Path(temporary) / name
@@ -199,9 +209,12 @@ def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT) -> Path:
         # upstream checksums were verified above. Never sweep arbitrary local
         # untracked files or private scratch data into a release archive.
         source_paths.update(native.rglob("*"))
-        source_paths.update((root / "backend/models/V6").rglob("*"))
+        if profile == "paddle":
+            source_paths.update((root / "backend/models/V6").rglob("*"))
         for source in sorted(source_paths):
             relative = source.relative_to(root)
+            if profile == "native" and relative.parts[:2] == ("backend", "models"):
+                continue
             if not source.is_file() or not include_source(relative, target_platform, target_arch):
                 continue
             if source.is_symlink():
@@ -215,25 +228,27 @@ def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT) -> Path:
                 shutil.copy2(source, stage / relative)
         shutil.copy2(root / "scripts/bundle_bootstrap.py", stage / "bootstrap.py")
         (stage / 'requirements-lock.txt').write_text('\n'.join(lock) + '\n', encoding='utf-8')
-        runtime_info = build_runtime(stage, wheels, runtime_requirements, target_platform, target_arch)
+        native_info = stage_native_artifact(native_ocr, stage / 'native-ocr', target_platform) if profile == 'native' else None
+        runtime_info = build_runtime(stage, wheels, runtime_requirements, target_platform, target_arch, profile)
         if target_platform == 'linux':
             try:
                 from .bundle_linux_runtime_libs import bundle_linux_libraries
             except ImportError:
                 from bundle_linux_runtime_libs import bundle_linux_libraries
             runtime_info['native_libraries'] = bundle_linux_libraries(stage, stage / runtime_info['python'])
-        portable_launchers(stage, target_platform, target_arch, runtime_info["python"])
+        portable_launchers(stage, target_platform, target_arch, runtime_info["python"], profile)
         app_files = {}
         if target_platform == 'macos':
             app_root = stage.parent.parent
             app_files = {path.relative_to(app_root).as_posix(): sha256(path) for path in app_root.rglob('*') if path.is_file() and not path.is_relative_to(stage)}
-        manifest = {"app_files": app_files, "format": 2, "version": version, "commit": revision, "platform": target_platform, "arch": target_arch, "python": "3.12", "distribution": "self-contained CPU inference runtime", "runtime_python": runtime_info["python"], "runtime_provenance": runtime_info, "runtime_requirements": runtime_requirements, "files": {path.relative_to(stage).as_posix(): sha256(path) for path in sorted(stage.rglob("*")) if path.is_file()}}
+        manifest = {"ocr_backend": profile, "native_ocr": native_info, "app_files": app_files, "format": 2, "version": version, "commit": revision, "platform": target_platform, "arch": target_arch, "python": "3.12", "distribution": "self-contained CPU inference runtime", "runtime_python": runtime_info["python"], "runtime_provenance": runtime_info, "runtime_requirements": runtime_requirements, "files": {path.relative_to(stage).as_posix(): sha256(path) for path in sorted(stage.rglob("*")) if path.is_file()}}
         (stage / "bundle-manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
             for path in sorted(archive_root.rglob("*")):
                 if path.is_file():
                     archive.write(path, path.relative_to(archive_root.parent).as_posix())
         size_report = {"commit": revision, "platform": target_platform, "arch": target_arch,
+                       "ocr_backend": profile,
                        "compressed_archive_bytes": archive_path.stat().st_size,
                        "extracted_payload_bytes": sum(path.stat().st_size for path in archive_root.rglob('*') if path.is_file()),
                        "build_only_wheel_bytes": sum(wheel.stat().st_size for wheel in wheels),
@@ -326,7 +341,7 @@ def verify_bundle(archive_path: Path, smoke: bool) -> None:
                 elif manifest['platform'] == 'macos':
                     audit_macos_executables(root, isolation_reports)
                 subprocess.run([str(python), str(root / 'bootstrap.py'), '--verify', '--results-dir', str(evidence)], check=True, cwd=root, env=env)
-                summarize_reports(root, isolation_reports, required_modules=('PySide6.QtWidgets', 'paddle', 'cv2', 'qfluentwidgets'))
+                summarize_reports(root, isolation_reports, required_modules=('PySide6.QtWidgets', 'cv2', 'qfluentwidgets') + (('paddle',) if manifest.get('ocr_backend', 'paddle') == 'paddle' else ()), forbidden_modules=('paddle', 'paddleocr', 'paddlex', 'onnxruntime') if manifest.get('ocr_backend') == 'native' else ())
             finally:
                 # Preserve extraction evidence before TemporaryDirectory cleanup,
                 # especially when the child reports a path in a failed smoke.
@@ -340,6 +355,8 @@ def verify_bundle(archive_path: Path, smoke: bool) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wheelhouse", type=Path)
+    parser.add_argument("--profile", choices=("paddle", "native"), default="paddle")
+    parser.add_argument("--native-ocr", type=Path, help="Verified complete native CPU artifact (build-side only)")
     parser.add_argument("--output", type=Path, default=Path("dist"))
     parser.add_argument("--verify", type=Path, help="Verify all bundle ZIPs in this directory")
     parser.add_argument("--smoke", action="store_true", help="Test included interpreter/runtime with no client installation or host Python")
@@ -352,7 +369,7 @@ def main() -> int:
             verify_bundle(archive, args.smoke)
             print(f"Verified: {archive}")
     elif args.wheelhouse:
-        print(create_bundle(args.wheelhouse, args.output))
+        print(create_bundle(args.wheelhouse, args.output, profile=args.profile, native_ocr=args.native_ocr))
     else:
         parser.error("Specify --wheelhouse or --verify")
     return 0

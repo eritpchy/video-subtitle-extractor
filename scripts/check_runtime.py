@@ -16,13 +16,23 @@ def main() -> int:
     os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
     os.environ.setdefault("VSE_OFFLINE", "1")
 
+    manifest_path = ROOT / 'bundle-manifest.json'
+    if manifest_path.is_file():
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        os.environ['VSE_OCR_BACKEND'] = manifest.get('ocr_backend', 'paddle')
+        if os.environ['VSE_OCR_BACKEND'] == 'native':
+            os.environ['VSE_NATIVE_OCR_ROOT'] = str(ROOT / 'native-ocr')
+    from backend.tools.native_ocr import selected_backend
+    backend = selected_backend()
+
     # Importing config/main reaches QtGui/QtWidgets even for CLI extraction.
     # Import PaddleOCR explicitly too; --help/--version do not load this stack.
     from ui.qt_runtime import prepare_qt_runtime
     prepare_qt_runtime()
     import cv2
-    import paddle
-    import paddleocr
+    if backend == 'paddle':
+        import paddle
+        import paddleocr
     from PIL import ImageFont
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QColor, QFont, QFontDatabase, QImage, QPainter
@@ -50,14 +60,31 @@ def main() -> int:
         raise RuntimeError("Qt font rendering produced no pixels")
     if ImageFont.truetype(str(font_path), 24).getlength("VSE") <= 0:
         raise RuntimeError("Pillow FreeType font measurement failed")
-    # A real CPU operation also loads lazy native Paddle math dependencies.
-    paddle.set_device("cpu")
-    if float(paddle.to_tensor([1.0, 2.0]).sum().item()) != 3.0:
-        raise RuntimeError("Paddle CPU tensor smoke failed")
+    if backend == 'paddle':
+        # A real CPU operation loads lazy native Paddle math dependencies.
+        paddle.set_device("cpu")
+        if float(paddle.to_tensor([1.0, 2.0]).sum().item()) != 3.0:
+            raise RuntimeError("Paddle CPU tensor smoke failed")
+        inference = {"paddle_cpu": True, "paddle": paddle.__version__, "paddleocr": paddleocr.__version__}
+    else:
+        from PIL import Image, ImageDraw
+        import numpy as np
+        from backend.tools.ocr import OcrRecogniser
+        frame = Image.new('RGB', (640, 180), 'black')
+        ImageDraw.Draw(frame).text((40, 50), 'VSE 字幕', font=ImageFont.truetype(str(font_path), 48), fill='white')
+        recognizer = OcrRecogniser('ch', 'fast', 1)
+        try:
+            boxes, records = recognizer.predict(np.ascontiguousarray(np.asarray(frame)[:, :, ::-1]))
+            if not boxes or 'VSE' not in ''.join(text for text, score in records).replace(' ', ''):
+                raise RuntimeError('Native CPU OCR smoke failed')
+        finally:
+            recognizer.close()
+        if any(name.split('.')[0] in {'paddle', 'paddleocr', 'paddlex', 'onnxruntime'} for name in sys.modules):
+            raise RuntimeError('Native CPU profile imported a forbidden Python inference framework')
+        inference = {"native_cpu": True, "recognized": [text for text, score in records]}
     app.processEvents()
     print(json.dumps({"result": "passed", "qt_font_rendering": True,
-                      "pillow_freetype": True, "paddle_cpu": True,
-                      "paddle": paddle.__version__, "paddleocr": paddleocr.__version__,
+                      "pillow_freetype": True, "ocr_backend": backend, **inference,
                       "opencv": cv2.__version__, "extractor_import": SubtitleExtractor.__name__}))
     return 0
 

@@ -80,9 +80,15 @@ def runtime_wheels(wheelhouse, requirements):
     return [records[name]['path'] for name in sorted(selected)], roots
 
 
-def audit_installed(roots):
+def audit_installed(roots, backend="paddle"):
     records = {canonicalize_name(d.metadata['Name']): {'version': d.version, 'requires': d.requires or []} for d in distributions()}
     selected = resolve(records, roots)
+    if backend == 'native':
+        try:
+            from .native_package import assert_native_requirements
+        except ImportError:
+            from native_package import assert_native_requirements
+        assert_native_requirements([f'{name}=={record["version"]}' for name, record in records.items()])
     # Audit every installed distribution as well, not only the root closure.
     for name, record in records.items():
         for raw in record['requires']:
@@ -124,6 +130,7 @@ if __name__ == '__main__':
             shutil.copy2(wheel, args.output / wheel.name)
         (args.output / 'runtime-manifest.json').write_text(json.dumps({'runtime_requirements': roots}, indent=2) + '\n')
     elif args.manifest:
-        audit_installed(json.loads(args.manifest.read_text())['runtime_requirements'])
+        manifest = json.loads(args.manifest.read_text())
+        audit_installed(manifest['runtime_requirements'], manifest.get('ocr_backend', 'paddle'))
     else:
         parser.error('Specify --manifest, or --wheelhouse/--requirements/--output')

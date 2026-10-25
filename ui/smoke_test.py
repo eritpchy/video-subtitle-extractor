@@ -64,13 +64,29 @@ def run_gui_smoke(app, window):
                 if screenshot_dir and not screenshot.save(str(screenshot_dir / f"{theme.value.lower()}-{name}.png")):
                     raise AssertionError(f"Could not save {name} screenshot")
 
-        combo.setCurrentIndex(combo.findData(Theme.AUTO))
-        settle()
-        for theme in (Theme.DARK, Theme.LIGHT):
-            window.themeListener._onThemeChanged(theme)
-            settle()
-            if qconfig.theme != theme or config.themeMode.value != Theme.AUTO:
-                raise AssertionError("System appearance changed the saved theme preference")
+        # The real fallback timer must observe the same simulated OS appearance
+        # as the explicit refresh. Injecting only _onThemeChanged lets a timer
+        # tick overwrite fake Dark with the host's real Light during settle().
+        # Keep the production listener and timer active; replace only its OS read.
+        from unittest.mock import patch
+        listener = window.themeListener
+        original_interval = listener._timer.interval()
+        try:
+            with patch.object(listener, "_readSystemTheme", return_value=Theme.LIGHT) as read_system:
+                listener._timer.setInterval(100)  # Exercise actual timer ticks per settle.
+                combo.setCurrentIndex(combo.findData(Theme.AUTO))
+                settle()
+                for theme in (Theme.DARK, Theme.LIGHT):
+                    read_system.return_value = theme
+                    listener.refresh()
+                    settle()
+                    if qconfig.theme != theme or config.themeMode.value != Theme.AUTO:
+                        raise AssertionError(
+                            f"System appearance mismatch: expected={theme.value}, "
+                            f"effective={qconfig.theme.value}, saved={config.themeMode.value.value}"
+                        )
+        finally:
+            listener._timer.setInterval(original_interval)
         saved = json.loads(config.file.read_text(encoding="utf-8"))
         if saved["QFluentWidgets"]["ThemeMode"] != Theme.AUTO.value:
             raise AssertionError("System theme preference was not persisted")

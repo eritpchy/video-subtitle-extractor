@@ -120,7 +120,9 @@ def file_record(path, root):
             'sha256': digest(path)}
 
 
-def build_plan(root, include_openvino=False):
+def build_plan(root, include_openvino=False, engine="paddle"):
+    if engine not in ("paddle", "native") or (engine == "native" and include_openvino):
+        raise ValueError("Invalid inference engine / OpenVINO pruning combination")
     versions, records = installed(root)
     if include_openvino and not (
         platform.system() == 'Linux' and platform.machine().lower() in ('x86_64', 'amd64')
@@ -143,7 +145,7 @@ def build_plan(root, include_openvino=False):
             removed.append(entry)
         else:
             retained.append(entry)
-    return {'schema': 1, 'profile': 'VSE inference-only', 'engine': 'paddle',
+    return {'schema': 1, 'profile': 'VSE inference-only', 'engine': engine,
             'platform': {'system': platform.system(), 'machine': platform.machine()},
             'distributions': versions, 'original_RECORD_unchanged': True,
             'requires_no_bytecode_launcher': True,
@@ -163,7 +165,7 @@ def child_path(root, relative):
 
 
 def verify(root, manifest):
-    if manifest.get('schema') != 1 or manifest.get('engine') != 'paddle':
+    if manifest.get('schema') != 1 or manifest.get('engine') not in ('paddle', 'native'):
         raise ValueError('Unsupported compact-runtime manifest')
     actual = {p.relative_to(root).as_posix(): p for p in safe_files(root)}
     retained = {e['path']: e for e in manifest['retained']}
@@ -187,7 +189,7 @@ def resume_pending(root, manifest):
     Strict --verify still rejects partial deletion; --apply can recover files
     listed as removed that still exactly match their original recorded bytes.
     """
-    if manifest.get('schema') != 1 or manifest.get('engine') != 'paddle':
+    if manifest.get('schema') != 1 or manifest.get('engine') not in ('paddle', 'native'):
         raise ValueError('Unsupported compact-runtime manifest')
     actual = {p.relative_to(root).as_posix(): p for p in safe_files(root)}
     retained = {e['path']: e for e in manifest['retained']}
@@ -215,8 +217,8 @@ def apply_plan(root, plan, manifest_path):
     if manifest_path.exists():
         previous = json.loads(manifest_path.read_text(encoding='utf-8'))
         verify(root, previous)
-        if previous['distributions'] != plan['distributions']:
-            raise ValueError('Cannot extend manifest after vendor version changes')
+        if previous['distributions'] != plan['distributions'] or previous.get('engine') != plan.get('engine'):
+            raise ValueError('Cannot extend manifest after vendor version or engine changes')
     # Validate everything before deleting anything; reject source changes after planning.
     for entry in plan['removed'] + plan['retained']:
         path = child_path(root, entry['path'])
@@ -244,6 +246,7 @@ def main(argv=None):
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--apply', action='store_true')
     modes.add_argument('--verify', action='store_true')
+    parser.add_argument('--engine', choices=('paddle', 'native'), default='paddle')
     parser.add_argument('--include-unused-openvino', action='store_true')
     args = parser.parse_args(argv)
     root = args.site_packages.resolve()
@@ -255,7 +258,7 @@ def main(argv=None):
         return 0
     if args.apply and args.manifest.exists():
         resume_pending(root, json.loads(args.manifest.read_text(encoding='utf-8')))
-    plan = build_plan(root, args.include_unused_openvino)
+    plan = build_plan(root, args.include_unused_openvino, args.engine)
     if args.apply:
         apply_plan(root, plan, args.manifest)
     print(json.dumps({'applied': args.apply, 'removed_bytes': plan['removed_bytes'],

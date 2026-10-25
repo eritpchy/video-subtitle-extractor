@@ -46,17 +46,24 @@ class SettingInterface(QtWidgets.QVBoxLayout):
         )
         self.addWidget(self.mode_combo)
            
+        # Native CPU packages must not pretend GPU acceleration is enabled.
+        from backend.tools.native_ocr import selected_backend
+        native_cpu = selected_backend() == 'native'
+
         # 是否启用硬件加速
         self.hardware_acceleration = SwitchSettingCard(
-            configItem=config.hardwareAcceleration,
+            configItem=None if native_cpu else config.hardwareAcceleration,
             icon=FluentIcon.SPEED_HIGH, 
             title=tr["Setting"]["HardwareAcceleration"],
-            content=tr["Setting"]["HardwareAccelerationDesc"],
+            content=tr["Setting"]["NativeOCRCPUOnly"] if native_cpu else tr["Setting"]["HardwareAccelerationDesc"],
             parent=parent
         )
         self.addWidget(self.hardware_acceleration)
         # 如果硬件加速选项被禁用, 设置硬件加速为False并只读
-        if not HARDWARD_ACCELERATION_OPTION:
+        if native_cpu:
+            self.hardware_acceleration.switchButton.setChecked(False)
+            self.hardware_acceleration.switchButton.setEnabled(False)
+        elif not HARDWARD_ACCELERATION_OPTION:
             self.hardware_acceleration.switchButton.setChecked(False)
             self.hardware_acceleration.switchButton.setEnabled(False)
             config.set(config.hardwareAcceleration, False)

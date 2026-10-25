@@ -1,0 +1,45 @@
+{
+  "status": "diagnostic-only: host-library closure not certified",
+  "expanded_bytes": 1048278757,
+  "zip_bytes": 495709920,
+  "zip_sha256": "ec442670acf2403b0d253c87d3b3e676e1e7078b2faf040872aa3a4eafa3f4d1",
+  "whole_GUI_application": true,
+  "Paddle_python_runtime": false,
+  "native_ocr_models": 15,
+  "runtime_bytes": 697617698,
+  "native_worker_models_bytes": 297529850,
+  "release_ready": false,
+  "source_state": "uncommitted native profile candidate based on d001024; diagnostic snapshot, not release provenance",
+  "verification": {
+    "bundled_python": "3.12.15",
+    "minimal_python_distributions": 27,
+    "bootstrap_verify": "passed",
+    "strict_path_bootstrap_verify": "passed",
+    "relocated_bootstrap_verify": "passed",
+    "gui_screenshots": 6,
+    "real_video_cases": [
+      "ordinary",
+      "multiline",
+      "AV1",
+      "timeline"
+    ],
+    "audited_python_processes": 21,
+    "forbidden_python_frameworks_observed": [],
+    "external_host_library_audit_errors": 28,
+    "clean_container": "not run: no Docker/attributable system-library closure in this environment",
+    "native_windows_macos": "not run",
+    "zip_integrity": "passed"
+  },
+  "known_limits": [
+    "Measured ZIP snapshot predates CPU-only UI indicator fix; source fix and six fresh GUI screenshots verified separately.",
+    "No actual GPU inference tested; native profile is CPU only",
+    "Final native-platform C++/GUI library closure adds attributable runtime bytes; this is not a completed release size"
+  ],
+  "diagnostic_measurement_stdlib_pyc_bytes": 648517,
+  "follow_up_verification": {
+    "cpu_only_gpu_toggle": "Off/disabled; saved Paddle preference unchanged",
+    "native_gui_smoke": "passed: light/dark/system, persistence, shutdown",
+    "macos_minimum_plist": "native 14.0 / Paddle 13.0 unit assertions passed",
+    "native_runtime_probe": "real VSE 字幕 C++ OCR, Qt and Pillow fonts passed without Paddle stack"
+  }
+}

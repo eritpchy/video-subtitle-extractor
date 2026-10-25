@@ -384,3 +384,4 @@ $RECYCLE.BIN/
 
 # Runtime dependency roots are release source, not local text output.
 !requirements-inference.txt
+!requirements-native-inference.txt

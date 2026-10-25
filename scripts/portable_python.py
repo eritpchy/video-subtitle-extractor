@@ -146,7 +146,7 @@ export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1
 '''
 
 
-def write_launchers(root: Path, target_platform: str | None = None, target_arch: str | None = None, runtime_python: str | None = None) -> None:
+def write_launchers(root: Path, target_platform: str | None = None, target_arch: str | None = None, runtime_python: str | None = None, *, minimum_macos_version: str = "13.0") -> None:
     root = Path(root)
     target_platform = target_platform or {'Darwin': 'macos', 'Windows': 'windows', 'Linux': 'linux'}[platform.system()]
     runtime_python = runtime_python or ('runtime/python.exe' if target_platform == 'windows' else 'runtime/bin/python3.12')
@@ -172,7 +172,7 @@ def write_launchers(root: Path, target_platform: str | None = None, target_arch:
         script.chmod(0o755)
         info = {'CFBundleName': 'Video Subtitle Extractor', 'CFBundleDisplayName': 'Video Subtitle Extractor',
                 'CFBundleIdentifier': 'io.vse.portable-launcher', 'CFBundleExecutable': 'VSE',
-                'CFBundlePackageType': 'APPL', 'CFBundleVersion': '1', 'LSMinimumSystemVersion': '13.0',
+                'CFBundlePackageType': 'APPL', 'CFBundleVersion': '1', 'LSMinimumSystemVersion': minimum_macos_version,
                 'NSHighResolutionCapable': True}
         png = root / 'design/icon_1024.png'
         if png.exists():

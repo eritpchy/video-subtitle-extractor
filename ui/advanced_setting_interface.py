@@ -14,6 +14,7 @@ from backend.config import config, tr, VERSION, PROJECT_HOME_URL, PROJECT_ISSUES
 from backend.tools.version_service import VersionService
 from backend.tools.concurrent import TaskExecutor
 from backend.tools.constant import VideoSubFinderDecoder
+from backend.tools.native_ocr import selected_backend
 
 class AdvancedSettingInterface(ScrollArea):
     """高级设置页面"""
@@ -109,7 +110,7 @@ class AdvancedSettingInterface(ScrollArea):
             configItem=config.recBatchNumber,
             icon=FluentIcon.SEARCH,
             title=tr["Setting"]["RecBatchNumber"],
-            content=tr["Setting"]["RecBatchNumberDesc"],
+            content=tr["Setting"]["RecBatchNumberNativeDesc"] if selected_backend() == "native" else tr["Setting"]["RecBatchNumberDesc"],
             parent=self.advanced_group
         )
         # DB算法每个batch识别多少张

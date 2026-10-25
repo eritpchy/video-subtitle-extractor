@@ -1,0 +1,194 @@
+name: Experimental native OCR one-click packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      acknowledge_vc_redistribution_license:
+        description: Confirm applicable Microsoft Visual C++ redistributable distribution rights
+        required: false
+        default: false
+        type: boolean
+  push:
+    paths:
+      - 'native/ocr/**'
+      - 'requirements*.txt'
+      - 'backend/**'
+      - 'ui/**'
+      - 'gui.py'
+      - 'scripts/**'
+      - 'tests/**'
+      - '.github/workflows/native-ocr.yml'
+  pull_request:
+    paths:
+      - 'native/ocr/**'
+      - 'requirements*.txt'
+      - 'backend/**'
+      - 'ui/**'
+      - 'gui.py'
+      - 'scripts/**'
+      - 'tests/**'
+      - '.github/workflows/native-ocr.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-ocr-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  POLYGRAPHY_AUTOINSTALL_DEPS: '0'
+  ORT_DISABLE_TELEMETRY: '1'
+
+jobs:
+  models:
+    name: Pinned FP32 models / conversion only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install explicitly pinned conversion tools (build side only)
+        run: python -m pip install -r native/ocr/requirements-model-build.txt
+      - name: Convert all 15 verified official models without auto-install
+        env:
+          PIP_NO_INDEX: '1'
+          PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: 'True'
+        run: python native/ocr/prepare_models.py --output build/native-models --cache build/model-cache
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-ocr-fp32-models-${{ github.sha }}
+          path: build/native-models/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  native:
+    name: Native CPU / ${{ matrix.name }}
+    needs: models
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: Linux x64
+            platform: linux
+            arch: x64
+          - os: windows-2022
+            name: Windows x64
+            platform: windows
+            arch: x64
+          - os: macos-15
+            name: macOS arm64
+            platform: macos
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      QT_QPA_PLATFORM: ${{ matrix.platform == 'macos' && 'cocoa' || 'offscreen' }}
+      VSE_OCR_BACKEND: native
+      VSE_NATIVE_OCR_ROOT: ${{ github.workspace }}/build/native-ocr
+      VSE_OFFLINE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-ocr-fp32-models-${{ github.sha }}
+          path: build/native-models
+      - name: Install Linux attributable GUI runtime libraries
+        if: runner.os == 'Linux'
+        run: >-
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          libgl1 libegl1 libglib2.0-0 libdbus-1-3 libxkbcommon0
+          libfontconfig1 libfreetype6 libx11-6 libx11-xcb1 libxext6 libxrender1
+          libxi6 libxfixes3 libsm6 libice6 libxcb1 libxcb-cursor0
+          libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-util1
+          libxcb-randr0 libxcb-render0 libxcb-render-util0 libxcb-shape0
+          libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-xkb1 libxcb-glx0
+          libxkbcommon-x11-0 xvfb xauth
+      - name: Install explicit native build tools
+        run: |
+          python -m pip install --only-binary=:all: --require-hashes -r native/ocr/requirements-build.txt
+          python -m pip install packaging pytest==8.3.5
+      - name: Compile target worker and stage verified CPU libraries/models
+        run: >-
+          python native/ocr/build.py --platform ${{ matrix.platform }}
+          --arch ${{ matrix.arch }} --models build/native-models --output build/native-ocr
+          ${{ matrix.platform == 'windows' && ((inputs.acknowledge_vc_redistribution_license || vars.VSE_VC_REDISTRIBUTION_LICENSE_ACK == 'true') && '--acknowledge-vc-redistribution-license' || '--runner-test-only') || '' }}
+      - name: Native worker protocol/model/GPU-refusal smoke
+        run: python native/ocr/smoke.py --artifact build/native-ocr --output test-results/native-worker.json
+      - name: Resolve GUI/media wheels (no Paddle framework roots)
+        run: python -m pip wheel -r requirements-native-inference.txt --wheel-dir build/all-wheels
+      - name: Select minimal dependency closure with exact meta substitutions
+        run: >-
+          python scripts/runtime_dependencies.py --wheelhouse build/all-wheels
+          --requirements requirements-native-inference.txt --output build/wheelhouse
+      - name: Install selected untouched wheels for source integration checks
+        run: >-
+          python -c "import pathlib,subprocess,sys; subprocess.run([sys.executable,'-m','pip','install','--no-index','--no-deps','--no-compile',*map(str,sorted(pathlib.Path('build/wheelhouse').glob('*.whl')))],check=True)"
+      - name: Install and verify fixed VideoSubFinder release
+        run: python scripts/install_videosubfinder.py --version 6.10
+      - name: Native adapter and packaging regression tests
+        env:
+          VSE_RUN_NATIVE_INTEGRATION: '1'
+          VSE_NATIVE_LEGACY_EVIDENCE: ${{ github.workspace }}/native/ocr/tests/evidence/legacy
+          VSE_NATIVE_MISSING_EVIDENCE: ${{ github.workspace }}/native/ocr/tests/evidence/missing
+          VSE_NATIVE_DETECTION_EVIDENCE: ${{ github.workspace }}/native/ocr/tests/evidence/detection
+        run: >-
+          python -m pytest native/ocr/tests tests/test_native_ocr.py tests/test_native_ocr_integration.py
+          tests/test_native_package.py tests/test_release_packaging.py
+          tests/test_runtime_dependencies.py tests/test_prune_inference_runtime.py
+          tests/test_standalone_runtime_probe.py -vv --junitxml=test-results/native-profile.xml
+      - name: Windows customer-package license gate (runner tests are not release approval)
+        if: matrix.platform == 'windows' && !(inputs.acknowledge_vc_redistribution_license || vars.VSE_VC_REDISTRIBUTION_LICENSE_ACK == 'true')
+        shell: pwsh
+        run: |
+          'Windows customer package: PENDING applicable VC redistribution rights confirmation. Native compilation and runner tests above are separate evidence; no VC redistributable/customer candidate uploaded.' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          throw 'PENDING: customer packaging requires VC redistribution license acknowledgment; runner tests do not grant redistribution rights.'
+      - name: Build self-contained native CPU package
+        run: >-
+          python scripts/package_release.py --profile native --native-ocr build/native-ocr
+          --wheelhouse build/wheelhouse --output dist-native
+      - name: Verify packaged Linux GUI, SRT and dependency isolation under X11
+        if: runner.os == 'Linux'
+        shell: bash
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" env QT_QPA_PLATFORM=xcb python scripts/package_release.py --verify dist-native --smoke
+      - name: Verify packaged Windows/macOS GUI, SRT and native imports
+        if: runner.os != 'Linux'
+        env:
+          QT_QPA_PLATFORM: ${{ runner.os == 'macOS' && 'cocoa' || 'windows' }}
+        run: python scripts/package_release.py --verify dist-native --smoke
+      - name: Verify Linux package without host Python/network/native libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          for archive in dist-native/*linux-x64-native-cpu.zip; do
+            python scripts/verify_clean_linux_bundle.py --archive "$archive" --output test-results/clean-native-linux
+          done
+      - name: Preserve exact-size, isolation and GUI screenshot evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-profile-evidence-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            test-results/
+            dist-native/test-results/
+            dist-native/*.size.json
+            dist-native/*.sha256
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Preserve test candidate only (never publish release/tag)
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-profile-candidate-${{ matrix.platform }}-${{ matrix.arch }}
+          path: dist-native/*.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7

@@ -227,7 +227,8 @@ def install_probe() -> None:
     atexit.register(finish)
 
 
-def summarize_reports(bundle_root: Path, report_dir: Path, required_modules: tuple[str, ...] = ()) -> dict:
+def summarize_reports(bundle_root: Path, report_dir: Path, required_modules: tuple[str, ...] = (),
+                      forbidden_modules: tuple[str, ...] = ()) -> dict:
     """Write evidence and fail closed on missing reports or probe failures."""
     root = str(bundle_root.resolve())
     errors: list[str] = []
@@ -264,6 +265,9 @@ def summarize_reports(bundle_root: Path, report_dir: Path, required_modules: tup
     for module in required_modules:
         if not any(name == module or name.startswith(module + '.') for name in seen_modules):
             errors.append(f'Required workload was not observed: {module}')
+    for module in forbidden_modules:
+        if any(name == module or name.startswith(module + '.') for name in seen_modules):
+            errors.append(f'Forbidden inference framework loaded: {module}')
     summary = {'process_count': len(reports), 'modules_observed': sorted(seen_modules),
                'errors': sorted(set(errors)), 'passed': not errors,
                'scope': 'Loaded Python process libraries; non-Python executables require separate native audit'}
@@ -338,7 +342,7 @@ def audit_windows_executables(bundle_root: Path, runtime_python: Path, report_di
         ffmpeg = sorted((root / 'runtime').glob('**/imageio_ffmpeg/binaries/*.exe'))
         if not vsf or not ffmpeg:
             raise RuntimeError('Cannot audit Windows native executables: bundled VSF/ffmpeg missing')
-        executables = vsf + ffmpeg
+        executables = vsf + ffmpeg + list((root / "native-ocr").glob("native-ocr.exe"))
     errors, graphs = [], {}
     for executable in executables:
         executable = executable.resolve()
@@ -402,7 +406,7 @@ def audit_macos_executables(bundle_root: Path, report_dir: Path, executables: li
     if executables is None:
         vsf = sorted((root / 'backend/subfinder/macos').rglob('VideoSubFinder*'))
         ffmpeg = sorted((root / 'runtime').glob('**/imageio_ffmpeg/binaries/ffmpeg-macos*'))
-        executables = [path for path in vsf + ffmpeg if path.is_file()]
+        executables = [path for path in vsf + ffmpeg + list((root / "native-ocr").glob("native-ocr")) if path.is_file()]
         if not vsf or not ffmpeg:
             raise RuntimeError('Cannot audit macOS native executables: bundled VSF/ffmpeg missing')
     errors, graphs = [], {}

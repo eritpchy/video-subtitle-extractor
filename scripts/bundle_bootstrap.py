@@ -62,10 +62,11 @@ def write_size_report(root: Path, manifest: dict, phase: str, results_dir: Path 
     path = directory / 'runtime-size.json'
     report = json.loads(path.read_text()) if path.is_file() else {'measurements': []}
     report.update({'commit': manifest.get('commit'), 'platform': manifest['platform'],
-                   'arch': manifest['arch'], 'profile': 'inference-essentials',
+                   'arch': manifest['arch'], 'profile': manifest.get('ocr_backend', 'paddle'),
                    'byte_count_method': 'sum of regular file sizes; symlinks, original ZIPs and test-results excluded'})
     report['measurements'].append({'phase': phase, 'runtime_bytes': size(root / 'runtime'),
-                                   'model_bytes': size(root / 'backend/models'),
+                                   'model_bytes': size(root / 'backend/models') + size(root / 'native-ocr/models'),
+                                   'native_worker_bytes': size(root / 'native-ocr'),
                                    'wheelhouse_bytes': size(root / 'wheelhouse'),
                                    'total_installed_bytes': total})
     path.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
@@ -118,6 +119,14 @@ def main(argv: list[str] | None = None) -> int:
         raise RuntimeError('Unexpected bundled Python version; re-extract the original release archive')
     os.chdir(root)
     configure_user_paths()
+    backend = manifest.get('ocr_backend', 'paddle')
+    if backend not in ('paddle', 'native'):
+        raise RuntimeError('Unknown bundled OCR backend')
+    os.environ['VSE_OCR_BACKEND'] = backend
+    if backend == 'native':
+        os.environ['VSE_NATIVE_OCR_ROOT'] = str(root / 'native-ocr')
+        # Do not override a requested unsupported GPU provider: adapter rejects it.
+        os.environ['ORT_DISABLE_TELEMETRY'] = '1'
     os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
     os.environ['PYTHONNOUSERSITE'] = '1'
     os.environ['PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK'] = 'True'

@@ -80,6 +80,14 @@ def container_command(bundle: Path, evidence: Path, image: str, python: str,
         'VSE_CONFIG_FILE': '/results/user/config.json', 'VSE_WORK_DIR': '/results/work',
         'VSE_SMOKE_SCREENSHOT_DIR': f'/results/{case}-screenshots',
     }
+    manifest_path = Path(bundle) / 'bundle-manifest.json'
+    if manifest_path.is_file():
+        backend = json.loads(manifest_path.read_text()).get('ocr_backend', 'paddle')
+        if backend not in ('paddle', 'native'):
+            raise ValueError('Unknown bundled OCR backend')
+        environment['VSE_OCR_BACKEND'] = backend
+        if backend == 'native':
+            environment.update(VSE_NATIVE_OCR_ROOT='/bundle/native-ocr', ORT_DISABLE_TELEMETRY='1')
     if display is not None:
         if not re.fullmatch(r':\d+(?:\.\d+)?', display) or xauthority is None or not xauthority.is_file():
             raise ValueError('XCB requires a local Xvfb display and existing Xauthority cookie')
