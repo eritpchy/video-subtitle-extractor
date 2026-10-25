@@ -1,6 +1,9 @@
 """Windows toolchain policy/command tests; no Windows execution or downloads."""
 import json
+import os
 from pathlib import Path
+import re
+import subprocess
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -116,22 +119,35 @@ def test_prepare_discovers_installed_version_and_preserves_pinned_build_tools(tm
     build_tools = {name: {'path': str(tmp_path / 'Pinned Python Scripts' / (name + '.exe')), 'version': value}
                    for name, value in [('cmake', '4.1.2'), ('ninja', '1.13.0')]}
     discovery = json.dumps([{'installationPath': str(installation), 'installationVersion': '17.14.fixture'}])
-    env_bytes = '\r\n'.join(key + '=' + value for key, value in environment.items()).encode('utf-16-le')
+    def initialize(command, **kwargs):
+        marker = re.search(r'echo (VSE_TOOLCHAIN_ENV_[0-9a-f]+)&&', command)[1]
+        env_text = '\r\n'.join(key + '=' + value for key, value in environment.items())
+        stdout = ('initializing exact toolset\r\n' + marker + '\r\n' + env_text +
+                  '\r\nSECRET_TOKEN=must-not-persist').encode('utf-16-le')
+        return SimpleNamespace(stdout=stdout, stderr=b'', returncode=0)
     report = {}
     with patch.object(toolchain, 'os', fake_os), \
             patch.object(toolchain, 'pinned_build_tools', return_value=build_tools), \
             patch.object(toolchain, 'file_version', side_effect=file_version), \
             patch.object(toolchain.subprocess, 'check_output', return_value=discovery), \
-            patch.object(toolchain.subprocess, 'run', return_value=SimpleNamespace(stdout=env_bytes)) as run, \
+            patch.object(toolchain.subprocess, 'run', side_effect=initialize) as run, \
             patch.object(toolchain.shutil, 'which', side_effect=lambda name, **_: str(directory / 'bin/Hostx64/x64' / name)):
         result = toolchain.prepare(report)
     command = run.call_args.args[0]
-    assert command[:5] == ['cmd.exe', '/d', '/u', '/s', '/c']
-    assert '-arch=x64 -host_arch=x64 -vcvars_ver=14.44.35207' in command[-1]
-    assert 'call "' in command[-1] and ' && set' in command[-1]
+    assert isinstance(command, str)
+    assert command.startswith('"cmd.exe" /d /q /u /s /v:off /c "call "')
+    assert '-arch=x64 -host_arch=x64 -vcvars_ver=14.44.35207' in command
+    assert '\\"' not in command and '>nul' not in command
+    assert run.call_args.kwargs['executable'] == 'cmd.exe'
+    assert run.call_args.kwargs['shell'] is False
+    assert run.call_args.kwargs['check'] is False
     assert result['PATH'].startswith(str(tmp_path / 'Pinned Python Scripts') + ';')
     assert result['CMAKE_GENERATOR'] == 'Ninja'
     assert report['selected']['crt']['version'] == RUNTIME
+    assert report['initialization']['stdout_diagnostics'] == 'initializing exact toolset'
+    assert report['initialization']['returncode'] == 0
+    assert 'must-not-persist' not in json.dumps(report)
+    assert 'SECRET_TOKEN' not in result
 
 
 def test_missing_compatible_installed_tools_records_mismatch_before_any_command(tmp_path):
@@ -238,3 +254,115 @@ def test_workflow_initializes_both_server_toolchains_and_records_outcome():
     assert '--github-env "$env:GITHUB_ENV"' in text
     assert "'--generator Ninja'" in text
     assert '"native-toolchain":"${{ steps.windows-toolchain.outcome }}"' in text
+
+
+@pytest.mark.parametrize('installation', [r'C:\Program Files\Microsoft Visual Studio\18\Enterprise',
+                                         r'C:\Program Files (x86)\VS 2022\Enterprise',
+                                         r'C:\Build Tools & SDK (reviewed)\VS'])
+def test_cmd_uses_raw_quoted_batch_path_not_crt_argv_serialization(installation):
+    script = installation + r'\Common7\Tools\VsDevCmd.bat'
+    comspec = r'C:\Windows\System32\cmd.exe'
+    marker = 'VSE_TOOLCHAIN_ENV_' + 'a' * 32
+    command = toolchain.initialization_command(comspec, script, '14.44.35207', marker)
+    assert command == (f'"{comspec}" /d /q /u /s /v:off /c "call "{script}" '
+                       f'-no_logo -arch=x64 -host_arch=x64 -vcvars_ver=14.44.35207 '
+                       f'&& echo {marker}&& set"')
+    # This is the exact Windows serialization of the previous (incorrect) list.
+    previous = subprocess.list2cmdline([comspec, '/d', '/u', '/s', '/c',
+                                       f'call "{script}" -vcvars_ver=14.44.35207 >nul && set'])
+    assert '\\"' in previous and '\\"' not in command
+
+
+@pytest.mark.parametrize('bad', ['quote"', 'expand%PATH%', 'expand!PATH!', 'caret^', 'new\nline', 'pipe|'])
+def test_cmd_rejects_untrusted_expansion_and_control_characters(bad):
+    with pytest.raises(ValueError):
+        toolchain.initialization_command('cmd.exe', bad, '14.44.35207', 'VSE_TOOLCHAIN_ENV_' + 'a' * 32)
+
+
+def test_failed_initialization_preserves_diagnostics_without_environment_secrets(tmp_path):
+    installation, _, _ = fixture_tools(tmp_path)
+    selected = {'installation': str(installation), 'toolset': '14.44.35207'}
+    report = {}
+    failed = SimpleNamespace(returncode=7, stdout='[ERROR] Could not initialize VC\r\nPRIVATE_TOKEN=secret'.encode('utf-16-le'),
+                             stderr=b'initializer diagnostic: secret')
+    with patch.object(toolchain, 'os', SimpleNamespace(environ={'ComSpec': 'cmd.exe', 'PRIVATE_TOKEN': 'secret'})), \
+            patch.object(toolchain.subprocess, 'run', return_value=failed), \
+            pytest.raises(RuntimeError, match='exit 7'):
+        toolchain.initialize_environment(selected, report)
+    assert report['initialization']['returncode'] == 7
+    assert 'Could not initialize VC' in report['initialization']['stdout_diagnostics']
+    assert 'secret' not in json.dumps(report).replace('secret value omitted', '')
+    assert 'PRIVATE_TOKEN=' not in json.dumps(report)
+    assert len(report['initialization']['script_sha256']) == 64
+
+
+@pytest.mark.parametrize('line', ['CHILD_ONLY=private', 'set CHILD_ONLY=private',
+                                 'set "CHILD_ONLY=private"', '@set "CHILD_ONLY=private"'])
+def test_initialization_diagnostics_omit_even_child_created_quoted_assignments(line):
+    with patch.object(toolchain, 'os', SimpleNamespace(environ={})):
+        assert toolchain.diagnostic_text(line.encode('utf-16-le')) == '[environment assignment omitted]'
+
+
+def test_initialization_timeout_preserves_prefix_but_not_partial_environment(tmp_path):
+    installation, _, _ = fixture_tools(tmp_path)
+    report = {}
+    def timeout(command, **kwargs):
+        marker = re.search(r'echo (VSE_TOOLCHAIN_ENV_[0-9a-f]+)&&', command)[1]
+        data = ('still initializing\r\n' + marker + '\r\nSECRET_TOKEN=private').encode('utf-16-le')
+        raise subprocess.TimeoutExpired(command, 120, output=data, stderr=b'timeout diagnostic')
+    with patch.object(toolchain, 'os', SimpleNamespace(environ={'ComSpec': 'cmd.exe'})), \
+            patch.object(toolchain.subprocess, 'run', side_effect=timeout), \
+            pytest.raises(RuntimeError, match='timed out'):
+        toolchain.initialize_environment({'installation': str(installation), 'toolset': '14.44.35207'}, report)
+    assert report['initialization']['timed_out']
+    assert report['initialization']['stdout_diagnostics'] == 'still initializing'
+    assert 'private' not in json.dumps(report)
+
+
+def test_success_without_delimiter_never_persists_unknown_output(tmp_path):
+    installation, _, _ = fixture_tools(tmp_path)
+    report = {}
+    result = SimpleNamespace(returncode=0, stdout=b'unknown possibly private output', stderr=b'')
+    with patch.object(toolchain, 'os', SimpleNamespace(environ={'ComSpec': 'cmd.exe'})), \
+            patch.object(toolchain.subprocess, 'run', return_value=result), \
+            pytest.raises(RuntimeError, match='delimiter'):
+        toolchain.initialize_environment({'installation': str(installation), 'toolset': '14.44.35207'}, report)
+    assert 'possibly private' not in json.dumps(report)
+
+
+@pytest.mark.parametrize('changed', ['toolset', 'directory', 'compiler', 'linker', 'crt'])
+def test_active_candidate_must_match_exact_preselected_snapshot(changed):
+    selected = {name: {'path': name, 'sha256': 'original'} for name in ('compiler', 'linker', 'crt')}
+    selected.update(toolset='14.44.35207', directory='reviewed installation')
+    toolchain.bind_selected_toolset(dict(selected), selected)
+    active = dict(selected)
+    active[changed] = 'another same-family toolset or changed input'
+    with pytest.raises(RuntimeError, match='differs from selected toolset: ' + changed):
+        toolchain.bind_selected_toolset(active, selected)
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Real cmd.exe execution requires the authorized Windows CI runner')
+@pytest.mark.parametrize('returncode', [0, 7])
+def test_real_windows_cmd_initialization_with_spaces_ampersand_and_parentheses(tmp_path, returncode):
+    # No compiler/installers involved: only exercise real cmd quoting/diagnostics.
+    installation = tmp_path / 'Build Tools & SDK (reviewed)'
+    script = installation / 'Common7/Tools/VsDevCmd.bat'
+    script.parent.mkdir(parents=True)
+    script.write_text('@echo off\n'
+                      'if not "%*"=="-no_logo -arch=x64 -host_arch=x64 -vcvars_ver=14.44.35207" exit /b 9\n'
+                      'echo real fixture initialization\n'
+                      'set "INCLUDE=C:\\exact header fixture"\n'
+                      'set "PRIVATE_TOOLCHAIN_TEST=must-not-persist"\n'
+                      f'exit /b {returncode}\n', encoding='utf-8')
+    report = {}
+    selected = {'installation': str(installation), 'toolset': '14.44.35207'}
+    if returncode:
+        with pytest.raises(RuntimeError, match='exit 7'):
+            toolchain.initialize_environment(selected, report)
+    else:
+        env = toolchain.initialize_environment(selected, report)
+        assert env['INCLUDE'] == r'C:\exact header fixture'
+        assert 'PRIVATE_TOOLCHAIN_TEST' not in env
+    assert report['initialization']['returncode'] == returncode
+    assert 'real fixture initialization' in report['initialization']['stdout_diagnostics']
+    assert 'must-not-persist' not in json.dumps(report)

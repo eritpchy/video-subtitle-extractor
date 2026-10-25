@@ -184,6 +184,9 @@ jobs:
         run: |
           python -m pip install --only-binary=:all: --require-hashes -r native/ocr/requirements-build.txt
           python -m pip install packaging pytest==8.3.5
+      - name: Test Windows toolchain command quoting before initialization
+        if: runner.os == 'Windows'
+        run: python -m pytest native/ocr/tests/test_windows_toolchain.py -q
       - name: Select installed runtime-compatible x64 MSVC and pinned Ninja
         id: windows-toolchain
         if: runner.os == 'Windows'

@@ -46,13 +46,25 @@ year or installation path. The helper selects an installed v143/14.44 x64 toolse
 whose own `include/crtversion.h` CRT version is no newer than the committed
 `vc-runtime-manifest.json` **14.51.36247.0** runtime. It initializes that exact
 toolset with `VsDevCmd.bat -arch=x64 -host_arch=x64 -vcvars_ver=<version>`, verifies
-compiler/linker and INCLUDE/LIB precedence, and keeps pinned CMake **4.1.2** and
+compiler/linker and INCLUDE/LIB precedence against that exact preselected
+directory/header/import-library snapshot, and keeps pinned CMake **4.1.2** and
 Ninja **1.13.0** ahead of Visual Studio's bundled tools. The compiler's 19.44
 servicing patch is recorded separately: it is **not** mechanically converted
 into a CRT minimum version. A newer toolset family, missing/ambiguous CRT macros,
 or newer CRT header version fails before compilation, retaining candidate paths,
 versions and the reason; there is no fallback to `latest`, automatic installation,
 runtime pin change, license acknowledgment or security-setting change.
+
+Initialization uses an explicitly quoted `cmd.exe` command-line string, not
+Python's C-runtime argv quoting (which inserts inappropriate `\"` around a batch
+path). It retains the documented full version selector; there is no prefix or
+cross-instance fallback. The report preserves the initialization command, script
+hash, return code and bounded diagnostics, but never the raw `set` environment
+dump. A delimiter separates diagnostics from allowlisted environment parsing;
+assignment lines and known inherited secret values are omitted from diagnostics.
+Windows CI runs the command regression tests **before** toolchain initialization,
+including real `cmd.exe` fixtures with spaces, ampersands and parentheses in the
+batch path, successful initialization and nonzero diagnostic preservation.
 
 OpenCV's static libraries explicitly use `BUILD_WITH_STATIC_CRT=OFF` and
 `CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL`; the worker also explicitly uses

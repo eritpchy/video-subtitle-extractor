@@ -131,6 +131,81 @@ def parse_environment(output):
     return result
 
 
+def initialization_command(comspec, script, toolset, marker):
+    """Build a cmd command line, not a CRT-quoted argv sequence.
+
+    subprocess's Windows list2cmdline escapes embedded quotes as backslash-quote;
+    cmd /s does not interpret that CRT convention. Its outer /c quotes must wrap
+    the unescaped quoted batch path. Spaces, ampersands and parentheses remain
+    protected by the inner quotes; expansion characters are rejected.
+    https://docs.python.org/3/library/subprocess.html#converting-an-argument-sequence-to-a-string-on-windows
+    https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cmd
+    """
+    for path in (str(comspec), str(script)):
+        if not path or any(c in path for c in '\r\n"%!^<>|'):
+            raise ValueError('Unsafe command-shell executable or batch path')
+    version(toolset)
+    if not re.fullmatch(r'VSE_TOOLCHAIN_ENV_[0-9a-f]{32}', marker):
+        raise ValueError('Invalid toolchain environment delimiter')
+    return (f'"{comspec}" /d /q /u /s /v:off /c "call "{script}" '
+            f'-no_logo -arch=x64 -host_arch=x64 -vcvars_ver={toolset} '
+            f'&& echo {marker}&& set"')
+
+
+def diagnostic_text(data):
+    """Bounded initialization diagnostics, never a persisted environment dump."""
+    data = data or b''
+    if b'\0' in data:
+        text = data.decode('utf-16-le', errors='replace')
+    else:
+        text = data.decode('utf-8', errors='replace')
+    # Initialization scripts may emit assignments in debug/error output. Omit
+    # them as well as known inherited secret values, even before the delimiter.
+    text = '\n'.join('[environment assignment omitted]' if
+                     re.match(r'^\s*@?(?:set\s+)?"?[A-Za-z_][A-Za-z0-9_()]*\s*=', line, re.I)
+                     else line for line in text.splitlines())
+    for key, value in os.environ.items():
+        if value and re.search(r'token|secret|password|credential|cookie|api.?key', key, re.I):
+            text = text.replace(value, '[secret value omitted]')
+    return text[:65536]
+
+
+def initialize_environment(selected, report):
+    script = Path(selected['installation']) / 'Common7/Tools/VsDevCmd.bat'
+    marker = 'VSE_TOOLCHAIN_ENV_' + uuid.uuid4().hex
+    command = initialization_command(os.environ['ComSpec'], script, selected['toolset'], marker)
+    evidence = {'command_line': command, 'shell': False, 'script': str(script),
+                'script_sha256': hashlib.sha256(script.read_bytes()).hexdigest()}
+    report['initialization'] = evidence
+    # Never use check=True: CalledProcessError would discard our structured
+    # diagnostics. Never persist the raw stdout suffix containing `set` output.
+    try:
+        result = subprocess.run(command, executable=os.environ['ComSpec'], shell=False,
+                                capture_output=True, check=False, timeout=120)
+        output, stderr = result.stdout, result.stderr
+        evidence['returncode'] = result.returncode
+    except subprocess.TimeoutExpired as error:
+        output, stderr = error.stdout or b'', error.stderr or b''
+        evidence['timed_out'] = True
+    delimiter = marker.encode('utf-16-le')
+    count = output.count(delimiter)
+    prefix, _, suffix = output.partition(delimiter)
+    evidence['stdout_diagnostics'] = (diagnostic_text(prefix) if count == 1 or
+                                     (count == 0 and evidence.get('returncode') != 0) else
+                                     '[stdout omitted: invalid environment delimiter]')
+    evidence['stderr_diagnostics'] = diagnostic_text(stderr)
+    if evidence.get('timed_out'):
+        raise RuntimeError('VsDevCmd initialization timed out; see initialization diagnostics')
+    if evidence['returncode'] != 0:
+        raise RuntimeError(f'VsDevCmd initialization failed with exit {evidence["returncode"]}; '
+                           'see initialization diagnostics')
+    if count != 1:
+        raise RuntimeError('Missing or ambiguous initialized environment delimiter')
+    env = parse_environment(suffix.decode('utf-16-le').lstrip('\r\n'))
+    evidence['environment_keys'] = sorted(env)  # Names only, no unrelated values.
+    return env
+
+
 def validate_environment(environment, runtime):
     env = {key.upper(): value for key, value in environment.items()}
     if any(env.get(key) != 'x64' for key in ('VSCMD_ARG_TGT_ARCH', 'VSCMD_ARG_HOST_ARCH')):
@@ -158,6 +233,14 @@ def validate_environment(environment, runtime):
     record['runtime_linkage'] = 'MultiThreadedDLL (/MD)'
     record['loader_compatibility'] = 'Pending actual worker/ORT PE import-symbol and loaded-DLL package gates'
     return record
+
+
+def bind_selected_toolset(active, selected):
+    # Same-family is not enough: CC/CXX and INCLUDE/LIB must belong to the exact
+    # inspected candidate, with unchanged CRT header/import-library evidence.
+    for field in ('toolset', 'directory', 'compiler', 'linker', 'crt'):
+        if active[field] != selected[field]:
+            raise RuntimeError('Initialized MSVC differs from selected toolset: ' + field)
 
 
 def prepare(report):
@@ -196,15 +279,12 @@ def prepare(report):
                            'see candidates in toolchain evidence. No tool installation or runtime update was attempted.')
     selected = max(eligible, key=lambda row: version(row['toolset']))
     report['selected'] = selected
-    script = Path(selected['installation']) / 'Common7/Tools/VsDevCmd.bat'
-    command = f'call "{script}" -no_logo -arch=x64 -host_arch=x64 -vcvars_ver={selected["toolset"]} >nul && set'
-    result = subprocess.run([os.environ['ComSpec'], '/d', '/u', '/s', '/c', command],
-                            capture_output=True, check=True, timeout=120)
-    env = parse_environment(result.stdout.decode('utf-16-le'))
+    env = initialize_environment(selected, report)
     # VS also bundles CMake/Ninja: never let its developer PATH shadow pinned wheels.
     env['PATH'] = ';'.join(dict.fromkeys(str(Path(row['path']).parent) for row in build_tools.values())) + ';' + env.get('PATH', '')
     env.update(CC=selected['compiler']['path'], CXX=selected['compiler']['path'], CMAKE_GENERATOR='Ninja')
     report['active'] = validate_environment(env, runtime)
+    bind_selected_toolset(report['active'], selected)
     return env
 
 
