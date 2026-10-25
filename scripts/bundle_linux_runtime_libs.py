@@ -44,6 +44,25 @@ def safe_name(name: str) -> str:
     return name
 
 
+def staged_origin_dependency(name: str, binary: Path, root: Path) -> Path | None:
+    """Resolve a loader ORIGIN expression only to an existing staged file."""
+    prefix = next((value for value in ('$ORIGIN/', '${ORIGIN}/') if name.startswith(value)), None)
+    if prefix is None:
+        if '$' in name:
+            raise ValueError(f'Unsupported ELF dependency token: {name!r}')
+        return None
+    suffix = name[len(prefix):]
+    if not suffix or '$' in suffix or '\\' in suffix:
+        raise ValueError(f'Unsafe ORIGIN dependency: {name!r}')
+    # String expansion follows loader semantics even when a suffix starts '/'.
+    candidate = Path(str(binary.parent) + '/' + suffix).resolve()
+    if not candidate.is_relative_to(root.resolve()):
+        raise ValueError(f'Escaping ORIGIN dependency: {name!r}')
+    if not candidate.is_file():
+        raise RuntimeError(f'Missing staged ORIGIN dependency {name!r} required by {binary}')
+    return candidate
+
+
 def elf_info(path: Path) -> dict:
     dynamic = run('readelf', '-dW', str(path))
     versions = run('readelf', '-VW', str(path))
@@ -148,6 +167,10 @@ def bundle_linux_libraries(stage_root: Path, runtime_python: Path | None = None)
                 if '$' not in expanded and Path(expanded).is_absolute():
                     search.append(Path(expanded))
             for name in info['needed']:
+                internal = staged_origin_dependency(name, binary, root)
+                if internal is not None:
+                    queue.append(internal)
+                    continue
                 safe_name(name)
                 if BASE.fullmatch(name):
                     base.add(name)

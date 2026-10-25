@@ -98,9 +98,12 @@ def wheel_lock(wheelhouse: Path, selected: list[Path] | None = None) -> list[str
 
 def finalize_portable_runtime(stage: Path, python: Path, env: dict) -> dict:
     """Drop build-only pip/ensurepip without touching runtime package licenses."""
+    stage = stage.resolve(strict=True)
+    python = python.resolve(strict=True)
     query = 'import json,sysconfig; print(json.dumps({k:sysconfig.get_path(k) for k in ("purelib","stdlib","scripts")}))'
     paths = json.loads(subprocess.check_output([str(python), '-c', query], text=True, env=env))
-    runtime = stage / 'runtime'
+    runtime = (stage / 'runtime').resolve(strict=True)
+    paths = {key: str(Path(value).resolve(strict=True)) for key, value in paths.items()}
     roots = [Path(paths['purelib']) / 'pip', Path(paths['stdlib']) / 'ensurepip']
     candidates = []
     for directory in roots:

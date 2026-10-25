@@ -10,6 +10,24 @@ from scripts import bundle_linux_runtime_libs as native
 
 
 class NativeClosureTests(unittest.TestCase):
+    def test_origin_needed_resolves_within_staged_runtime(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'stage'
+            binary = root / 'runtime/bin/python3.12'
+            library = root / 'runtime/lib/libpython3.12.so.1.0'
+            binary.parent.mkdir(parents=True)
+            library.parent.mkdir(parents=True)
+            binary.write_bytes(b'\x7fELFpython')
+            library.write_bytes(b'\x7fELFlibrary')
+            for name in ('$ORIGIN/../lib/libpython3.12.so.1.0', '${ORIGIN}/../lib/libpython3.12.so.1.0'):
+                self.assertEqual(native.staged_origin_dependency(name, binary, root), library.resolve())
+            self.assertIsNone(native.staged_origin_dependency('libc.so.6', binary, root))
+            with self.assertRaisesRegex(RuntimeError, 'Missing staged'):
+                native.staged_origin_dependency('$ORIGIN/missing.so', binary, root)
+            for name in ('$ORIGIN/../../../escape.so', '$LIB/libpython.so', '$ORIGIN/$LIB/lib.so'):
+                with self.assertRaises(ValueError):
+                    native.staged_origin_dependency(name, binary, root)
+
     def test_missing_linux_os_metadata_is_not_silently_invented(self):
         with patch.object(native.Path, 'read_text', side_effect=FileNotFoundError('missing os-release')):
             with self.assertRaises(FileNotFoundError):

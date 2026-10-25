@@ -11,7 +11,7 @@ from unittest.mock import patch
 import zipfile
 
 from scripts.bundle_bootstrap import sha256, verify_payload, write_size_report, main as bootstrap_main, configure_user_paths
-from scripts.package_release import create_bundle, extract_checked, include_source, read_version, wheel_lock, verify_bundle, verification_path
+from scripts.package_release import create_bundle, extract_checked, include_source, read_version, wheel_lock, verify_bundle, verification_path, finalize_portable_runtime
 from scripts.release_guard import assert_target, remote_tag_commit, validate_tag
 
 
@@ -48,6 +48,32 @@ class ReleaseGuardTests(unittest.TestCase):
 
 
 class PackageTests(unittest.TestCase):
+    def test_interpreter_pruning_uses_canonical_stage_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp)
+            (parent / 'alias-parent').mkdir()
+            stage = parent / 'stage'
+            runtime = stage / 'runtime'
+            purelib = runtime / 'lib/python3.12/site-packages'
+            stdlib = runtime / 'lib/python3.12'
+            scripts = runtime / 'bin'
+            (purelib / 'pip').mkdir(parents=True)
+            (stdlib / 'ensurepip').mkdir()
+            scripts.mkdir()
+            python = scripts / 'python3.12'
+            python.write_bytes(b'interpreter')
+            (purelib / 'pip/__init__.py').write_bytes(b'build tool')
+            (purelib / 'pip/LICENSE').write_text('license retained')
+            (stdlib / 'ensurepip/tool').write_bytes(b'installer')
+            paths = {'purelib': str(purelib.resolve()), 'stdlib': str(stdlib.resolve()), 'scripts': str(scripts.resolve())}
+            with patch('scripts.package_release.subprocess.check_output', return_value=json.dumps(paths)):
+                report = finalize_portable_runtime(parent / 'alias-parent/../stage', python, {})
+            self.assertGreater(report['removed_bytes'], 0)
+            self.assertFalse((purelib / 'pip/__init__.py').exists())
+            self.assertTrue((purelib / 'pip/LICENSE').is_file())
+            recorded = json.loads((runtime / 'build-tool-prune.json').read_text())
+            self.assertTrue(all('..' not in Path(item['path']).parts for item in recorded['removed']))
+
     def test_only_native_verified_subfinder_included(self):
         self.assertTrue(include_source(Path("backend/subfinder/linux/x64/VideoSubFinderCli"), "linux", "x64"))
         for path in ("backend/subfinder/windows/x64/VideoSubFinderCli.exe", "backend/subfinder/linux/VideoSubFinderCli", "backend/__pycache__/config.pyc"):
