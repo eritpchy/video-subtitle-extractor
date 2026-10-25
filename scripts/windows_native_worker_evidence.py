@@ -1,12 +1,14 @@
 """Read-only Windows worker module/path evidence, never an installer or injector.
 
-Toolhelp snapshots and a QUERY_LIMITED_INFORMATION process handle establish the
-live image paths. Hashes describe those files on disk, not process memory. This
+Toolhelp snapshots provide module handles; K32GetModuleFileNameExW obtains their
+Unicode paths with QUERY_INFORMATION | VM_READ (read-only). Hashes describe
+those files on disk, not process memory. This
 is a point-in-time audit after inference, not a lifetime or network audit.
 
 https://learn.microsoft.com/en-us/windows/win32/api/tlhelp32/nf-tlhelp32-createtoolhelp32snapshot
 https://learn.microsoft.com/en-us/windows/win32/api/tlhelp32/ns-tlhelp32-moduleentry32w
 https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-queryfullprocessimagenamew
+https://learn.microsoft.com/en-us/windows/win32/api/psapi/nf-psapi-getmodulefilenameexw
 """
 from __future__ import annotations
 
@@ -25,7 +27,8 @@ REQUIRED_FILES = frozenset({
     'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll',
 })
 MAX_MODULES = 4096
-METHOD = 'windows-toolhelp32-querylimited-v1'
+METHOD = 'windows-toolhelp32-psapi-unicode-v2'
+PROCESS_ACCESS = 0x0400 | 0x0010  # QUERY_INFORMATION | VM_READ; no write/debug rights.
 _OS_EVIDENCE_COLLECTOR = None
 _OS_EVIDENCE_LOCK = threading.Lock()
 
@@ -134,10 +137,35 @@ def _checked_module_path(pid, entry_pid, module_name, path):
     return path
 
 
+def _read_module_path(kernel, process, module):
+    """Read the target module's Unicode path, never reconstruct lossy Toolhelp text.
+
+    Server CI returned question marks in Toolhelp's szExePath for a Chinese
+    installation path despite the W entrypoint. The module handle is the lookup
+    key here; no expected filename or substituted characters enter this API.
+    """
+    if not module:
+        raise RuntimeError('Missing Toolhelp module handle')
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = kernel.K32GetModuleFileNameExW(process, module, buffer, len(buffer))
+    if not length:
+        raise OSError(ctypes.get_last_error(), 'K32GetModuleFileNameExW failed')
+    if length >= len(buffer) - 1 or not buffer.value:
+        raise RuntimeError('Truncated/empty K32GetModuleFileNameExW module path')
+    return buffer.value
+
+
+def _raw_snapshot(snapshot):
+    if not isinstance(snapshot, dict):
+        return None
+    return {key: snapshot[key] for key in ('process_executable', 'mapped_paths', 'windows_root', 'module_entries')
+            if key in snapshot}
+
+
 def _report(pid, executable):
     return {'schema': 1, 'available': False, 'passed': False, 'errors': [],
             'pid': pid, 'executable': str(executable), 'mapped_paths': [], 'files': {},
-            'method': METHOD, 'process_query_access': 0x1000,
+            'method': METHOD, 'process_query_access': PROCESS_ACCESS, 'raw_snapshot': None,
             'matches_worker': False, 'forbidden_python_paddle_libraries': [],
             'os_security_evidence': None, 'observed_os_security_components': [],
             'unverified_os_security_components': [],
@@ -184,6 +212,7 @@ def validate_native_worker_snapshot(pid, executable, snapshot):
         _valid_pid(pid)
         if not isinstance(snapshot, dict):
             raise ValueError('Missing Windows worker snapshot')
+        report['raw_snapshot'] = snapshot.get('raw_snapshot') or _raw_snapshot(snapshot)
         paths = snapshot['mapped_paths']
         if not isinstance(paths, list) or not 0 < len(paths) <= MAX_MODULES:
             raise ValueError('Empty or unbounded Windows worker module snapshot')
@@ -290,6 +319,7 @@ def _snapshot(pid):
         'GetProcessId': ([wintypes.HANDLE], wintypes.DWORD),
         'GetExitCodeProcess': ([wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)], wintypes.BOOL),
         'QueryFullProcessImageNameW': ([wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)], wintypes.BOOL),
+        'K32GetModuleFileNameExW': ([wintypes.HANDLE, wintypes.HMODULE, wintypes.LPWSTR, wintypes.DWORD], wintypes.DWORD),
         'CreateToolhelp32Snapshot': ([wintypes.DWORD, wintypes.DWORD], wintypes.HANDLE),
         'Module32FirstW': ([wintypes.HANDLE, ctypes.POINTER(MODULEENTRY32W)], wintypes.BOOL),
         'Module32NextW': ([wintypes.HANDLE, ctypes.POINTER(MODULEENTRY32W)], wintypes.BOOL),
@@ -299,8 +329,12 @@ def _snapshot(pid):
         function = getattr(kernel, name)
         function.argtypes, function.restype = args, result
 
+    details = {'process_executable': None, 'mapped_paths': [], 'windows_root': None, 'module_entries': []}
+
     def error(action):
-        return OSError(ctypes.get_last_error(), action + ': ' + str(ctypes.WinError(ctypes.get_last_error())))
+        failure = OSError(ctypes.get_last_error(), action + ': ' + str(ctypes.WinError(ctypes.get_last_error())))
+        failure.native_snapshot = details
+        return failure
 
     def running(process):
         code = wintypes.DWORD()
@@ -309,9 +343,11 @@ def _snapshot(pid):
         if code.value != 259:
             raise RuntimeError('Worker exited during module inspection')
 
-    process = kernel.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFORMATION only.
+    # Non-NULL HMODULE queries officially require these two read-only rights.
+    # QUERY_INFORMATION also supplies QUERY_LIMITED_INFORMATION for the EXE API.
+    process = kernel.OpenProcess(PROCESS_ACCESS, False, pid)
     if not process:
-        raise error('OpenProcess QUERY_LIMITED_INFORMATION')
+        raise error('OpenProcess QUERY_INFORMATION | VM_READ')
     try:
         if kernel.GetProcessId(process) != pid:
             raise RuntimeError('Worker process handle PID mismatch')
@@ -322,10 +358,12 @@ def _snapshot(pid):
             raise error('QueryFullProcessImageNameW')
         if not 0 < length.value < len(image) - 1:
             raise RuntimeError('Truncated/empty worker executable path')
+        details['process_executable'] = image.value
         windows = ctypes.create_unicode_buffer(32768)
         size = kernel.GetWindowsDirectoryW(windows, len(windows))
         if not 0 < size < len(windows):
             raise RuntimeError('Cannot establish Windows OS directory')
+        details['windows_root'] = windows.value
         invalid = ctypes.c_void_p(-1).value
         for _ in range(5):
             snapshot = kernel.CreateToolhelp32Snapshot(0x8 | 0x10, pid)
@@ -342,9 +380,18 @@ def _snapshot(pid):
                 raise error('Module32FirstW')
             paths = []
             while True:
-                path = entry.szExePath
-                _checked_module_path(pid, entry.th32ProcessID, entry.szModule, path)
+                base = ctypes.cast(entry.modBaseAddr, ctypes.c_void_p).value
+                record = {'module_handle': entry.hModule, 'base_address': base,
+                          'toolhelp_name': entry.szModule, 'toolhelp_path': entry.szExePath,
+                          'psapi_path': None}
+                details['module_entries'].append(record)
+                _checked_module_path(pid, entry.th32ProcessID, entry.szModule, entry.szExePath)
+                if not base or base != entry.hModule:
+                    raise RuntimeError('Toolhelp module handle/base-address mismatch')
+                path = _read_module_path(kernel, process, entry.hModule)
+                record['psapi_path'] = path
                 paths.append(path)
+                details['mapped_paths'] = paths
                 if len(paths) > MAX_MODULES:
                     raise RuntimeError('Unbounded Toolhelp module snapshot')
                 entry.dwSize = ctypes.sizeof(entry)
@@ -353,10 +400,13 @@ def _snapshot(pid):
                         raise error('Module32NextW')
                     break
             running(process)
-            return {'process_executable': image.value, 'mapped_paths': paths, 'windows_root': windows.value}
+            return details
         finally:
             if not kernel.CloseHandle(snapshot):
                 raise error('CloseHandle module snapshot')
+    except Exception as failure:
+        failure.native_snapshot = details
+        raise
     finally:
         if not kernel.CloseHandle(process):
             raise error('CloseHandle process query')
@@ -364,12 +414,14 @@ def _snapshot(pid):
 
 def collect_native_worker_evidence(pid, executable):
     """Never hide collection failures or require admin/injection privileges."""
+    snapshot = None
     try:
         snapshot = _snapshot(pid)
         snapshot['os_security_evidence'] = _collect_os_security_evidence(snapshot, executable)
         return validate_native_worker_snapshot(pid, executable, snapshot)
     except Exception as error:
         report = _report(pid, executable)
+        report['raw_snapshot'] = _raw_snapshot(getattr(error, 'native_snapshot', snapshot))
         report['errors'].append(type(error).__name__ + ': ' + str(error))
         return report
 
@@ -386,7 +438,7 @@ def validate_native_worker_evidence(evidence, executable):
         if (not isinstance(evidence, dict) or evidence.get('schema') != 1
                 or evidence.get('available') is not True or evidence.get('passed') is not True
                 or evidence.get('errors') != [] or evidence.get('method') != METHOD
-                or evidence.get('process_query_access') != 0x1000):
+                or evidence.get('process_query_access') != PROCESS_ACCESS):
             raise ValueError('Incomplete/failed Windows worker evidence')
         if sys.platform == 'win32' and _canonical(evidence['windows_root']) != _system_windows_directory():
             raise ValueError('Saved Windows worker OS root differs from the actual OS directory')

@@ -3,7 +3,12 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import queue
+import shutil
+import subprocess
 import sys
+import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -26,6 +31,10 @@ def fixture(tmp_path):
     exe = root / 'native-ocr.exe'
     snapshot = {'process_executable': str(exe), 'windows_root': str(windows),
                 'mapped_paths': [str(root / row['path']) for row in rows] + [str(kernel)]}
+    snapshot['module_entries'] = [
+        {'toolhelp_name': Path(path).name, 'toolhelp_path': path.replace('空间', '??'),
+         'module_handle': index + 1, 'base_address': index + 1, 'psapi_path': path}
+        for index, path in enumerate(snapshot['mapped_paths'])]
     return exe, snapshot
 
 
@@ -35,7 +44,8 @@ def test_exact_seven_images_have_actual_paths_hashes_and_read_only_revalidation(
     monkeypatch.setattr(worker, '_system_windows_directory', lambda: Path(snapshot['windows_root']))
     report = worker.collect_native_worker_evidence(123, exe)
     assert report['available'] and report['passed'] and not report['errors']
-    assert report['method'] == worker.METHOD
+    assert report['method'] == worker.METHOD == 'windows-toolhelp32-psapi-unicode-v2'
+    assert report['process_query_access'] == 0x410
     assert set(report['files']) == worker.REQUIRED_FILES
     for name, row in report['files'].items():
         assert row['passed'] and row['path_matches'] and row['inventory_match']
@@ -122,7 +132,8 @@ def test_inventory_must_bind_all_required_regular_sibling_files(tmp_path, change
 
 
 @pytest.mark.parametrize('change', ['passed-only', 'missing-files', 'forged-hash', 'wrong-method',
-                                   'wrong-executable', 'missing-ort', 'wrong-inventory', 'failed'])
+                                   'v1-method', 'v1-access', 'wrong-executable', 'missing-ort',
+                                   'wrong-inventory', 'failed'])
 def test_saved_evidence_does_not_trust_passed_flag(tmp_path, change, monkeypatch):
     exe, snapshot = fixture(tmp_path)
     monkeypatch.setattr(worker, '_system_windows_directory', lambda: Path(snapshot['windows_root']))
@@ -132,6 +143,8 @@ def test_saved_evidence_does_not_trust_passed_flag(tmp_path, change, monkeypatch
     elif change == 'missing-files': report.pop('files')
     elif change == 'forged-hash': report['files']['onnxruntime.dll']['sha256'] = 'f' * 64
     elif change == 'wrong-method': report['method'] = 'pretend'
+    elif change == 'v1-method': report['method'] = 'windows-toolhelp32-querylimited-v1'
+    elif change == 'v1-access': report['process_query_access'] = 0x1000
     elif change == 'wrong-executable': report['executable'] = '/foreign/native-ocr.exe'
     elif change == 'missing-ort': report['mapped_paths'].remove(str(exe.parent / 'onnxruntime.dll'))
     elif change == 'wrong-inventory': report['inventory_sha256'] = '0' * 64
@@ -180,7 +193,7 @@ def test_windows_paths_reject_remote_devices_and_streams_before_file_access(monk
 def test_no_environment_systemroot_override_or_remote_process_write_apis():
     source = Path(worker.__file__).read_text()
     assert 'GetWindowsDirectoryW' in source
-    assert "OpenProcess(0x1000, False, pid)" in source
+    assert worker._report(123, 'fixture.exe')['process_query_access'] == 0x410
     assert 'os.environ' not in source
     assert all(name not in source for name in ('WriteProcessMemory', 'CreateRemoteThread', 'AdjustTokenPrivileges'))
 
@@ -191,6 +204,169 @@ def test_real_windows_snapshot_reads_current_process_without_admin():
     assert Path(snapshot['process_executable']).samefile(sys.executable)
     assert any(Path(path).samefile(sys.executable) for path in snapshot['mapped_paths'])
     assert Path(snapshot['windows_root']).is_dir()
+
+
+def test_psapi_reads_actual_wide_path_by_handle_without_toolhelp_spelling():
+    expected = r'C:\bundle 环境 & spaces\字幕 worker.exe'
+    calls = []
+    def read(process, module, buffer, capacity):
+        calls.append((process, module, capacity))
+        buffer.value = expected
+        return len(expected)
+    kernel = SimpleNamespace(K32GetModuleFileNameExW=read)
+    assert worker._read_module_path(kernel, 123, 456) == expected
+    assert calls == [(123, 456, 32768)]
+
+
+@pytest.mark.parametrize('length', [0, 32768, 32769])
+def test_psapi_zero_or_truncated_result_fails_closed(monkeypatch, length):
+    def read(process, module, buffer, capacity):
+        buffer.value = r'C:\truncated.dll'
+        return length
+    monkeypatch.setattr(worker.ctypes, 'get_last_error', lambda: 299, raising=False)
+    monkeypatch.setattr(worker.ctypes, 'WinError', lambda code=299: OSError(code, 'partial copy'), raising=False)
+    with pytest.raises((OSError, RuntimeError)):
+        worker._read_module_path(SimpleNamespace(K32GetModuleFileNameExW=read), 123, 456)
+
+
+@pytest.mark.parametrize('failure', [None, 'zero', 'truncated'])
+def test_toolhelp_handles_feed_psapi_even_when_toolhelp_unicode_path_is_lossy(monkeypatch, failure):
+    """Exercise the real snapshot control flow with synthetic Win32 APIs only."""
+    from ctypes import wintypes
+    expected = r'C:\bundle 环境 & spaces\字幕 worker.exe'
+    lossy = r'C:\bundle ?? & spaces\?? worker.exe'
+    calls, closed = [], []
+    def query(process, flags, buffer, length):
+        buffer.value = expected
+        length._obj.value = len(expected)
+        return 1
+    def first(snapshot, pointer):
+        entry = pointer._obj
+        entry.th32ProcessID = 123
+        entry.szModule = '?? worker.exe'
+        entry.szExePath = lossy
+        entry.hModule = 0x100000
+        entry.modBaseAddr = worker.ctypes.cast(worker.ctypes.c_void_p(0x100000), type(entry.modBaseAddr))
+        return 1
+    def read(process, module, buffer, capacity):
+        calls.append(('psapi', process, module))
+        buffer.value = expected
+        if failure == 'zero':
+            return 0
+        if failure == 'truncated':
+            return capacity
+        return len(expected)
+    def windows(buffer, capacity):
+        buffer.value = r'C:\Windows'
+        return len(buffer.value)
+    def running(process, code):
+        code._obj.value = 259
+        return 1
+    # Function objects permit ctypes' argtypes/restype assignments.
+    functions = {
+        'OpenProcess': lambda access, inherit, pid: calls.append(('open', access, inherit, pid)) or 99,
+        'CloseHandle': lambda handle: closed.append(handle) or 1,
+        'GetProcessId': lambda process: 123,
+        'GetExitCodeProcess': running,
+        'QueryFullProcessImageNameW': query,
+        'CreateToolhelp32Snapshot': lambda flags, pid: 88,
+        'Module32FirstW': first,
+        'Module32NextW': lambda snapshot, entry: 0,
+        'GetWindowsDirectoryW': windows,
+        'K32GetModuleFileNameExW': read,
+    }
+    kernel = SimpleNamespace(**functions)
+    monkeypatch.setattr(worker.sys, 'platform', 'win32')
+    monkeypatch.setattr(worker.ctypes, 'WinDLL', lambda *args, **kwargs: kernel, raising=False)
+    monkeypatch.setattr(worker.ctypes, 'get_last_error', lambda: 18, raising=False)
+    if failure:
+        report = worker.collect_native_worker_evidence(123, expected)
+        assert not report['available'] and not report['passed'] and report['errors']
+        snapshot = report['raw_snapshot']
+        assert snapshot['mapped_paths'] == []  # Never substitute the expected/queried EXE for failed PSAPI evidence.
+        assert report['mapped_paths'] == []
+    else:
+        snapshot = worker._snapshot(123)
+        assert snapshot['mapped_paths'] == [expected]
+    assert snapshot['process_executable'] == expected
+    row, = snapshot['module_entries']
+    assert row['toolhelp_path'] == lossy and row['toolhelp_name'] == '?? worker.exe'
+    assert row['psapi_path'] == (None if failure else expected)
+    assert row['module_handle'] == row['base_address'] == 0x100000
+    assert ('open', 0x410, False, 123) in calls
+    assert ('psapi', 99, 0x100000) in calls
+    assert kernel.K32GetModuleFileNameExW.argtypes == [wintypes.HANDLE, wintypes.HMODULE, wintypes.LPWSTR, wintypes.DWORD]
+    assert kernel.K32GetModuleFileNameExW.restype is wintypes.DWORD
+    assert closed == [88, 99]
+
+
+def test_collection_failure_preserves_raw_unicode_snapshot_and_lossy_toolhelp_forensics(tmp_path, monkeypatch):
+    exe, snapshot = fixture(tmp_path)
+    monkeypatch.setattr(worker, '_snapshot', lambda pid: snapshot)
+    def failed(*args):
+        raise OSError('OS proof path canonicalization failed')
+    monkeypatch.setattr(worker, '_collect_os_security_evidence', failed)
+    report = worker.collect_native_worker_evidence(123, exe)
+    assert not report['available'] and not report['passed']
+    assert 'canonicalization failed' in '\n'.join(report['errors'])
+    for field in ('process_executable', 'mapped_paths', 'windows_root', 'module_entries'):
+        assert report['raw_snapshot'][field] == snapshot[field]
+    assert any('??' in row['toolhelp_path'] for row in report['raw_snapshot']['module_entries'])
+    assert any('空间' in path for path in report['raw_snapshot']['mapped_paths'])
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Unicode Toolhelp/PSAPI regression requires native Windows CI')
+def test_real_windows_child_unicode_directory_preserves_actual_image_paths(tmp_path):
+    # Copy one OS executable into this test's disposable directory; never edit
+    # System32, install a runtime, alter machine settings, or launch via a shell.
+    directory = tmp_path / 'worker 环境 & spaces'
+    directory.mkdir()
+    # Match production: the worker basename is ASCII, its installation path is not.
+    executable = directory / 'native-audit-child.exe'
+    shutil.copy2(worker._system_windows_directory() / 'System32/cmd.exe', executable)
+    process = subprocess.Popen([str(executable), '/d', '/q', '/k'],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               shell=False, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    ready = queue.Queue(maxsize=1)
+    marker = b'VSE_UNICODE_SNAPSHOT_READY'
+    def read_ready():
+        try:
+            for line in iter(process.stdout.readline, b''):
+                if marker in line:
+                    ready.put(True)
+                    return
+            ready.put(False)
+        except (OSError, ValueError):
+            ready.put(False)
+    reader = threading.Thread(target=read_ready, daemon=True)
+    reader.start()
+    try:
+        process.stdin.write(b'echo ' + marker + b'\r\n')
+        process.stdin.flush()
+        assert ready.get(timeout=15), 'Copied cmd.exe did not reach its idle command loop'
+        assert process.poll() is None
+        snapshot = worker._snapshot(process.pid)
+        assert Path(snapshot['process_executable']).samefile(executable)
+        assert '环境' in snapshot['process_executable']
+        images = [path for path in snapshot['mapped_paths'] if Path(path).name == executable.name]
+        assert len(images) == 1 and Path(images[0]).samefile(executable)
+        assert '环境' in images[0]
+        rows = [row for row in snapshot['module_entries'] if row['psapi_path'] == images[0]]
+        assert len(rows) == 1 and rows[0]['module_handle'] and rows[0]['base_address']
+        assert 'toolhelp_name' in rows[0] and 'toolhelp_path' in rows[0]
+    finally:
+        if process.poll() is None:
+            try:
+                process.stdin.write(b'exit\r\n')
+                process.stdin.flush()
+                process.wait(timeout=10)
+            except (OSError, subprocess.TimeoutExpired):
+                process.kill()
+                process.wait(timeout=10)
+        for stream in (process.stdin, process.stdout, process.stderr):
+            stream.close()
+        reader.join(timeout=2)
+    assert process.returncode == 0
 
 
 def signed_os_fixture(tmp_path, monkeypatch, name='directxdatabasehelper.dll'):
