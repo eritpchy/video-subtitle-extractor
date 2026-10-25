@@ -176,6 +176,17 @@ class WindowThemeTests(ThemeTestCase):
         self.window.show()
         self.app.processEvents()
 
+    def test_window_and_application_icons_keep_rounded_transparency(self):
+        for icon in (self.window.windowIcon(), self.app.windowIcon()):
+            self.assertFalse(icon.isNull())
+            for size in (16, 32, 128):
+                image = icon.pixmap(size, size).toImage()
+                self.assertFalse(image.isNull())
+                width, height = image.width(), image.height()
+                for point in ((0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1)):
+                    self.assertEqual(image.pixelColor(*point).alpha(), 0)
+                self.assertGreaterEqual(image.pixelColor(width // 2, height // 2).alpha(), 250)
+
     def switch_to_settled_page(self, interface):
         # FluentWindow.switchTo starts a 300 ms position animation. Waiting
         # only for the 120 ms theme animation can capture a moving translucent
