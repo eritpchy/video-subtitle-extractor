@@ -381,3 +381,89 @@ def test_packaged_windows_processes_require_authenticated_vcomp_evidence(tmp_pat
     file.write_text(json.dumps(report))
     with pytest.raises(RuntimeError, match='missing authenticated app-local VCOMP startup evidence'):
         probe.summarize_reports(bundle, evidence, require_isolated=True)
+
+
+@pytest.mark.parametrize('entry', ['direct-source-packager', 'isolated-package-module'])
+def test_windows_worker_final_summary_imports_in_real_entrypoint_contexts(tmp_path, entry):
+    """Actual child imports/summary, with inert Windows file/snapshot fixtures."""
+    import packaging
+    root = tmp_path / 'source and bundle 字幕'
+    python = _copy_for_startup_fixture(root)
+    repository = Path(portable.__file__).resolve().parents[1]
+    shutil.copytree(repository / 'scripts', root / 'scripts', dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns('__pycache__'))
+    shutil.copytree(Path(packaging.__file__).parent, root / 'runtime/Lib/site-packages/packaging',
+                    ignore=shutil.ignore_patterns('__pycache__'))
+    driver = root / 'scripts/summary_context_fixture.py'
+    driver.write_text('''import hashlib, json, os, sys
+from pathlib import Path
+root = Path(__file__).resolve().parents[1]
+package = sys.flags.isolated == 1
+assert Path(os.environ['VSE_FIXTURE_REPOSITORY']) not in [Path(value).resolve() for value in sys.path if value]
+if package:
+    from scripts import package_release, standalone_runtime_probe as probe, windows_native_worker_evidence as worker
+    assert str(root / 'scripts') not in sys.path
+else:
+    # Same import chain as python scripts/package_release.py, without the
+    # repository root or an arbitrary PYTHONPATH supplying scripts.*.
+    assert root not in [Path(value).resolve() for value in sys.path if value]
+    import package_release, standalone_runtime_probe as probe, windows_native_worker_evidence as worker
+    assert not any(name.startswith('scripts.') for name in sys.modules)
+assert Path(package_release.__file__).parent == root / 'scripts'
+assert Path(worker.__file__).parent == root / 'scripts'
+before = list(sys.path)
+native = root / 'native-ocr'
+native.mkdir()
+rows = []
+for name in sorted(worker.REQUIRED_FILES):
+    content = ('inert native import-context fixture: ' + name).encode()
+    (native / name).write_bytes(content)
+    rows.append(dict(path=name, bytes=len(content), sha256=hashlib.sha256(content).hexdigest()))
+(native / 'size-audit.json').write_text(json.dumps(dict(files=rows)), encoding='utf-8')
+if sys.platform == 'win32':
+    windows = worker._system_windows_directory()
+else:
+    windows = root / 'Windows'
+    (windows / 'System32').mkdir(parents=True)
+    (windows / 'System32/kernel32.dll').write_bytes(b'inert OS path fixture')
+exe = native / 'native-ocr.exe'
+snapshot = dict(process_executable=str(exe), windows_root=str(windows),
+                mapped_paths=[str(native / row['path']) for row in rows] + [str(windows / 'System32/kernel32.dll')])
+# Only the live API is simulated; collector routing, validation, all seven
+# current-file hashes, parent/worker binding and summary remain real code.
+worker._snapshot = lambda pid: dict(snapshot)
+native_report = worker.collect_native_worker_evidence(123, exe)
+assert native_report['passed'], native_report['errors']
+assert worker._classify_os_security_component(windows / 'System32/directxdatabasehelper.dll', {}, windows)['allowed'] is False
+evidence = root.parent / 'reports'
+probe.audit_environment(root, evidence)
+process = dict(pid=1, system='Windows', executable=str(root / 'runtime/python.exe'),
+               prefix=str(root / 'runtime'), windows_root=str(windows), images=[str(windows / 'System32/kernel32.dll')],
+               snapshots=1, probe_errors=[], modules={})
+(evidence / 'process-1.json').write_text(json.dumps(process), encoding='utf-8')
+record = dict(schema=1, parent_pid=1, worker_pid=123, executable=str(exe), successful_requests=1,
+              passed=True, errors=[], snapshots=[dict(phase='inference', native_runtime=native_report)])
+(evidence / 'native-worker-1-123.json').write_text(json.dumps(record), encoding='utf-8')
+summary = probe.summarize_reports(root, evidence, require_native_workers=True)
+assert summary['passed'] and summary['native_worker_count'] == 1
+assert sys.path == before
+(native / 'concrt140.dll').write_bytes(b'tampered fixture')
+try:
+    probe.summarize_reports(root, evidence, require_native_workers=True)
+except RuntimeError as error:
+    assert 'checksum' in str(error), str(error)
+else:
+    raise AssertionError('Bad native evidence must not pass after import fix')
+assert json.loads((evidence / 'summary.json').read_text(encoding='utf-8'))['passed'] is False
+print(json.dumps(dict(entry='package' if package else 'direct', imports=worker.__name__, valid_passed=True, tamper_rejected=True)))
+''', encoding='utf-8')
+    environment = bootstrap.sanitize_environment(root, dict(os.environ), 'windows' if os.name == 'nt' else 'linux')
+    environment['VSE_FIXTURE_REPOSITORY'] = str(repository)
+    if entry == 'direct-source-packager':
+        command = [sys.executable, '-E', '-s', str(driver)]
+    else:
+        command = [str(python), '-m', 'scripts.summary_context_fixture']
+    result = subprocess.run(command, cwd=tmp_path, env=environment, capture_output=True, timeout=30, check=True)
+    report = json.loads(result.stdout.decode('utf-8'))
+    assert report['valid_passed'] and report['tamper_rejected']
+    assert report['imports'] == ('windows_native_worker_evidence' if entry == 'direct-source-packager' else 'scripts.windows_native_worker_evidence')

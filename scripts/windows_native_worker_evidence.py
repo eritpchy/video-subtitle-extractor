@@ -37,8 +37,12 @@ def _collect_os_security_evidence(snapshot, executable):
     process. Every use below independently rehashes the currently mapped file;
     a changed file fails rather than inheriting a stale signature verdict.
     """
-    from scripts.windows_os_evidence import CANDIDATE_NAMES, WindowsOSEvidenceCollector
-    from scripts.standalone_runtime_probe import library_violation
+    if __package__:
+        from .windows_os_evidence import CANDIDATE_NAMES, WindowsOSEvidenceCollector
+        from .standalone_runtime_probe import library_violation
+    else:
+        from windows_os_evidence import CANDIDATE_NAMES, WindowsOSEvidenceCollector
+        from standalone_runtime_probe import library_violation
     root = _canonical(executable).parent
     windows = _canonical(snapshot['windows_root'])
     paths = []
@@ -57,8 +61,12 @@ def _collect_os_security_evidence(snapshot, executable):
 
 
 def _classify_os_security_component(path, proof, windows):
-    from scripts.windows_os_evidence import classify_loaded_windows_component
-    from scripts.standalone_runtime_probe import _identity
+    if __package__:
+        from .windows_os_evidence import classify_loaded_windows_component
+        from .standalone_runtime_probe import _identity
+    else:
+        from windows_os_evidence import classify_loaded_windows_component
+        from standalone_runtime_probe import _identity
     component = classify_loaded_windows_component(str(path), proof or {})
     if component.get('allowed'):
         # Bind the proof's OS root to the live query and its stable signature
@@ -180,8 +188,12 @@ def validate_native_worker_snapshot(pid, executable, snapshot):
         if not isinstance(paths, list) or not 0 < len(paths) <= MAX_MODULES:
             raise ValueError('Empty or unbounded Windows worker module snapshot')
         # Lazy import avoids importing a process probe during ordinary startup.
-        from scripts.standalone_runtime_probe import _identity, library_violation
-        from scripts.windows_os_evidence import CANDIDATE_NAMES
+        if __package__:
+            from .standalone_runtime_probe import _identity, library_violation
+            from .windows_os_evidence import CANDIDATE_NAMES
+        else:
+            from standalone_runtime_probe import _identity, library_violation
+            from windows_os_evidence import CANDIDATE_NAMES
         expected_exe = _canonical(executable)
         if expected_exe.name.lower() != 'native-ocr.exe' or Path(executable).is_symlink():
             raise ValueError('Expected the regular native-ocr.exe worker')

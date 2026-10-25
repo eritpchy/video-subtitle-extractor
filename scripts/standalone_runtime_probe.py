@@ -249,7 +249,13 @@ def _summarize_native_workers(bundle_root, report_dir, processes, required):
         errors.append('No Windows native worker PID/module evidence produced after inference')
     if not paths:
         return records, errors
-    from scripts.windows_native_worker_evidence import validate_native_worker_evidence
+    # The source packager imports this module directly from scripts/, while
+    # the isolated runtime imports scripts.standalone_runtime_probe. Preserve
+    # both contexts without adding an application/host directory to sys.path.
+    if __package__:
+        from .windows_native_worker_evidence import validate_native_worker_evidence
+    else:
+        from windows_native_worker_evidence import validate_native_worker_evidence
     parents = {row['pid'] for row in processes if row['system'] == 'Windows'}
     expected = bundle_root.resolve() / 'native-ocr/native-ocr.exe'
     seen = set()
