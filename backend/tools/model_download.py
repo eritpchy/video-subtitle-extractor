@@ -5,13 +5,18 @@ building an offline distribution. This module deliberately does not import Qt
 or Paddle so it can also run during a lightweight packaging step.
 """
 import argparse
+import errno
+import http.client
 import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
+import socket
+import ssl
 import tarfile
 import tempfile
+import time
 import urllib.error
 import urllib.request
 
@@ -42,19 +47,60 @@ def verify_model(model_dir, model_name):
     return True
 
 
-def _download_file(url, destination):
-    """One unauthenticated request to an independently published official URL.
+def _is_transient_download_error(error):
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in (429, 500, 502, 503, 504)
+    if isinstance(error, urllib.error.URLError):
+        error = error.reason
+    # Never retry certificate failures or relax TLS verification.
+    if isinstance(error, ssl.SSLError):
+        return False
+    if isinstance(error, (TimeoutError, http.client.IncompleteRead,
+                          http.client.RemoteDisconnected)):
+        return True
+    if isinstance(error, socket.gaierror):
+        return error.errno == socket.EAI_AGAIN
+    return isinstance(error, OSError) and error.errno in (
+        errno.ECONNRESET, errno.ECONNABORTED, errno.ETIMEDOUT,
+    )
 
-    Do not retry denied URLs, alter headers to evade access restrictions, or
-    silently switch origins after an HTTP error. Source choice is explicit.
+
+def _download_file(url, destination):
+    """Atomically download one official URL, with bounded transient retries.
+
+    At most three attempts, each with a 120-second socket timeout, separated
+    by 1 and 2 seconds. Denials, TLS failures and unknown errors fail closed;
+    retries never change the URL, headers, credentials or certificate checks.
     """
-    try:
-        with urllib.request.urlopen(url, timeout=120) as response, destination.open('wb') as target:
-            shutil.copyfileobj(response, target)
-    except urllib.error.HTTPError as error:
-        raise RuntimeError(f'Official model source returned HTTP {error.code}: {url}') from error
-    except urllib.error.URLError as error:
-        raise RuntimeError(f'Cannot reach official model source {url}: {error.reason}') from error
+    if os.environ.get('VSE_OFFLINE') == '1':
+        raise RuntimeError(f'Offline mode forbids downloading official model source: {url}')
+    destination = Path(destination)
+    for attempt in range(3):
+        partial = None
+        try:
+            # Stage beside the destination so replacement is atomic. Existing
+            # complete files survive failures; partial responses never escape.
+            with tempfile.NamedTemporaryFile(prefix=f'.{destination.name}-', suffix='.part',
+                                             dir=destination.parent, delete=False) as target:
+                partial = Path(target.name)
+                with urllib.request.urlopen(url, timeout=120) as response:
+                    shutil.copyfileobj(response, target)
+            os.replace(partial, destination)
+            return
+        except (urllib.error.URLError, OSError, http.client.HTTPException) as error:
+            if isinstance(error, urllib.error.HTTPError):
+                error.close()
+            if attempt < 2 and _is_transient_download_error(error):
+                retry_delay = 2 ** attempt
+            else:
+                if isinstance(error, urllib.error.HTTPError):
+                    raise RuntimeError(f'Official model source returned HTTP {error.code}: {url}') from error
+                reason = getattr(error, 'reason', error)
+                raise RuntimeError(f'Cannot reach official model source {url}: {reason}') from error
+        finally:
+            if partial is not None:
+                partial.unlink(missing_ok=True)
+        time.sleep(retry_delay)
 
 
 def _download_huggingface_files(entry, extracted):

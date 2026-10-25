@@ -12,6 +12,7 @@ from backend.tools import model_download
 
 @pytest.fixture
 def bundle(tmp_path, monkeypatch):
+    monkeypatch.delenv('VSE_OFFLINE', raising=False)
     name = 'PP-OCRv6_small_det'
     archive_dir = tmp_path / 'archives'
     archive_dir.mkdir()
@@ -32,7 +33,8 @@ def bundle(tmp_path, monkeypatch):
     return name, archive_dir, tmp_path / 'models'
 
 
-def test_verified_atomic_download_is_idempotent(bundle):
+def test_verified_atomic_download_is_idempotent(bundle, monkeypatch):
+    monkeypatch.setenv('VSE_OFFLINE', '1')
     name, archives, output = bundle
     destination = model_download.download_model(name, output, archives)
     assert model_download.verify_model(destination, name)
@@ -99,7 +101,7 @@ def test_primary_checksum_failure_never_falls_back_or_publishes(bundle, monkeypa
     assert not (output / f'{name}_infer').exists()
 
 
-@pytest.mark.parametrize('status', [401, 403, 404, 429, 503])
+@pytest.mark.parametrize('status', [401, 403, 404])
 def test_http_errors_do_not_retry_or_switch_origins(bundle, monkeypatch, status):
     name, _, output = bundle
     requests = []
