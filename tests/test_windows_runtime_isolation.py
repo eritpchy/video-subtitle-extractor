@@ -88,6 +88,8 @@ def test_no_windows_configuration_before_pip_or_after_prune_inventory(tmp_path, 
             events.append('prune')
         else:
             assert configured
+            assert command[1:3] == ['-m', 'scripts.runtime_dependencies']
+            assert kwargs['cwd'] == tmp_path
             events.append('dependencies')
     monkeypatch.setattr(portable, 'prepare_runtime', prepare)
     monkeypatch.setattr(package_release, 'finalize_portable_runtime', lambda *args: {})
@@ -185,6 +187,110 @@ def test_owned_hook_fails_closed_instead_of_site_swallowing_audit_error(tmp_path
     assert result.returncode == 91
     assert b'MUST_NOT_RUN' not in result.stdout
     assert b'Trusted portable startup audit failed' in result.stderr
+
+
+def test_isolated_native_dependency_audit_uses_trusted_package_not_script_search_path(tmp_path):
+    """Real ._pth entrypoint/import regression; inference packages are inert fixtures."""
+    import packaging
+    from scripts import native_package, runtime_dependencies
+    root = tmp_path / 'bundle 字幕 & spaces'
+    python = _copy_for_startup_fixture(root)
+    packages = root / 'runtime/Lib/site-packages'
+    shutil.copytree(Path(packaging.__file__).parent, packages / 'packaging',
+                    ignore=shutil.ignore_patterns('__pycache__'))
+    for module in (native_package, runtime_dependencies):
+        shutil.copy2(module.__file__, root / 'scripts' / Path(module.__file__).name)
+    for name in ('pyside6_essentials', 'shiboken6'):
+        metadata = packages / f'{name}-6.12.0.dist-info'
+        metadata.mkdir(exist_ok=True)
+        (metadata / 'METADATA').write_text(f'Name: {name}\nVersion: 6.12.0\n', encoding='utf-8')
+    (packages / 'cv2.py').write_text('\n'.join(f'{name} = object()' for name in (
+        'VideoCapture', 'VideoWriter', 'cvtColor', 'findContours', 'minAreaRect')), encoding='utf-8')
+    (packages / 'PySide6').mkdir()
+    for name in ('__init__', 'QtCore', 'QtGui', 'QtWidgets', 'QtSvg', 'QtSvgWidgets', 'QtXml'):
+        (packages / 'PySide6' / f'{name}.py').write_text('# inert API-import fixture\n', encoding='utf-8')
+    if sys.platform == 'darwin':
+        for name in ('Cocoa', 'objc'):
+            (packages / f'{name}.py').write_text('# inert platform-import fixture\n', encoding='utf-8')
+        (packages / 'Quartz').mkdir()
+        for name in ('__init__', 'CoreGraphics'):
+            (packages / 'Quartz' / f'{name}.py').write_text('# inert platform-import fixture\n', encoding='utf-8')
+    manifest = root / 'runtime/runtime-profile.json'
+    manifest.write_text(json.dumps({'ocr_backend': 'native', 'runtime_requirements': [
+        'pyside6-essentials==6.12.0', 'shiboken6==6.12.0']}), encoding='utf-8')
+    foreign = tmp_path / 'unrelated-cwd'
+    foreign.mkdir()
+    marker = tmp_path / 'FOREIGN_HELPER_EXECUTED'
+    (foreign / 'native_package.py').write_text(f'from pathlib import Path\nPath({str(marker)!r}).touch()\n', encoding='utf-8')
+    audit = tmp_path / 'audit'
+    env = bootstrap.sanitize_environment(root, dict(os.environ), 'windows' if os.name == 'nt' else 'linux')
+    env.update(probe.audit_environment(root, audit), VSE_RUNTIME_AUDIT_ACTIVE='portable-bootstrap-v1', PYTHONPATH=str(foreign))
+    arguments = ['--manifest', str(manifest)]
+    # Preserve the exact failure mode: direct scripts get neither __package__
+    # nor an implicit scripts/ sys.path entry under the locked runtime.
+    direct = subprocess.run([str(python), str(root / 'scripts/runtime_dependencies.py'), *arguments],
+                            cwd=foreign, env=env, capture_output=True, timeout=30)
+    assert direct.returncode != 0 and b"No module named 'native_package'" in direct.stderr
+    result = subprocess.run([str(python), '-m', 'scripts.runtime_dependencies', *arguments],
+                            cwd=foreign, env=env, capture_output=True, timeout=30, check=True)
+    assert b'Inference dependencies verified' in result.stdout
+    assert not marker.exists()
+    reports = [json.loads(path.read_text(encoding='utf-8')) for path in audit.glob('process-*.json')]
+    assert len(reports) == 2
+    assert all(report['isolated'] == report['ignore_environment'] == 1 for report in reports)
+    assert all(str(foreign) not in report['sys_path'] and str(root / 'scripts') not in report['sys_path'] for report in reports)
+    assert any(report['modules'].get('scripts.native_package') == str(root / 'scripts/native_package.py') for report in reports)
+    # Source-mode direct invocation remains supported without modifying its
+    # documented CLI or importing a host dependency into the isolated runtime.
+    source_env = bootstrap.sanitize_environment(root, dict(os.environ), 'windows' if os.name == 'nt' else 'linux')
+    source_env['PYTHONPATH'] = str(packages)
+    source = subprocess.run([sys.executable, '-S', str(root / 'scripts/runtime_dependencies.py'), *arguments],
+                            cwd=foreign, env=source_env, capture_output=True, timeout=30, check=True)
+    assert b'Inference dependencies verified' in source.stdout
+    forbidden = packages / 'paddlepaddle-3.3.1.dist-info'
+    forbidden.mkdir()
+    (forbidden / 'METADATA').write_text('Name: paddlepaddle\nVersion: 3.3.1\n', encoding='utf-8')
+    rejected = subprocess.run([str(python), '-m', 'scripts.runtime_dependencies', *arguments],
+                              cwd=foreign, env=env, capture_output=True, timeout=30)
+    assert rejected.returncode != 0
+    assert b'Native GUI runtime contains forbidden inference stacks' in rejected.stderr
+
+
+@pytest.mark.parametrize('entry', [
+    'prune_inference_runtime.py', 'windows_verification.py', 'install_videosubfinder.py',
+    'e2e_smoke.py', 'e2e_issues.py', 'e2e_multiline.py', 'e2e_av1.py', 'e2e_timeline.py',
+])
+def test_other_isolated_direct_script_children_have_resolvable_entry_imports(tmp_path, entry):
+    """Cover remaining build/bootstrap/E2E script imports, not native workloads."""
+    root = tmp_path / 'bundle'
+    python = _copy_for_startup_fixture(root)
+    repository = Path(portable.__file__).resolve().parents[1]
+    shutil.copytree(repository / 'scripts', root / 'scripts', dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns('__pycache__'))
+    for relative in ('backend/__init__.py', 'backend/tools/__init__.py', 'backend/tools/videosubfinder.py'):
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(repository / relative, destination)
+    # AV1 imports this optional workload dependency before parsing --help;
+    # no encoding is exercised by this entrypoint/import-only fixture.
+    (root / 'runtime/Lib/site-packages/imageio_ffmpeg.py').write_text('# inert import fixture\n', encoding='utf-8')
+    env = bootstrap.sanitize_environment(root, dict(os.environ), 'windows' if os.name == 'nt' else 'linux')
+    result = subprocess.run([str(python), str(root / 'scripts' / entry), '--help'],
+                            cwd=tmp_path, env=env, capture_output=True, timeout=30, check=True)
+    assert b'usage:' in result.stdout.lower()
+
+
+def test_bootstrap_native_dependency_child_keeps_package_module_entry():
+    import ast
+    import inspect
+    tree = ast.parse(inspect.getsource(bootstrap.main))
+    commands = [node.args[0] for node in ast.walk(tree) if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute) and node.func.attr == 'run'
+                and node.args and isinstance(node.args[0], ast.List)]
+    values = [[item.value if isinstance(item, ast.Constant) else None for item in command.elts]
+              for command in commands]
+    assert sum(command[1:3] == ['-m', 'scripts.runtime_dependencies'] for command in values) == 1
+    assert all('scripts/runtime_dependencies.py' not in command for command in values)
 
 
 def test_registry_inventory_is_read_only_and_distinguishes_missing_from_denied(monkeypatch):

@@ -282,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
         if manifest['platform'] == 'windows' and os.environ.get('VSE_WINDOWS_RUNNER_LABEL'):
             subprocess.run([str(python), 'scripts/windows_verification.py', 'capture', '--runner', os.environ['VSE_WINDOWS_RUNNER_LABEL'], '--profile', backend, '--output', str(results / 'bundled-windows-identity')], check=True)
         subprocess.run([str(python), 'scripts/prune_inference_runtime.py', '--verify', '--manifest', str(root / 'runtime/inference-prune.json')], check=True)
-        subprocess.run([str(python), 'scripts/runtime_dependencies.py', '--manifest', str(manifest_path)], check=True)
+        subprocess.run([str(python), '-m', 'scripts.runtime_dependencies', '--manifest', str(manifest_path)], check=True)
         subprocess.run([str(python), 'scripts/install_videosubfinder.py', '--verify-only'], check=True)
         subprocess.run([str(python), '-m', 'backend.cli', '--help'], check=True)
         qt_platform = 'cocoa' if platform.system() == 'Darwin' else 'windows' if os.name == 'nt' else 'xcb' if os.environ.get('DISPLAY') else 'offscreen'

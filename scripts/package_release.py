@@ -159,7 +159,9 @@ def build_runtime(stage: Path, wheels: list[Path], runtime_requirements: list[st
     if profile == 'paddle' and (target_platform, target_arch) == ('linux', 'x64'):
         prune.append('--include-unused-openvino')
     subprocess.run(prune, check=True, env=env)
-    subprocess.run([str(python), str(stage / 'scripts/runtime_dependencies.py'), '--manifest', str(profile_manifest)], check=True, env=env)
+    # The Windows ._pth deliberately excludes the direct script's directory.
+    # Resolve sibling helpers through the trusted application package instead.
+    subprocess.run([str(python), '-m', 'scripts.runtime_dependencies', '--manifest', str(profile_manifest)], check=True, env=env, cwd=stage)
     info = dict(info, python=python.relative_to(stage.resolve()).as_posix())
     return info
 
