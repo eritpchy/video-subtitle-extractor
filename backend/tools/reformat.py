@@ -104,8 +104,18 @@ def execute(path, lang='en'):
                 print(traceback.format_exc())
                 return []
 
+        # Format each visual row independently. Word segmentation otherwise
+        # consumes a multiline caption as one sentence and erases its breaks.
+        line_groups = []
+        processing_subtitles = []
+        for original in subs:
+            parts = [pysrt.SubRipItem(index=original.index, start=original.start,
+                                     end=original.end, text=line)
+                     for line in original.text.split('\n')]
+            line_groups.append((original, parts))
+            processing_subtitles.extend(parts)
         modified_count = 0
-        for index, sub in enumerate(subs):
+        for index, sub in enumerate(processing_subtitles):
             try:
                 if not hasattr(sub, 'text') or not sub.text:
                     continue
@@ -199,6 +209,8 @@ def execute(path, lang='en'):
                 # Keep original text unchanged
                 continue
                 
+        for original, parts in line_groups:
+            original.text = '\n'.join(part.text for part in parts)
         try:
             subs.save(path, encoding='utf-8')
             print(f"Successfully processed subtitle file: {path}, modified {modified_count} lines")

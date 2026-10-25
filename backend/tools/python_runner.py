@@ -15,11 +15,14 @@ class AsyncPythonRunner:
         self._stdout_callbacks: List[Callable[[str], Any]] = []
         self._stderr_callbacks: List[Callable[[str], Any]] = []
         self._exit_callbacks: List[Callable[[int], Any]] = []
+        self._token_exit_callbacks: List[Callable[[int, int], Any]] = []
+        self.generation = 0
 
     def register_callback(self, 
                         stdout: Callable[[str], Any] = None,
                         stderr: Callable[[str], Any] = None,
-                        complete: Callable[[int], Any] = None):
+                        complete: Callable[[int], Any] = None,
+                        complete_with_token: Callable[[int, int], Any] = None):
         """注册回调函数"""
         if stdout:
             self._stdout_callbacks.append(stdout)
@@ -27,6 +30,8 @@ class AsyncPythonRunner:
             self._stderr_callbacks.append(stderr)
         if complete:
             self._exit_callbacks.append(complete)
+        if complete_with_token:
+            self._token_exit_callbacks.append(complete_with_token)
 
     def _notify_callbacks(self, 
                         stream_type: str, 
@@ -51,7 +56,7 @@ class AsyncPythonRunner:
         :param python_args: 传递给Python解释器的参数
         :param cwd: 设置工作目录
         """
-        if self.process is not None:
+        if self.process is not None and self.process.poll() is None:
             raise RuntimeError("Process is already running")
         
         python_path = sys.executable
@@ -66,7 +71,7 @@ class AsyncPythonRunner:
             cmd.extend(args)
         
         # 启动子进程
-        self.process = subprocess.Popen(
+        process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -76,25 +81,32 @@ class AsyncPythonRunner:
             universal_newlines=True,
             cwd=cwd
         )
+        self.process = process
+        self.generation += 1
+        generation = self.generation
+        self.returncode = None
+        self._output_threads = []
         
         # 启动输出读取线程
-        self._start_reader_thread('stdout', self.process.stdout)
-        self._start_reader_thread('stderr', self.process.stderr)
+        self._start_reader_thread('stdout', process.stdout, process)
+        self._start_reader_thread('stderr', process.stderr, process)
         
         # 启动监控线程
         self._monitor_thread = threading.Thread(
             target=self._monitor_process,
+            args=(process, tuple(self._output_threads), generation),
             daemon=True
         )
         self._monitor_thread.start()
 
     def _start_reader_thread(self, 
                            stream_type: str, 
-                           stream):
+                           stream, process):
         """启动输出读取线程"""
         def reader():
             for line in iter(stream.readline, ''):
-                self._notify_callbacks(stream_type, line)
+                if self.process is process:
+                    self._notify_callbacks(stream_type, line)
             stream.close()
         
         thread = threading.Thread(
@@ -104,21 +116,38 @@ class AsyncPythonRunner:
         thread.start()
         self._output_threads.append(thread)
 
-    def _monitor_process(self):
+    def _monitor_process(self, process, readers, generation):
         """监控进程状态"""
-        self.returncode = self.process.wait()
-        for callback in self._exit_callbacks:
-            callback(self.returncode)
+        returncode = process.wait()
+        for reader in readers:
+            reader.join()
+        if self.process is process:
+            self.returncode = returncode
+            for callback in self._exit_callbacks:
+                if self.process is process and self.generation == generation:
+                    callback(returncode)
+            for callback in self._token_exit_callbacks:
+                if self.process is process and self.generation == generation:
+                    callback(returncode, generation)
 
     def is_running(self) -> bool:
         """检查子进程是否在运行"""
-        return self.returncode is None
+        return self.process is not None and self.process.poll() is None
 
     def stop(self):
         """停止子进程"""
-        if self.process:
-            ProcessManager.instance().terminate_by_pid(self.process.pid)
+        process = self.process
+        # Detach first so output/completion from a stopped job cannot update a
+        # later run, and never send a signal to a completed/reused process ID.
         self.process = None
+        self.generation += 1
+        if process is not None and process.poll() is None:
+            ProcessManager.instance().terminate_by_pid(process.pid)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
 
     def wait(self, timeout: float = None) -> bool:
         """等待进程结束"""

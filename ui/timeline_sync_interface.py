@@ -19,6 +19,7 @@ class Option:
 class TimelineSyncInterface(QWidget):
 
     append_log_signal = Signal(str)
+    completed_signal = Signal(int, int)
     def __init__(self, parent):
         super().__init__()
         
@@ -27,8 +28,9 @@ class TimelineSyncInterface(QWidget):
         self.python_runner.register_callback(
             stdout = self.append_log_signal.emit,
             stderr = self.append_log_signal.emit,
-            complete = self.on_complete
+            complete_with_token = self.completed_signal.emit
         )
+        self.completed_signal.connect(self.on_complete)
         self.option = Option()
 
         self.setContentsMargins(16, 16, 16, 16)
@@ -161,11 +163,24 @@ class TimelineSyncInterface(QWidget):
         if not self.is_selected_file_exists(tr["TimelineSync"]["DestinationVideoTitle"], self.option.destination_video.value):
             return
 
-        self.python_runner.start("sushi", cwd="./backend/", args=[
+        output = Path(self.output_path)
+        source_subtitle = Path(self.option.source_subtitle.value)
+        if output.resolve() == source_subtitle.resolve() or output.exists():
+            InfoBar.error(
+                title=tr["TimelineSync"]["Error"],
+                content=f"Refusing to overwrite an existing subtitle: {output}",
+                parent=self,
+                duration=5000,
+            )
+            return
+        self._active_output_path = str(output)
+
+        backend_dir = Path(__file__).resolve().parents[1] / "backend"
+        self.python_runner.start(str(backend_dir / "sushi"), cwd=str(backend_dir), args=[
             '--src', self.option.source_video.value,
             '--dst', self.option.destination_video.value,
             '--script', self.option.source_subtitle.value,
-            '--output', self.output_path
+            '--output', self._active_output_path
         ], python_args=["-u"])
         self.stop_button.setVisible(True)
         self.run_button.setVisible(False)
@@ -183,11 +198,17 @@ class TimelineSyncInterface(QWidget):
 
     @property
     def output_path(self):
-        return os.path.join(os.path.dirname(self.option.destination_video.value), f"{Path(self.option.destination_video.value).stem}{os.path.splitext(self.option.source_subtitle.value)[-1]}")
+        # Never use the destination video's ordinary subtitle path: it may be
+        # the source script itself or an existing subtitle the user must keep.
+        return os.path.join(os.path.dirname(self.option.destination_video.value), f"{Path(self.option.destination_video.value).stem}.synced{os.path.splitext(self.option.source_subtitle.value)[-1]}")
 
-    def on_complete(self, return_code):
+    def on_complete(self, return_code, generation):
+        # A finished process may have queued this signal immediately before
+        # Stop/Run. Do not let that older completion change the new run's UI.
+        if generation != self.python_runner.generation:
+            return
         self.stop_button.setVisible(False)
         self.run_button.setVisible(True)
         if return_code == 0:
-            self.append_log_signal.emit(f"Synced subtitle: {self.output_path}")
+            self.append_log_signal.emit(f"Synced subtitle: {getattr(self, '_active_output_path', self.output_path)}")
             return

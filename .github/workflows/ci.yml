@@ -99,6 +99,10 @@ jobs:
         env:
           VSE_OFFLINE: '1'
         run: python scripts/e2e_smoke.py --output test-results/e2e
+      - name: Issue-targeted multiline, AV1 and timeline end-to-end regressions
+        env:
+          VSE_OFFLINE: '1'
+        run: python scripts/e2e_issues.py --output test-results/issues
       - name: Publish test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -137,6 +141,12 @@ jobs:
           mkdir -p test-results
           docker run --name vse-e2e --network none -e VSE_OFFLINE=1 --entrypoint python "$IMAGE" scripts/e2e_smoke.py --output /tmp/vse-e2e
           docker cp vse-e2e:/tmp/vse-e2e test-results/docker-e2e
+      - name: Issue-targeted regressions in offline container
+        env:
+          IMAGE: vse-ci:${{ github.sha }}
+        run: |
+          docker run --name vse-issues --network none -e VSE_OFFLINE=1 --entrypoint python "$IMAGE" scripts/e2e_issues.py --output /tmp/vse-issues
+          docker cp vse-issues:/tmp/vse-issues test-results/docker-issues
       - name: Capture Docker logs and cleanup
         if: always()
         run: |
@@ -144,6 +154,9 @@ jobs:
           docker logs vse-e2e > test-results/docker.log 2>&1 || true
           docker cp vse-e2e:/tmp/vse-e2e test-results/docker-e2e 2>/dev/null || true
           docker rm -f vse-e2e 2>/dev/null || true
+          docker logs vse-issues > test-results/docker-issues.log 2>&1 || true
+          docker cp vse-issues:/tmp/vse-issues test-results/docker-issues 2>/dev/null || true
+          docker rm -f vse-issues 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:

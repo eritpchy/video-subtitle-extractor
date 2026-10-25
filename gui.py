@@ -51,6 +51,8 @@ class SubtitleExtractorGUI(FluentWindow):
         application = QApplication.instance()
         if application is not None:
             require_native_window_backend(application.platformName())
+            from ui.fonts import register_bundled_cjk_font
+            register_bundled_cjk_font(application)
         super().__init__()
         # 禁用云母效果
         self.setMicaEffectEnabled(False)

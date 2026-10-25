@@ -31,7 +31,7 @@ class ProcessManager:
         self.logger = logging.getLogger(__name__)
         
         # 注册退出处理函数
-        atexit.register(self.terminate_all)
+        atexit.register(self._shutdown)
     
     def add_process(self, process, name=None):
         """
@@ -68,8 +68,23 @@ class ProcessManager:
             return True
         return False
     
-    def terminate_all(self):
+    def _shutdown(self):
+        # Python's thread shutdown has already begun when atexit runs. Creating
+        # a ThreadPoolExecutor here can fail before any child is cleaned up.
+        self.terminate_all(synchronous=True)
+
+    def terminate_all(self, synchronous=False):
         """并发终止所有管理的进程"""
+        if not self.processes:
+            return
+        if synchronous:
+            for process in list(self.processes.values()):
+                if isinstance(process, int):
+                    self.terminate_by_pid(process)
+                else:
+                    self.terminate_by_process(process)
+            self.processes.clear()
+            return
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = []
             for process_id, process in list(self.processes.items()):
@@ -105,12 +120,17 @@ class ProcessManager:
                     process.wait(timeout=3)
                 except:
                     pass
+            # wait() may have reaped the child; its numeric PID can now be reused.
+            if hasattr(process, 'poll') and process.poll() is not None:
+                return
             # 进程未能正常终止，尝试强制终止
             if hasattr(process, 'kill'):
                 process.kill()
         except Exception as e:
             # print(f"Error terminating process: {str(e)}")
             pass
+        if hasattr(process, 'poll') and process.poll() is not None:
+            return
         self.terminate_by_pid(process.pid)
 
     def terminate_by_pid(self, pid):

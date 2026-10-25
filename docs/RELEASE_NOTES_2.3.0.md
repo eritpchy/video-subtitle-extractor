@@ -28,6 +28,23 @@ CI and native package verification for the exact release commit.
   explicit. Keep original subtitles intact after failed extraction.
 - Work around a verified Paddle 3.3.1 CPU oneDNN/PIR incompatibility by disabling
   oneDNN by default.
+- Keep portable configuration independent of the launch directory (upstream
+  [#450](https://github.com/YaoFANGUK/video-subtitle-extractor/issues/450)).
+- Preserve visual subtitle rows through OCR grouping and word segmentation,
+  without rewriting the raw recognition cache (upstream
+  [#467](https://github.com/YaoFANGUK/video-subtitle-extractor/issues/467)).
+- Decode otherwise unsupported OpenCV frames with bundled FFmpeg; when needed,
+  prepare a lossless temporary stream for VSF rather than report empty success
+  (upstream [#459](https://github.com/YaoFANGUK/video-subtitle-extractor/issues/459)).
+  This compatibility conversion is bounded to 30 minutes and the smaller of
+  20 GiB or 80% of available temporary disk space. Inputs exceeding these limits
+  require manual pre-conversion; corrupt/unsupported media fail explicitly.
+- Launch timeline synchronization from any working directory, preserve source
+  subtitles, refuse existing output overwrites, and ignore stale completion
+  callbacks after stopping or restarting a job. New outputs use `.synced.srt`
+  or `.synced.ass` rather than overwriting the source filename.
+- Preserve the original rounded logo and transparent corners in all seven
+  ICO sizes, window icons and application icons.
 
 ## Distribution and verification
 
@@ -41,6 +58,9 @@ including actual OCR, video-to-SRT, GUI theme tests, and native GUI startup.
 Archive verification installs dependencies offline in a fresh environment and
 repeats GUI/CLI/extraction checks. A workflow definition or source-only result
 does not certify a platform; check the completed run for the final commit.
+Issue-specific real-media gates additionally cover multiline subtitles, AV1
+extraction and an exact two-second timeline shift, including offline Docker
+and freshly installed archive execution.
 
 GPU, DirectML/ONNX runtime acceleration, Intel macOS, Linux ARM64 and Windows
 ARM64 are not certified by this CPU release matrix. Some fallback language

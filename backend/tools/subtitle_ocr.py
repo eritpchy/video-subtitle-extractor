@@ -1,3 +1,4 @@
+from backend.tools.video_decode import read_frame
 import os
 import re
 from multiprocessing import Queue, Process
@@ -201,11 +202,10 @@ def ocr_task_producer(ocr_queue, task_queue, progress_queue, video_path, raw_sub
                     tbar.update(tbar.total - tbar.n)
                 return
             tbar.update(round(current_frame_no - tbar.n))
-            if total_ms is not None:
-                cap.set(cv2.CAP_PROP_POS_MSEC, total_ms)
-            else:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame_no - 1)
-            ret, frame = cap.read()
+            ret, frame = read_frame(cap, video_path,
+                                    milliseconds=total_ms,
+                                    frame_index=None if total_ms is not None else current_frame_no - 1,
+                                    stop_event=stop_event)
             if not ret or frame is None:
                 raise RuntimeError(f'Cannot decode OCR frame {current_frame_no} at {total_ms} ms: {video_path}')
             if default_subtitle_area is not None:

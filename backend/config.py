@@ -96,7 +96,9 @@ class Config(QConfig):
     # VideoSubFinder 视频解码组件
     videoSubFinderDecoder = OptionsConfigItem("Main", "VideoSubFinderDecoder", VideoSubFinderDecoder.OPENCV, OptionsValidator(VideoSubFinderDecoder), EnumSerializer(VideoSubFinderDecoder))
 
-CONFIG_FILE = os.environ.get('VSE_CONFIG_FILE', 'config/config.json')
+# Resolve the portable configuration beside the project, not the launch CWD.
+# Explicit overrides remain useful for isolated jobs and tests.
+CONFIG_FILE = os.environ.get('VSE_CONFIG_FILE') or str(Path(__file__).resolve().parents[1] / 'config' / 'config.json')
 config = Config()
 qconfig.load(CONFIG_FILE, config)
 

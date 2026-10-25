@@ -73,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
         env = dict(os.environ, QT_QPA_PLATFORM=qt_platform, PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK="True", VSE_OFFLINE="1")
         subprocess.run([str(python), "gui.py", "--smoke-test"], check=True, env=env, timeout=120)
         subprocess.run([str(python), "scripts/e2e_smoke.py", "--output", "test-results/bundle-e2e"], check=True, env=env, timeout=960)
+        subprocess.run([str(python), "scripts/e2e_issues.py", "--output", "test-results/bundle-issues"], check=True, env=env, timeout=3660)
         return 0
     if args.install_only:
         return 0

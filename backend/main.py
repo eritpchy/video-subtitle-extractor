@@ -12,6 +12,7 @@ import math
 import shutil
 import traceback
 import queue
+from contextlib import nullcontext
 from collections import Counter, namedtuple
 import unicodedata
 from threading import Thread
@@ -30,6 +31,7 @@ from backend.tools.hardware_accelerator import HardwareAccelerator
 from backend.tools import reformat
 from backend.tools.ocr import OcrRecogniser, get_coordinates
 from backend.tools import subtitle_ocr
+from backend.tools.video_decode import read_frame, compatible_video
 from backend.tools.paddle_model_config import PaddleModelConfig
 from backend.tools.process_manager import ProcessManager
 from backend.tools.videosubfinder import (build_command, resolve_binary, run_command,
@@ -269,7 +271,9 @@ class SubtitleExtractor:
         # self.video_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         
         # 读取第一帧
-        ret, frame = self.video_cap.read()
+        self._needs_compatible_video = False
+        ret, frame = read_frame(self.video_cap, self.video_path, frame_index=0,
+                               on_fallback=lambda: setattr(self, '_needs_compatible_video', True))
         
         if ret:
             # 如果有字幕区域，绘制矩形
@@ -301,8 +305,7 @@ class SubtitleExtractor:
         total_frames = int(self.frame_count)
         while current_frame_no < total_frames:
             # 直接跳到目标帧
-            self.video_cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame_no)
-            ret, frame = self.video_cap.read()
+            ret, frame = read_frame(self.video_cap, self.video_path, frame_index=current_frame_no)
             if not ret:
                 break
             current_frame_no += 1
@@ -339,7 +342,7 @@ class SubtitleExtractor:
         if self.ocr is None:
             self.ocr = OcrRecogniser()
         while self.video_cap.isOpened():
-            ret, frame = self.video_cap.read()
+            ret, frame = read_frame(self.video_cap, self.video_path, frame_index=current_frame_no)
             # 如果读取视频帧失败（视频读到最后一帧）
             if not ret:
                 break
@@ -462,14 +465,22 @@ class SubtitleExtractor:
 
         def register_process(process):
             nonlocal process_id
+            if process_id is not None:
+                ProcessManager.instance().remove_process(process_id)
             process_id = ProcessManager.instance().add_process(process)
             self.manage_process(process.pid)
 
         self.vsf_running = True
         try:
-            result = run_command(command,
-                on_progress=lambda value: self.update_progress(frame_extract=value),
-                on_log=self.append_output, on_spawn=register_process)
+            source = nullcontext(self.video_path)
+            if getattr(self, '_needs_compatible_video', False):
+                self.append_output("OpenCV cannot decode this codec; preparing a lossless temporary video for VideoSubFinder")
+                source = compatible_video(self.video_path, self.temp_output_dir, on_spawn=register_process)
+            with source as compatible_path:
+                command[command.index('-i') + 1] = str(compatible_path)
+                result = run_command(command,
+                    on_progress=lambda value: self.update_progress(frame_extract=value),
+                    on_log=self.append_output, on_spawn=register_process)
             if not os.path.isfile(self.vsf_subtitle):
                 raise VideoSubFinderError("VideoSubFinderCli did not write the requested SRT timing file")
             # Frame events can arrive out of order from the CLI worker pool.
@@ -495,13 +506,14 @@ class SubtitleExtractor:
         # 随机选择一帧, 将所水印区域标记出来，用户看图判断是否是水印区域
         cap = cv2.VideoCapture(self.video_path)
         ret, sample_frame = False, None
-        for i in range(10):
-            frame_no = random.randint(int(self.frame_count * 0.1), int(self.frame_count * 0.9))
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
-            ret, sample_frame = cap.read()
-            if ret:
-                break
-        cap.release()
+        try:
+            for i in range(10):
+                frame_no = random.randint(int(self.frame_count * 0.1), int(self.frame_count * 0.9))
+                ret, sample_frame = read_frame(cap, self.video_path, frame_index=frame_no)
+                if ret:
+                    break
+        finally:
+            cap.release()
 
         if not ret:
             self.append_output("Error in filter_watermark: reading frame from video")
@@ -556,13 +568,14 @@ class SubtitleExtractor:
         # 随机选择一帧，将所水印区域标记出来，用户看图判断是否是水印区域
         cap = cv2.VideoCapture(self.video_path)
         ret, sample_frame = False, None
-        for i in range(10):
-            frame_no = random.randint(int(self.frame_count * 0.1), int(self.frame_count * 0.9))
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
-            ret, sample_frame = cap.read()
-            if ret:
-                break
-        cap.release()
+        try:
+            for i in range(10):
+                frame_no = random.randint(int(self.frame_count * 0.1), int(self.frame_count * 0.9))
+                ret, sample_frame = read_frame(cap, self.video_path, frame_index=frame_no)
+                if ret:
+                    break
+        finally:
+            cap.release()
 
         if not ret:
             self.append_output("Error in filter_scene_text: reading frame from video")
@@ -612,7 +625,7 @@ class SubtitleExtractor:
                     else:
                         frame_end = self._frame_to_timecode(int(content[1]))
                     frame_content = content[2]
-                    subtitle_line = f'{line_code}\n{frame_start} --> {frame_end}\n{frame_content}\n'
+                    subtitle_line = f'{line_code}\n{frame_start} --> {frame_end}\n{frame_content}\n\n'
                     f.write(subtitle_line)
             self.append_output(tr['Main']['SubLocation'].format(self.subtitle_output_path))
             # 返回持续时间低于1s的字幕行
@@ -729,15 +742,9 @@ class SubtitleExtractor:
         """
         读取原始的raw txt，去除重复行，返回去除了重复后的字幕列表
         """
-        self._concat_content_with_same_frameno()
-        with open(self.raw_subtitle_path, mode='r', encoding='utf-8') as r:
-            lines = r.readlines()
         RawInfo = namedtuple('RawInfo', 'no content')
-        content_list = []
-        for line in lines:
-            frame_no = line.split('\t')[0]
-            content = line.split('\t')[2]
-            content_list.append(RawInfo(frame_no, content))
+        content_list = [RawInfo(frame_no, content)
+                        for frame_no, _, content in self._concat_content_with_same_frameno()]
         # 去重后的字幕列表
         unique_subtitle_list = []
         idx_i = 0
@@ -778,31 +785,26 @@ class SubtitleExtractor:
         return unique_subtitle_list
 
     def _concat_content_with_same_frameno(self):
-        """
-        将raw txt文本中具有相同帧号的字幕行合并
-        """
-        with open(self.raw_subtitle_path, mode='r', encoding='utf-8') as r:
-            lines = r.readlines()
+        """Group OCR boxes into visual rows without destroying the raw cache.
 
-        # 用dict按frame_no分组，保留原始顺序
+        Same-row fragments are ordered left-to-right; distinct rows retain an
+        SRT newline. Returning structured text avoids embedding newlines in TSV.
+        """
+        from ast import literal_eval
         from collections import OrderedDict
-        grouped = OrderedDict()
-        for line in lines:
-            parts = line.split('\t', 2)
-            if len(parts) < 3:
-                continue
-            frame_no, coordinate, content = parts
-            if frame_no not in grouped:
-                grouped[frame_no] = (coordinate, [])
-            grouped[frame_no][1].append(content)
+        from backend.tools.subtitle_layout import join_visual_rows
 
-        with open(self.raw_subtitle_path, mode='w', encoding='utf-8') as f:
-            for frame_no, (coordinate, contents) in grouped.items():
-                merged = ' '.join(contents).replace('\n', ' ')
-                if not merged.endswith('\n'):
-                    merged += '\n'
-                merged = unicodedata.normalize('NFKC', merged)
-                f.write(f'{frame_no}\t{coordinate}\t{merged}')
+        grouped = OrderedDict()
+        with open(self.raw_subtitle_path, encoding='utf-8') as stream:
+            for line in stream:
+                parts = line.rstrip('\r\n').split('\t', 2)
+                if len(parts) != 3:
+                    continue
+                frame_no, coordinate, content = parts
+                bounds = literal_eval(coordinate)
+                grouped.setdefault(frame_no, []).append((bounds, content))
+        return [(frame_no, boxes[0][0], join_visual_rows(boxes))
+                for frame_no, boxes in grouped.items()]
 
     def _unite_coordinates(self, coordinates_list):
         """
