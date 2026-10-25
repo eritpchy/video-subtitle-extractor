@@ -105,7 +105,7 @@ def preserve_settings(default_file, previous_file):
 
 
 def download(url, target):
-    request = urllib.request.Request(url, headers={"User-Agent": "video-subtitle-extractor/2.2.0"})
+    request = urllib.request.Request(url, headers={"User-Agent": "video-subtitle-extractor/2.3.0"})
     with urllib.request.urlopen(request, timeout=120) as source, Path(target).open("wb") as output:
         shutil.copyfileobj(source, output)
 

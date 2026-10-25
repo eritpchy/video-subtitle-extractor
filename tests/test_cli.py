@@ -14,7 +14,7 @@ class CliTests(unittest.TestCase):
     def test_version_without_optional_dependencies(self):
         result = subprocess.run([sys.executable, "-m", "backend.cli", "--version"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Video Subtitle Extractor 2.2.0", result.stdout)
+        self.assertIn("Video Subtitle Extractor 2.3.0", result.stdout)
 
     def test_help_without_optional_dependencies(self):
         result = subprocess.run([sys.executable, "-m", "backend.cli", "--help"], capture_output=True, text=True)

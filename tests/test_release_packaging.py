@@ -18,30 +18,30 @@ from scripts.release_guard import assert_target, remote_tag_commit, validate_tag
 class ReleaseGuardTests(unittest.TestCase):
     def test_existing_tag_is_never_retargeted(self):
         with self.assertRaisesRegex(RuntimeError, "immutable"):
-            assert_target("2.2.0", "a" * 40, "a" * 40, "b" * 40, False)
+            assert_target("2.3.0", "a" * 40, "a" * 40, "b" * 40, False)
 
     def test_existing_release_is_never_overwritten(self):
         with self.assertRaisesRegex(RuntimeError, "already exists"):
-            assert_target("2.2.0", "a" * 40, "a" * 40, "a" * 40, True)
+            assert_target("2.3.0", "a" * 40, "a" * 40, "a" * 40, True)
 
     def test_sha_must_match_checkout(self):
         with self.assertRaisesRegex(RuntimeError, "checked-out"):
-            assert_target("2.2.0", "a" * 40, "b" * 40, None, False)
+            assert_target("2.3.0", "a" * 40, "b" * 40, None, False)
 
     def test_new_preview_and_same_commit_tag_allowed(self):
-        assert_target("2.2.0-preview.1", "a" * 40, "a" * 40, None, False)
-        assert_target("2.2.0", "a" * 40, "a" * 40, "a" * 40, False)
-        for value in ("2.2.0", "v2.2.0", "2.2.0-preview.1"):
-            validate_tag(value, "2.2.0")
+        assert_target("2.3.0-preview.1", "a" * 40, "a" * 40, None, False)
+        assert_target("2.3.0", "a" * 40, "a" * 40, "a" * 40, False)
+        for value in ("2.3.0", "v2.3.0", "2.3.0-preview.1"):
+            validate_tag(value, "2.3.0")
 
     def test_unsafe_or_mismatched_tags_are_rejected(self):
-        for value in ("", "2.1.0", "2.2.0; echo bad", "2.2.0-preview..1", "--help", "2.2.0-preview."):
+        for value in ("", "2.1.0", "2.3.0; echo bad", "2.3.0-preview..1", "--help", "2.3.0-preview."):
             with self.subTest(value=value), self.assertRaises(RuntimeError):
-                validate_tag(value, "2.2.0")
+                validate_tag(value, "2.3.0")
 
     def test_annotated_tag_resolves_to_commit(self):
-        output = "b" * 40 + "\trefs/tags/2.2.0\n" + "a" * 40 + "\trefs/tags/2.2.0^{}\n"
-        self.assertEqual(remote_tag_commit(output, "2.2.0"), "a" * 40)
+        output = "b" * 40 + "\trefs/tags/2.3.0\n" + "a" * 40 + "\trefs/tags/2.3.0^{}\n"
+        self.assertEqual(remote_tag_commit(output, "2.3.0"), "a" * 40)
 
     def test_version_does_not_import_ocr_or_gui(self):
         self.assertRegex(read_version(), r"^\d+\.\d+\.\d+")
@@ -83,7 +83,7 @@ class PackageTests(unittest.TestCase):
             root = Path(temporary) / "repo"
             for directory in ("backend/subfinder/linux/x64", "backend/models/V6", "scripts", "wheelhouse"):
                 (root / directory).mkdir(parents=True)
-            (root / "backend/config.py").write_text('VERSION = "2.2.0"\n', encoding="utf-8")
+            (root / "backend/config.py").write_text('VERSION = "2.3.0"\n', encoding="utf-8")
             (root / "backend/private-untracked.json").write_text("must not ship", encoding="utf-8")
             (root / "backend/subfinder/linux/x64/VideoSubFinderCli").write_text("runtime", encoding="utf-8")
             (root / "backend/models/V6/model.json").write_text("model", encoding="utf-8")

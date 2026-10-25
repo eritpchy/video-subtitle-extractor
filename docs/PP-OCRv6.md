@@ -1,6 +1,6 @@
 # Genuine PP-OCRv6 support
 
-The 2.2.0 runtime uses **PaddleOCR 3.7.0**, **PaddleX 3.7.2**, and
+The 2.3.0 runtime uses **PaddleOCR 3.7.0**, **PaddleX 3.7.2**, and
 **PaddlePaddle 3.3.1**, not renamed v5 weights. The models are the official
 PPLCNetV4 PP-OCRv6 inference bundles released with
 [PaddleOCR 3.7.0](https://github.com/PaddlePaddle/PaddleOCR/releases/tag/v3.7.0).

@@ -1,6 +1,6 @@
 # VideoSubFinder CLI integration
 
-VSE 2.2.0 uses the official `eritpchy/videosubfinder-cli` **v6.10** release on
+VSE 2.3.0 uses the official `eritpchy/videosubfinder-cli` **v6.10** release on
 Linux, Windows and macOS. The CLI's version was aligned with upstream, so older
 fork tags with a higher-looking version must not be selected by sorting tags.
 The old bundled Windows GUI executable is not used as a CLI fallback.

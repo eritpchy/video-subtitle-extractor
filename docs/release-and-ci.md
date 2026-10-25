@@ -39,7 +39,7 @@ A real X11 desktop may also need its normal Qt xcb runtime libraries. Offscreen 
 
 ## Publication and immutable tags
 
-Publication is manual and separate from preview. Select `draft`, `prerelease`, or `release` and supply a tag matching `backend/config.py`'s VERSION, optionally with a new preview suffix (for example `2.2.0-preview.1`). The workflow repeats CI and packaging, then publishes only after every required job passes. Configure required reviewers on the GitHub **release** environment if a second-person gate is desired.
+Publication is manual and separate from preview. Select `draft`, `prerelease`, or `release` and supply a tag matching `backend/config.py`'s VERSION, optionally with a new preview suffix (for example `2.3.0-preview.1`). The workflow repeats CI and packaging, then publishes only after every required job passes. Configure required reviewers on the GitHub **release** environment if a second-person gate is desired.
 
 The guard verifies the dispatch checkout's exact SHA and refuses:
 
@@ -47,7 +47,7 @@ The guard verifies the dispatch checkout's exact SHA and refuses:
 - an existing release, including drafts/prereleases, rather than replacing its assets;
 - a version/tag mismatch, failed API lookup, missing native bundle or failed checksum.
 
-**The existing `2.2.0` tag is immutable.** If it points at an older commit, do not move it to publish this work. Use a new preview tag for the current application version or bump the version and use a new release tag. Promoting an existing prerelease is a separate reviewed operation; this workflow intentionally cannot overwrite/promote it. A GitHub release's `target_commitish` display is not proof of the tag's actual commit: check the peeled tag SHA.
+**This feature release targets the new `2.3.0` version.** The existing `2.2.0` tag, release status and assets are out of scope and must remain untouched. New feature work uses a minor-version increment; fixes within a published feature version use a patch increment. No repository-specific version policy beyond semantic numeric VERSION/tags was present. This workflow cannot overwrite or promote an existing release. A GitHub release's `target_commitish` display is not proof of the tag's actual commit: check the peeled tag SHA.
 
 The final creation uses a non-force tag push and `gh release create --verify-tag`. A failure after tag creation may leave a tag without a release; inspect that exact tag before retrying. A successful prior release makes a rerun fail closed instead of overwriting anything. Existing 2.2.0 assets and historical tags are never deleted by these workflows.
 

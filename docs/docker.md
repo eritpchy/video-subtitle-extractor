@@ -5,9 +5,9 @@ The Dockerfile targets **Linux amd64 / CPU**. It packages Python 3.12, pinned pr
 ## Build and inspect
 
 ```sh
-docker build --platform linux/amd64 -t vse:2.2.0-cpu .
-docker run --rm vse:2.2.0-cpu --version
-docker run --rm vse:2.2.0-cpu --help
+docker build --platform linux/amd64 -t vse:2.3.0-cpu .
+docker run --rm vse:2.3.0-cpu --version
+docker run --rm vse:2.3.0-cpu --help
 ```
 
 The build needs internet access to PyPI, the official VSF GitHub release, and official Paddle model URLs. Downloads are checksum-verified where an upstream checksum manifest is supplied. The base image and resolved transitive Python dependencies can change between builds; release ZIPs record their exact native wheels and checksums. An image built locally is not a signed/reproducible release artifact.
@@ -19,7 +19,7 @@ Mount a writable directory at `/data` and specify a subtitle region as relative 
 ```sh
 docker run --rm \
   -v "$PWD/media:/data" \
-  vse:2.2.0-cpu \
+  vse:2.3.0-cpu \
   '/data/input video.mp4' --output /data/output.srt \
   --language en --mode fast --cpu --area 0.6,1,0,1
 ```
@@ -29,7 +29,7 @@ The container runs as UID 1000, not root. The mounted output directory must be w
 Small/medium PP-OCRv6 models and the VSF runtime are embedded during the build, so basic CPU extraction can run without network access:
 
 ```sh
-docker run --rm --network none -e VSE_OFFLINE=1 -v "$PWD/media:/data" vse:2.2.0-cpu \
+docker run --rm --network none -e VSE_OFFLINE=1 -v "$PWD/media:/data" vse:2.3.0-cpu \
   /data/input.mp4 --output /data/output.srt --cpu --area 0.6,1,0,1
 ```
 
@@ -38,7 +38,7 @@ Some non-v6 language/model paths may have additional model requirements. No GPU 
 ## Real container regression
 
 ```sh
-docker run --name vse-smoke --network none -e VSE_OFFLINE=1 --entrypoint python vse:2.2.0-cpu \
+docker run --name vse-smoke --network none -e VSE_OFFLINE=1 --entrypoint python vse:2.3.0-cpu \
   scripts/e2e_smoke.py --output /tmp/vse-e2e
 docker cp vse-smoke:/tmp/vse-e2e ./test-results/docker-e2e
 docker rm vse-smoke
