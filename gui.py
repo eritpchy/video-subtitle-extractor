@@ -104,9 +104,11 @@ class SubtitleExtractorGUI(FluentWindow):
     def switchTo(self, interface: QWidget):
         super().switchTo(interface)
         if interface == self.advancedSettingInterface:
-            QTimer.singleShot(222, lambda: self.advancedSettingInterface.macos_scrollarea_issue_workaround())
+            # Tie delayed work to the settings widget's QObject lifetime. A
+            # context-free lambda would still run after the window is deleted.
+            QTimer.singleShot(222, interface, interface.macos_scrollarea_issue_workaround)
             # try again
-            QTimer.singleShot(666, lambda: self.advancedSettingInterface.macos_scrollarea_issue_workaround())
+            QTimer.singleShot(666, interface, interface.macos_scrollarea_issue_workaround)
 
     def closeEvent(self, event):
         """程序关闭时保存窗口位置并恢复标准输出和标准错误"""

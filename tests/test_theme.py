@@ -243,6 +243,30 @@ class WindowThemeTests(ThemeTestCase):
         listener._onThemeChanged(Theme.LIGHT)
         self.assertEqual(qconfig.theme, Theme.DARK)
 
+    def test_delayed_settings_workarounds_run_for_live_widget(self):
+        import shiboken6
+        settings = self.window.advancedSettingInterface
+        callbacks = []
+        settings.macos_scrollarea_issue_workaround = lambda: callbacks.append(shiboken6.isValid(settings))
+        self.window.switchTo(settings)
+        QtTest.QTest.qWait(900)
+        self.assertEqual(callbacks, [True, True])
+
+    def test_delayed_settings_workarounds_cancel_when_widget_is_deleted(self):
+        import shiboken6
+        settings = self.window.advancedSettingInterface
+        callbacks = []
+        settings.macos_scrollarea_issue_workaround = lambda: callbacks.append(shiboken6.isValid(settings))
+        self.window.switchTo(settings)
+        self.window.close()
+        self.window.deleteLater()
+        self.widgets.remove(self.window)  # Already deleted, not a teardown target.
+        QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+        self.assertFalse(shiboken6.isValid(self.window))
+        self.assertFalse(shiboken6.isValid(settings))
+        QtTest.QTest.qWait(900)
+        self.assertEqual(callbacks, [], "Delayed callback reached a destroyed settings widget")
+
     def test_stop_icon_paths_are_independent_of_working_directory(self):
         from ui.icon.my_fluent_icon import MyFluentIcon
         for theme in (Theme.LIGHT, Theme.DARK):
