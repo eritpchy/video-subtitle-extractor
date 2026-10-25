@@ -10,6 +10,11 @@ from scripts import bundle_linux_runtime_libs as native
 
 
 class NativeClosureTests(unittest.TestCase):
+    def test_missing_linux_os_metadata_is_not_silently_invented(self):
+        with patch.object(native.Path, 'read_text', side_effect=FileNotFoundError('missing os-release')):
+            with self.assertRaises(FileNotFoundError):
+                native.linux_os_release()
+
     def test_base_policy_keeps_cpp_xcb_and_gomp(self):
         for name in ['libc.so.6', 'libpthread.so.0', 'ld-linux-x86-64.so.2', 'libm.so.6']:
             self.assertTrue(native.BASE.fullmatch(name))
@@ -93,10 +98,11 @@ class NativeClosureTests(unittest.TestCase):
             def inspect(path):
                 return {'needed': {'python': ['libfirst.so'], 'libfirst.so': ['libsecond.so'], 'libsecond.so': ['libc.so.6']}[path.name], 'paths': [], 'glibc': ['2.34']}
             cache = f'libfirst.so (libc6) => {source}/libfirst.so\nlibsecond.so (libc6) => {source}/libsecond.so'
-            with patch.object(native, 'elf_info', side_effect=inspect), patch.object(native, 'run', return_value=cache), patch.object(native, 'package_provenance', return_value={'package': 'fixture'}):
+            with patch.object(native, 'elf_info', side_effect=inspect), patch.object(native, 'run', return_value=cache), patch.object(native, 'package_provenance', return_value={'package': 'fixture'}), patch.object(native, 'linux_os_release', return_value='ID=ubuntu\nVERSION_ID=24.04\n'):
                 manifest = native.bundle_linux_libraries(root)
             self.assertEqual(set(manifest['libraries']), {'libfirst.so', 'libsecond.so'})
             self.assertEqual(manifest['minimum_glibc'], '2.34')
+            self.assertEqual(manifest['build_os_release'], 'ID=ubuntu\nVERSION_ID=24.04\n')
             self.assertEqual(manifest['base_libraries'], ['libc.so.6'])
             self.assertFalse((root / 'native-libs' / 'libfirst.so').is_symlink())
             self.assertEqual(native.verify_linux_libraries(root), manifest)

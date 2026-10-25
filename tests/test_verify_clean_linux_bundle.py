@@ -1,19 +1,35 @@
 """No Docker service is needed for deterministic clean-container gate tests."""
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from scripts import verify_clean_linux_bundle as clean
 
 
+class LinuxHostBoundaryTests(unittest.TestCase):
+    def test_absent_linux_identity_api_does_not_default_to_root(self):
+        with patch.object(clean, 'os', SimpleNamespace()):
+            with self.assertRaises(AttributeError):
+                clean.linux_identity()
+
+
 class CleanLinuxTests(unittest.TestCase):
+    def setUp(self):
+        # Exercise Linux command construction on every native CI OS without
+        # reading Windows/macOS identity APIs or pretending production is Linux.
+        identity = patch.object(clean, 'linux_identity', return_value=(1001, 1002))
+        identity.start()
+        self.addCleanup(identity.stop)
+
     def test_container_is_offline_readonly_and_uses_bundled_python(self):
-        command = clean.container_command(Path('/tmp/bundle with spaces'), Path('/tmp/results'), 'sha256:' + 'a'*64,
+        command = clean.container_command(PurePosixPath('/tmp/bundle with spaces'), PurePosixPath('/tmp/results'), 'sha256:' + 'a'*64,
                                           'runtime/bin/python3.12', ['scripts/check_runtime.py'], 'runtime')
         self.assertEqual(command[command.index('--network') + 1], 'none')
         self.assertIn('--read-only', command)
+        self.assertEqual(command[command.index('--user') + 1], '1001:1002')
         self.assertIn('type=bind,src=/tmp/bundle with spaces,dst=/bundle,readonly', command)
         self.assertIn('PATH=/usr/bin:/bin', command)
         self.assertIn('LD_LIBRARY_PATH=/bundle/native-libs', command)

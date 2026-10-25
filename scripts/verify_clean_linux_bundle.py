@@ -41,14 +41,20 @@ def runtime_relative(value: str) -> str:
     return value
 
 
+def linux_identity() -> tuple[int, int]:
+    """Real Linux host identity for cookie and evidence ownership, never guessed."""
+    return os.getuid(), os.getgid()
+
+
 def docker_base(bundle: Path, evidence: Path, image: str) -> list[str]:
     # --mount has comma-delimited options; reject ambiguous host paths.
     for path in (bundle, evidence):
         if ',' in str(path) or '\n' in str(path):
             raise ValueError('Docker mount paths cannot contain commas/newlines')
+    uid, gid = linux_identity()
     return ['docker', 'run', '--rm', '--network', 'none', '--read-only',
             '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
-            '--user', f'{os.getuid()}:{os.getgid()}', '--shm-size', '256m',
+            '--user', f'{uid}:{gid}', '--shm-size', '256m',
             '--tmpfs', '/tmp:rw,nosuid,nodev,size=512m',
             '--mount', f'type=bind,src={bundle},dst=/bundle,readonly',
             '--mount', f'type=bind,src={evidence},dst=/results',

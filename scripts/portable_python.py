@@ -136,7 +136,7 @@ def prepare_runtime(destination: Path, target_platform: str, target_arch: str, c
 
 
 def _shell_launcher(relative_python: str, root_expression: str, linux: bool = False) -> str:
-    libraries = 'export LD_LIBRARY_PATH="$ROOT/native-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\n' if linux else ''
+    libraries = 'export LD_LIBRARY_PATH="$ROOT/native-libs"\n' if linux else ''
     return f'''#!/bin/sh
 set -eu
 ROOT={root_expression}

@@ -1,11 +1,20 @@
 import json
 import os
+import platform
 from pathlib import Path
 import subprocess
 import sys
 
 import pytest
 import scripts.standalone_runtime_probe as probe
+
+
+def _host_os_image():
+    if sys.platform == 'win32':
+        return str(Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32/kernel32.dll')
+    if sys.platform == 'darwin':
+        return '/usr/lib/libSystem.B.dylib'
+    return '/usr/lib/libc.so.6'
 
 
 def stage_probe(root):
@@ -73,9 +82,9 @@ def test_hook_inherited_by_child_and_detects_host_python(tmp_path):
 def test_required_workload_not_seen(tmp_path):
     stage_probe(tmp_path)
     audit_environment(tmp_path, tmp_path)
-    report = {'pid': 1, 'system': 'Darwin', 'executable': str(tmp_path / 'runtime/bin/python'),
-              'prefix': str(tmp_path / 'runtime'), 'images': ['/usr/lib/libSystem.B.dylib'],
-              'snapshots': 1, 'probe_errors': [], 'windows_root': '', 'modules': {}}
+    report = {'pid': 1, 'system': platform.system(), 'executable': str(tmp_path / 'runtime/bin/python'),
+              'prefix': str(tmp_path / 'runtime'), 'images': [_host_os_image()],
+              'snapshots': 1, 'probe_errors': [], 'windows_root': os.environ.get('SystemRoot', r'C:\Windows'), 'modules': {}}
     (tmp_path / 'process-1.json').write_text(json.dumps(report))
     assert summarize_reports(tmp_path, tmp_path)['passed']
     with pytest.raises(RuntimeError, match='Required workload was not observed: paddle'):
@@ -93,9 +102,9 @@ def test_abrupt_worker_exit_still_records_loaded_workload(tmp_path):
 
 
 def _external_report(bundle, evidence, extra_modules=None):
-    report = {'pid': 1, 'system': 'Darwin', 'executable': str(bundle / 'runtime/bin/python'),
-              'prefix': str(bundle / 'runtime'), 'images': ['/usr/lib/libSystem.B.dylib'],
-              'snapshots': 1, 'probe_errors': [], 'windows_root': '', 'modules': {
+    report = {'pid': 1, 'system': platform.system(), 'executable': str(bundle / 'runtime/bin/python'),
+              'prefix': str(bundle / 'runtime'), 'images': [_host_os_image()],
+              'snapshots': 1, 'probe_errors': [], 'windows_root': os.environ.get('SystemRoot', r'C:\Windows'), 'modules': {
                   'sitecustomize': str(evidence / 'hook/sitecustomize.py'),
                   'standalone_runtime_probe': str(evidence / 'hook/standalone_runtime_probe.py'),
                   **(extra_modules or {})}}
@@ -255,3 +264,72 @@ def test_macos_native_discovery_in_architecture_directory(tmp_path, monkeypatch)
     monkeypatch.setattr(probe, 'macho_load_commands', lambda _: (['/usr/lib/libSystem.B.dylib'], []))
     result = probe.audit_macos_executables(tmp_path, tmp_path / 'reports')
     assert len(result['executables']) == 2
+
+
+@pytest.mark.parametrize('path,system,expected', [
+    (r'\\?\C:\VSE\runtime\..\runtime\Python312.dll', 'Windows', r'c:\vse\runtime\python312.dll'),
+    (r'\\?\UNC\server\Share\VSE\python.exe', 'Windows', r'\\server\share\vse\python.exe'),
+    ('/usr/lib/../lib/libSystem.B.dylib', 'Darwin', '/usr/lib/libSystem.B.dylib'),
+    ('/opt/homebrew/lib/libomp.dylib', 'Darwin', '/opt/homebrew/lib/libomp.dylib'),
+])
+def test_target_path_normalization_never_uses_host_filesystem(path, system, expected, monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Target lexical normalization must not use host Path')
+    monkeypatch.setattr(probe, 'Path', forbidden)
+    assert probe._normal(path, system) == expected
+    if system != platform.system():
+        assert probe._identity(path, system) == expected
+
+
+def test_windows_unc_prefix_identity_is_not_a_neighbor_prefix(monkeypatch):
+    # Pure UNC boundary fixture: never contact a synthetic SMB server on Windows.
+    monkeypatch.setattr(probe, '_identity', probe._normal)
+    assert probe._inside(r'\\?\UNC\server\Share\VSE\python.exe', r'\\server\share\vse', 'Windows')
+    assert not probe._inside(r'\\?\UNC\server\Share\VSE-other\python.exe', r'\\server\share\vse', 'Windows')
+
+
+def test_native_canonical_root_identity(tmp_path):
+    root = tmp_path / 'bundle with spaces'
+    root.mkdir()
+    runtime = root / 'runtime'
+    runtime.mkdir()
+    executable = runtime / 'python.exe'
+    executable.touch()
+    assert probe._inside(str(executable), str(root), platform.system())
+    assert not probe._inside(str(tmp_path / 'outside/python.exe'), str(root), platform.system())
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Native Windows path API required')
+def test_windows_native_root_case_and_exact_hook_aliases(tmp_path):
+    bundle, evidence = tmp_path / 'Bundle With Spaces', tmp_path / 'External Evidence'
+    stage_probe(bundle)
+    audit_environment(bundle, evidence)
+    _external_report(bundle, evidence)
+    report_path = evidence / 'process-1.json'
+    report = json.loads(report_path.read_text())
+    report['executable'] = report['executable'].upper()
+    report['prefix'] = report['prefix'].upper()
+    report['modules'] = {name: path.upper() for name, path in report['modules'].items()}
+    report_path.write_text(json.dumps(report))
+    assert summarize_reports(bundle, evidence)['passed']
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Native Windows 8.3 path API required')
+def test_windows_native_short_path_identity(tmp_path):
+    import ctypes
+    from ctypes import wintypes
+    root = tmp_path / 'Bundle With A Long Name'
+    root.mkdir()
+    executable = root / 'Bundled Python Executable.exe'
+    executable.touch()
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    short_path = kernel.GetShortPathNameW
+    short_path.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+    short_path.restype = wintypes.DWORD
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = short_path(str(executable), buffer, len(buffer))
+    assert length and length < len(buffer), ctypes.get_last_error()
+    if buffer.value.lower() == str(executable).lower():
+        pytest.skip('This Windows volume has 8.3 aliases disabled')
+    assert probe._inside(buffer.value, str(root), 'Windows')
+    assert probe._identity(buffer.value, 'Windows') == probe._identity(str(executable), 'Windows')

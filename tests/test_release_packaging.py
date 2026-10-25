@@ -146,7 +146,7 @@ class PackageTests(unittest.TestCase):
 
     def test_packaged_preferences_use_writable_user_location(self):
         with tempfile.TemporaryDirectory() as temporary:
-            with patch.dict(os.environ, {'XDG_CONFIG_HOME': temporary, 'XDG_CACHE_HOME': temporary}, clear=True), patch('scripts.bundle_bootstrap.sys.platform', 'linux'):
+            with patch.dict(os.environ, {'XDG_CONFIG_HOME': temporary, 'XDG_CACHE_HOME': temporary}, clear=True), patch('scripts.bundle_bootstrap.sys.platform', 'linux'), patch('scripts.bundle_bootstrap.Path.home', return_value=Path(temporary) / 'fixture-home'):
                 configure_user_paths()
                 config = Path(os.environ['VSE_CONFIG_FILE'])
                 self.assertEqual(config, Path(temporary) / 'video-subtitle-extractor/config.json')
@@ -180,10 +180,14 @@ class PackageTests(unittest.TestCase):
             with patch('scripts.bundle_bootstrap.__file__', str(root / 'bootstrap.py')), patch('scripts.bundle_bootstrap.host_platform', return_value=('linux', 'x64')), patch('scripts.bundle_bootstrap.sys.executable', str(python)), patch('scripts.bundle_bootstrap.os.chdir'), patch.dict(os.environ, {'VSE_CONFIG_FILE': str(root.parent / 'user-config.json'), 'VSE_WORK_DIR': str(root.parent / 'user-work')}), patch('scripts.bundle_bootstrap.subprocess.run') as run, patch('scripts.bundle_bootstrap.subprocess.call', return_value=0) as launch:
                 self.assertEqual(bootstrap_main([]), 0)
                 run.assert_not_called()
-                launch.assert_called_once_with([str(python), 'gui.py'])
+                launch.assert_called_once()
+                command = launch.call_args.args[0]
+                self.assertTrue(Path(command[0]).samefile(python))
+                self.assertEqual(command[1:], ['gui.py'])
                 self.assertEqual(bootstrap_main(['--verify']), 0)
                 commands = [call.args[0] for call in run.call_args_list]
                 self.assertTrue(commands)
+                self.assertTrue(all(Path(command[0]).samefile(python) for command in commands))
                 self.assertFalse(any('pip' in command or 'venv' in command or 'install' in command for command in commands))
 
     def test_archive_rejects_escape_and_symlink(self):

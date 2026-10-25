@@ -139,3 +139,23 @@ def test_qt_development_and_orphan_pdf_plugins_are_version_guarded():
         assert m.reason_for(rel, {'pyside6-essentials': '6.12.0'})
         assert m.reason_for(rel, {'pyside6-essentials': '6.13.0'}) is None
     assert m.reason_for('PySide6/Qt/plugins/imageformats/libqjpeg.so', {'pyside6-essentials': '6.12.0'}) is None
+
+
+def test_wayland_server_only_pruning_keeps_desktop_clients():
+    reviewed = {'pyside6-essentials': '6.12.0'}
+    for path in (
+        'PySide6/Qt/lib/libQt6WaylandCompositor.so.6',
+        'PySide6/Qt/lib/libQt6WaylandEglCompositorHwIntegration.so.6',
+        'PySide6/Qt/plugins/wayland-graphics-integration-server/libqt-wayland-compositor-egl.so',
+    ):
+        assert m.reason_for(path, reviewed)
+        assert m.reason_for(path, {'pyside6-essentials': '6.13.0'}) is None
+    for path in (
+        'PySide6/Qt/lib/libQt6WaylandClient.so.6',
+        'PySide6/Qt/lib/libQt6WaylandEglClientHwIntegration.so.6',
+        'PySide6/Qt/plugins/wayland-graphics-integration-client/libqt-plugin.so',
+        'PySide6/Qt/plugins/platforms/libqwayland-egl.so',
+        'PySide6/Qt/plugins/platforms/libqxcb.so',
+        'PySide6/Qt/plugins/wayland-graphics-integration-server/LICENSE',
+    ):
+        assert m.reason_for(path, reviewed) is None

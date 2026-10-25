@@ -95,6 +95,11 @@ def package_provenance(source: Path, destination: Path) -> dict:
             'license_files': [str(p.relative_to(destination)) for p in sorted(license_dir.iterdir())]}
 
 
+def linux_os_release() -> str:
+    """Read real build-host provenance; absence is a release-blocking error."""
+    return Path('/etc/os-release').read_text()
+
+
 def bundle_linux_libraries(stage_root: Path, runtime_python: Path | None = None) -> dict:
     root = Path(stage_root).resolve(strict=True)
     dest = root / 'native-libs'
@@ -168,7 +173,7 @@ def bundle_linux_libraries(stage_root: Path, runtime_python: Path | None = None)
                 queue.append(target)
         floor = max(versions, key=lambda x: tuple(map(int, x.split('.')))) if versions else None
         manifest = {'schema_version': 1, 'base_libraries': sorted(base), 'minimum_glibc': floor, 'glibc_non_numeric_requirements': sorted(abi_requirements),
-                    'build_os_release': Path('/etc/os-release').read_text(),
+                    'build_os_release': linux_os_release(),
                     'launch_environment': {'LD_LIBRARY_PATH': '$BUNDLE/native-libs'},
                     'limitations': ['Requires Linux with recorded glibc ABI or newer.', 'Native GUI requires an OS X11 display server. GPU/GL drivers are OS facilities.', 'DT_NEEDED closure does not prove arbitrary dlopen paths; clean-container GUI and OCR E2E are required.'],
                     'libraries': records, 'elf_files_scanned': len(scanned)}

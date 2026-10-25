@@ -20,14 +20,33 @@ import threading
 
 
 def _normal(path: str, system: str) -> str:
+    """Pure target-OS lexical normalization; never apply host Path semantics."""
     if system == 'Windows':
-        return ntpath.normcase(ntpath.normpath(path.removeprefix('\\\\?\\')))
+        if path[:8].lower() == '\\\\?\\unc\\':
+            path = '\\\\' + path[8:]
+        elif path.startswith('\\\\?\\'):
+            path = path[4:]
+        return ntpath.normcase(ntpath.normpath(path))
     return posixpath.normpath(path)
+
+
+def _identity(path: str, system: str) -> str:
+    """Resolve aliases only on the matching native OS, then compare lexically.
+
+    Windows Path.resolve uses the native final-path API, handling drive case,
+    junctions and existing 8.3 short names. POSIX resolve handles /var aliases.
+    A target-OS path on another host must not acquire that host's cwd/drive.
+    """
+    native = {'win32': 'Windows', 'darwin': 'Darwin', 'linux': 'Linux'}.get(sys.platform)
+    mod = ntpath if system == 'Windows' else posixpath
+    if system == native and mod.isabs(path):
+        path = str(Path(path).resolve())
+    return _normal(path, system)
 
 
 def _inside(path: str, root: str, system: str) -> bool:
     mod = ntpath if system == 'Windows' else posixpath
-    path, root = _normal(path, system), _normal(root, system)
+    path, root = _identity(path, system), _identity(root, system)
     try:
         return mod.commonpath([path, root]) == root
     except ValueError:
@@ -237,7 +256,7 @@ def summarize_reports(bundle_root: Path, report_dir: Path, required_modules: tup
                 errors.append(violation)
         for name, path in report['modules'].items():
             seen_modules.add(name)
-            trusted_hook = name in valid_hooks and _normal(path, system) == _normal(valid_hooks[name], system)
+            trusted_hook = name in valid_hooks and _identity(path, system) == _identity(valid_hooks[name], system)
             if not _inside(path, root, system) and not trusted_hook:
                 errors.append(f'External Python module {name}: {path}')
     if not reports:
@@ -410,6 +429,14 @@ def audit_macos_executables(bundle_root: Path, report_dir: Path, executables: li
             rpaths = tuple(dict.fromkeys([str(expand(path)) for path in declared_rpaths] + list(inherited_rpaths)))
             mapped = {}
             for dependency in dependencies:
+                # Mach-O load names use POSIX syntax even in cross-OS fixture
+                # inspection. Shared-cache OS dylibs may have no disk file.
+                if posixpath.isabs(dependency) and any(_inside(dependency, base, 'Darwin') for base in ('/usr/lib', '/System/Library')):
+                    mapped[dependency] = 'macOS base OS'
+                    continue
+                if posixpath.isabs(dependency) and os.name == 'nt':
+                    errors.append(f'{binary.relative_to(root)} requires external/missing dependency: {dependency}')
+                    continue
                 if dependency.startswith('@rpath/'):
                     suffix = dependency.removeprefix('@rpath/')
                     candidates = [Path(path) / suffix for path in rpaths]

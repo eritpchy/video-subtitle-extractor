@@ -81,9 +81,13 @@ def reason_for(rel, versions, include_openvino=False):
     if len(parts) > 1 and parts[:2] in (('PySide6', 'include'), ('PySide6', 'typesystems')):
         return 'PySide developer metadata' if versions.get('pyside6-essentials') == '6.12.0' else None
     qt_parts = parts[2:] if parts[:2] == ('PySide6', 'Qt') else parts[1:] if parts[0] == 'PySide6' else ()
+    if qt_parts in (('lib', 'libQt6WaylandCompositor.so.6'), ('lib', 'libQt6WaylandEglCompositorHwIntegration.so.6')):
+        return 'unused Wayland compositor/server libraries; desktop client support retained' if versions.get('pyside6-essentials') == '6.12.0' else None
     if qt_parts and qt_parts[0] == 'qml':
         return 'unused QML assets; VSE uses Qt Widgets, not Quick/QML' if versions.get('pyside6-essentials') == '6.12.0' else None
     if len(qt_parts) > 1 and qt_parts[0] == 'plugins':
+        if qt_parts[1] == 'wayland-graphics-integration-server':
+            return 'unused Wayland server plugins; desktop client plugins retained' if versions.get('pyside6-essentials') == '6.12.0' else None
         if qt_parts[1] in ('designer', 'qmltooling', 'sqldrivers', 'egldeviceintegrations'):
             return 'unused Qt Designer/QML tooling/SQL/embedded-EGLFS plugins' if versions.get('pyside6-essentials') == '6.12.0' else None
         if qt_parts[1] == 'platforms' and parts[-1] in ('libqeglfs.so', 'libqeglfs.dylib', 'qeglfs.dll'):
