@@ -85,6 +85,9 @@ class OcrRecogniser:
             batch_number = config.recBatchNumber.value
         if selected_backend() == 'native':
             return NativeOcr(model_config, batch_number, stop_event=self.stop_event)
+        if selected_backend() == 'directml':
+            from backend.tools.directml_ocr import DirectMlOcr
+            return DirectMlOcr(model_config, batch_number, stop_event=self.stop_event)
         from paddleocr import PaddleOCR
         model_config.ensure_models()
         kwargs = model_config.ocr_kwargs()

@@ -35,6 +35,8 @@ def main() -> int:
         os.environ['VSE_OCR_BACKEND'] = manifest.get('ocr_backend', 'paddle')
         if os.environ['VSE_OCR_BACKEND'] == 'native':
             os.environ['VSE_NATIVE_OCR_ROOT'] = str(ROOT / 'native-ocr')
+        elif os.environ['VSE_OCR_BACKEND'] == 'directml':
+            os.environ['VSE_DIRECTML_MODEL_ROOT'] = str(ROOT / 'directml-models')
     from backend.tools.native_ocr import selected_backend
     backend = selected_backend()
 
@@ -83,16 +85,25 @@ def main() -> int:
         from backend.tools.ocr import OcrRecogniser
         frame = Image.new('RGB', (640, 180), 'black')
         ImageDraw.Draw(frame).text((40, 50), 'VSE 字幕', font=ImageFont.truetype(str(font_path), 48), fill='white')
-        recognizer = OcrRecogniser('ch', 'fast', 1)
+        from backend.tools.hardware_accelerator import HardwareAccelerator
+        hardware = HardwareAccelerator()
+        hardware.set_enabled(False)  # Explicit CPU smoke on GPU-less Server CI, never a fallback.
+        recognizer = OcrRecogniser('ch', 'fast', 1, hardware)
         try:
             boxes, records = recognizer.predict(np.ascontiguousarray(np.asarray(frame)[:, :, ::-1]))
             if not boxes or 'VSE' not in ''.join(text for text, score in records).replace(' ', ''):
-                raise RuntimeError('Native CPU OCR smoke failed')
+                raise RuntimeError(f'{backend} explicit CPU OCR smoke failed')
         finally:
             recognizer.close()
-        if any(name.split('.')[0] in {'paddle', 'paddleocr', 'paddlex', 'onnxruntime'} for name in sys.modules):
-            raise RuntimeError('Native CPU profile imported a forbidden Python inference framework')
-        inference = {"native_cpu": True, "recognized": [text for text, score in records]}
+        forbidden = {'paddle', 'paddleocr', 'paddlex', 'paddle2onnx'}
+        if backend == 'native':
+            forbidden.add('onnxruntime')
+        if any(name.split('.')[0] in forbidden for name in sys.modules):
+            raise RuntimeError(f'{backend} profile imported a forbidden Python inference framework')
+        inference = {f'{backend}_cpu': True, 'cpu_explicit': True, 'gpu_hardware_verified': False,
+                     'recognized': [text for text, score in records]}
+        if backend == 'directml':
+            inference['execution_evidence'] = recognizer.recogniser.execution_evidence
     app.processEvents()
     print(json.dumps({"result": "passed", "qt_font_rendering": True,
                       "pillow_freetype": True, "ocr_backend": backend, **inference,

@@ -1,0 +1,2 @@
+# Preserve upstream BOM/CRLF byte-for-byte: these notices are SHA256-pinned.
+*.txt -text -diff

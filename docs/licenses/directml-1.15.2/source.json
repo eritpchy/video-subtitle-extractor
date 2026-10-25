@@ -1,0 +1,19 @@
+{
+  "component": "Microsoft.AI.DirectML",
+  "version": "1.15.2",
+  "scope": "Notices for the existing onnxruntime-directml 1.20.1 runtime; no new SDK or DLL is substituted.",
+  "source_url": "https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/1.15.2/microsoft.ai.directml.1.15.2.nupkg",
+  "license_url": "https://www.nuget.org/packages/Microsoft.AI.DirectML/1.15.2/License",
+  "files": {
+    "LICENSE.txt": "a05138e3a085ff60a44881eedfa58dccb03ecc1d7b1f6ae888418e8c2fec4b8d",
+    "ThirdPartyNotices.txt": "2c95795c13ff48a58b6ed916f37901c23d964b5d9d601af422f17ad2172e7950"
+  },
+  "existing_runtime": {
+    "distribution": "onnxruntime-directml",
+    "version": "1.20.1",
+    "wheel": "onnxruntime_directml-1.20.1-cp312-cp312-win_amd64.whl",
+    "wheel_sha256": "4b9a9f8349d68eef947fc692b3572e7a6490cb95effb151ace1a6ffc15884940",
+    "directml_dll_version": "1.15.2",
+    "directml_dll_sha256": "7e64aab30990e4b772751719a42290304d7502c99e75ae8164529d75b35c42f1"
+  }
+}

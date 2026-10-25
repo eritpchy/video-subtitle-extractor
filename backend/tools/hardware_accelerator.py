@@ -1,4 +1,4 @@
-"""Report the device actually used by the Paddle inference engine."""
+"""Report the explicitly selected inference backend and enabled device."""
 import logging
 import os
 
@@ -19,10 +19,16 @@ class HardwareAccelerator:
         self.__cuda = False
         self.__onnx_providers = []
         self.__enabled = True
+        self.__backend = 'paddle'
 
     def initialize(self):
         from backend.tools.native_ocr import selected_backend
-        if selected_backend() == 'native':
+        self.__backend = selected_backend()
+        self.__cuda = False
+        if self.__backend == 'directml':
+            self.check_onnx()
+            return
+        if self.__backend == 'native':
             self.__cuda = False
             return
         self.check_paddle()
@@ -45,15 +51,24 @@ class HardwareAccelerator:
             self.__onnx_providers = []
 
     def has_accelerator(self):
-        return self.has_cuda()
+        return self.has_cuda() or self.has_directml()
 
     @property
     def accelerator_name(self):
+        if self.__backend == 'directml' and self.__enabled:
+            return 'DirectML' if self.has_directml() else 'DirectML (unavailable; CPU fallback disabled)'
         return 'GPU (CUDA)' if self.has_cuda() else 'CPU'
 
     @property
     def onnx_providers(self):
         return list(self.__onnx_providers) if self.__enabled else []
+
+    @property
+    def is_enabled(self):
+        return self.__enabled
+
+    def has_directml(self):
+        return self.__backend == 'directml' and self.__enabled and 'DmlExecutionProvider' in self.__onnx_providers
 
     def has_cuda(self):
         return self.__enabled and self.__cuda

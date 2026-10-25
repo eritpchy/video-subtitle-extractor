@@ -47,7 +47,7 @@ VALIDATED_LEGACY_MODELS = frozenset({
 
 def selected_backend():
     backend = os.environ.get('VSE_OCR_BACKEND', 'paddle').strip().lower()
-    if backend not in ('paddle', 'native'):
+    if backend not in ('paddle', 'native', 'directml'):
         raise ValueError(f'Unsupported VSE_OCR_BACKEND: {backend}')
     if backend == 'native' and os.environ.get('VSE_NATIVE_OCR_PROVIDER', 'cpu').lower() != 'cpu':
         raise ValueError('Native OCR currently supports CPU only; requested GPU provider refused')
