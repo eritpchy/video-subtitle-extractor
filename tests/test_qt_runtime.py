@@ -12,6 +12,22 @@ ROOT = Path(__file__).resolve().parents[1]
 NAMES = ("QT_QPA_PLATFORM_PLUGIN_PATH", "QT_QPA_FONTDIR")
 
 
+@pytest.mark.parametrize("system,backend", [
+    ("darwin", "cocoa"), ("linux", "xcb"), ("linux", "offscreen"),
+    ("win32", "windows"), ("win32", "offscreen"),
+])
+def test_supported_native_window_backends(system, backend):
+    from ui.qt_runtime import require_native_window_backend
+    require_native_window_backend(backend, system=system)
+
+
+@pytest.mark.parametrize("backend", ["offscreen", "minimal", "xcb"])
+def test_macos_rejects_non_nsview_backends_before_frameless_window(backend):
+    from ui.qt_runtime import require_native_window_backend
+    with pytest.raises(RuntimeError, match="native Cocoa backend"):
+        require_native_window_backend(backend, system="darwin")
+
+
 @pytest.mark.parametrize("preimport", [False, True])
 def test_opencv_qt_paths_are_removed_before_pyside_application(preimport):
     env = {key: value for key, value in os.environ.items() if key not in NAMES}

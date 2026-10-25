@@ -2,6 +2,22 @@
 
 import os
 from pathlib import Path
+import sys
+
+
+def require_native_window_backend(backend, *, system=None):
+    """Reject a macOS plugin whose window ID is not an Objective-C NSView.
+
+    qframelesswindow's macOS implementation unconditionally dereferences this
+    native handle. Offscreen/minimal plugins can hang or crash inside PyObjC;
+    fail before constructing any frameless window instead.
+    """
+    if (system or sys.platform) == "darwin" and backend != "cocoa":
+        raise RuntimeError(
+            "The macOS GUI requires Qt's native Cocoa backend. Unset "
+            "QT_QPA_PLATFORM or set QT_QPA_PLATFORM=cocoa; offscreen/minimal "
+            "backends do not provide the NSView required by frameless windows."
+        )
 
 
 def prepare_qt_runtime():

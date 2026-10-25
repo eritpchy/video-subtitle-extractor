@@ -10,7 +10,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# macOS frameless widgets require a real Cocoa NSView, even in GUI tests.
+os.environ.setdefault("QT_QPA_PLATFORM", "cocoa" if sys.platform == "darwin" else "offscreen")
 
 from PySide6 import QtCore, QtTest, QtWidgets
 from qfluentwidgets import ConfigItem, Theme, qconfig

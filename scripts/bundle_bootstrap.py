@@ -67,7 +67,10 @@ def main(argv: list[str] | None = None) -> int:
         subprocess.run([str(python), "-m", "pip", "check"], check=True)
         subprocess.run([str(python), "scripts/install_videosubfinder.py", "--verify-only"], check=True)
         subprocess.run([str(python), "-m", "backend.cli", "--help"], check=True)
-        env = dict(os.environ, QT_QPA_PLATFORM="offscreen", PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK="True", VSE_OFFLINE="1")
+        # The macOS frameless window needs a real Cocoa NSView. Offscreen
+        # creates a different native handle and can hang inside Objective-C.
+        qt_platform = "cocoa" if platform.system() == "Darwin" else "offscreen"
+        env = dict(os.environ, QT_QPA_PLATFORM=qt_platform, PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK="True", VSE_OFFLINE="1")
         subprocess.run([str(python), "gui.py", "--smoke-test"], check=True, env=env, timeout=120)
         subprocess.run([str(python), "scripts/e2e_smoke.py", "--output", "test-results/bundle-e2e"], check=True, env=env, timeout=960)
         return 0

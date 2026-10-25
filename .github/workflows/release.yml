@@ -66,6 +66,8 @@ jobs:
             platform: macos
             arch: arm64
     runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: ${{ matrix.os == 'macos-15' && 'cocoa' || 'offscreen' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4

@@ -11,7 +11,7 @@ import sys
 import os
 import configparser
 import multiprocessing
-from ui.qt_runtime import prepare_qt_runtime
+from ui.qt_runtime import prepare_qt_runtime, require_native_window_backend
 
 # OpenCV's Linux wheel otherwise points Qt 6 at incompatible Qt 5 xcb plugins.
 prepare_qt_runtime()
@@ -46,6 +46,11 @@ from ui.timeline_sync_interface import TimelineSyncInterface
 
 class SubtitleExtractorGUI(FluentWindow): 
     def __init__(self):
+        # macOS frameless windows dereference a real NSView. Reject an
+        # unsupported headless plugin before PyObjC can hang on a fake handle.
+        application = QApplication.instance()
+        if application is not None:
+            require_native_window_backend(application.platformName())
         super().__init__()
         # 禁用云母效果
         self.setMicaEffectEnabled(False)

@@ -35,6 +35,8 @@ jobs:
           - os: macos-15
             name: macOS arm64
     runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: ${{ matrix.os == 'macos-15' && 'cocoa' || 'offscreen' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -66,7 +68,7 @@ jobs:
       - name: Unit, GUI, model and real CPU OCR tests
         timeout-minutes: 12
         run: python -m pytest tests -vv --capture=tee-sys -o faulthandler_timeout=120 --durations=20 --junitxml=test-results/native.xml
-      - name: Launch actual GUI offscreen
+      - name: Launch actual GUI with platform-safe Qt backend
         env:
           VSE_SMOKE_SCREENSHOT_DIR: test-results/gui
         run: python gui.py --smoke-test
@@ -88,7 +90,7 @@ jobs:
       - name: Windows or macOS native GUI backend smoke
         if: runner.os != 'Linux'
         env:
-          QT_QPA_PLATFORM: ''
+          QT_QPA_PLATFORM: ${{ runner.os == 'macOS' && 'cocoa' || 'windows' }}
           VSE_SMOKE_SCREENSHOT_DIR: test-results/gui-native
         run: python gui.py --smoke-test
       - name: CLI entrypoint

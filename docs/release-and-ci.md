@@ -4,7 +4,7 @@
 
 - Python 3.12, CPU: Linux x64 (`ubuntu-24.04`), Windows x64 (`windows-2022`), macOS Apple Silicon (`macos-15`).
 - Docker: headless Linux amd64 CPU image. It is built and exercised in CI, not automatically pushed to a registry.
-- Native jobs install dependencies, run `pip check`, verify VideoSubFinder 6.10, download checksum-pinned PP-OCRv6 small/medium models, run unit/real OCR/real VSF tests, launch the actual GUI offscreen in light/dark modes and with each native Qt platform backend (Linux X11 via Xvfb, Windows/macOS default), and run video-to-SRT extraction.
+- Native jobs install dependencies, run `pip check`, verify VideoSubFinder 6.10, download checksum-pinned PP-OCRv6 small/medium models, run unit/real OCR/real VSF tests, launch the actual GUI in light/dark modes using Cocoa on macOS and offscreen on Linux/Windows, then exercise each native Qt platform backend (Linux X11 via Xvfb, Windows, Cocoa), and run video-to-SRT extraction.
 - Package jobs include both verified PP-OCRv6 small and medium tiers, the native VSF binary and its libraries, the application source, and native offline Python wheels. Each archive is extracted, checksum-checked, installed into a fresh virtual environment without a package index, and tested with the GUI, CLI and real extraction.
 
 **A workflow definition is not a test result.** Read the completed run for the exact commit before claiming a platform passed. Offscreen rendering and hosted-runner native GUI checks do not prove display-driver/window-manager behavior on every desktop. CUDA, DirectML, Intel macOS, Windows ARM, Linux ARM and GPU Docker are not certified by this CPU release. The old QPT/CUDA/DirectML workflows were removed: they ran on obsolete Windows runners and could publish or mutate the same prerelease on every branch push.
@@ -45,7 +45,7 @@ sudo apt-get install libgl1 libegl1 libglib2.0-0 libdbus-1-3 libxkbcommon0 \
   libxcb-xkb1 libxcb-glx0 libxkbcommon-x11-0
 ```
 
-These runtime packages cover the [Qt X11/xcb requirements](https://doc.qt.io/qt-6/linux-requirements.html), including the Xlib/XCB bridge and font libraries. CI additionally installs Xvfb and xauth, records `ldd` output and Qt plugin paths, and runs its X11 smoke with `QT_DEBUG_PLUGINS=1`. A loader diagnostic passing without a display is not proof that X11 rendering passed. Offscreen CI uses `QT_QPA_PLATFORM=offscreen`; do not force that variable for a visible desktop app.
+These runtime packages cover the [Qt X11/xcb requirements](https://doc.qt.io/qt-6/linux-requirements.html), including the Xlib/XCB bridge and font libraries. CI additionally installs Xvfb and xauth, records `ldd` output and Qt plugin paths, and runs its X11 smoke with `QT_DEBUG_PLUGINS=1`. A loader diagnostic passing without a display is not proof that X11 rendering passed. Linux/Windows widget tests use `QT_QPA_PLATFORM=offscreen`; do not force that variable for a visible desktop app. **macOS GUI tests and bundle verification require `QT_QPA_PLATFORM=cocoa` and a graphical login session.** The frameless-window implementation calls native Objective-C `NSView` methods; an offscreen Qt handle is not a Cocoa `NSView` and can hang. macOS retains all GUI assertions and native smoke checks rather than skipping them.
 
 ## Publication and immutable tags
 
@@ -72,6 +72,8 @@ QT_QPA_PLATFORM=offscreen VSE_RUN_OCR_INTEGRATION=1 VSE_RUN_VSF_INTEGRATION=1 py
 QT_QPA_PLATFORM=offscreen python gui.py --smoke-test
 python scripts/e2e_smoke.py --output test-results/e2e
 ```
+
+On macOS, replace `QT_QPA_PLATFORM=offscreen` with `QT_QPA_PLATFORM=cocoa` for the pytest and GUI commands above, and run from a graphical login session. The release bootstrap selects Cocoa automatically on macOS.
 
 Set the same environment variables with PowerShell `$env:NAME='value'` on Windows. To create a release archive, use a clean, committed checkout on the target OS/architecture:
 
