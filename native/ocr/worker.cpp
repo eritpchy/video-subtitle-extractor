@@ -30,8 +30,8 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <tlhelp32.h>
 #include <windows.h>
+#include <tlhelp32.h>
 #endif
 #ifdef _WIN32
 #include <fcntl.h>
@@ -65,9 +65,15 @@ struct Tensor {
   std::vector<float> data;
   std::vector<int64_t> shape;
 };
+#ifdef VSE_OCR_PRECISION_DIAGNOSTIC
+#include "precision_diagnostic.hpp"
+#endif
 struct Session {
   OrtSession *s = nullptr;
   std::string input, output;
+#ifdef VSE_OCR_PRECISION_DIAGNOSTIC
+  fs::path diagnostic_model;
+#endif
   Session(OrtEnv *env, const fs::path &path, int threads) {
     OrtSessionOptions *o = nullptr;
     check(api->CreateSessionOptions(&o));
@@ -75,6 +81,10 @@ struct Session {
       check(api->SetIntraOpNumThreads(o, threads));
       check(api->SetInterOpNumThreads(o, 1));
       check(api->SetSessionGraphOptimizationLevel(o, ORT_ENABLE_ALL));
+#ifdef VSE_OCR_PRECISION_DIAGNOSTIC
+      diagnostic_model = path;
+      precision_diagnostic::configure(o);
+#endif
       check(api->CreateSession(env, path.c_str(), o, &s));
       api->ReleaseSessionOptions(o);
     } catch (...) {
@@ -142,6 +152,9 @@ struct Session {
     void *p = nullptr;
     check(api->GetTensorMutableData(out.p, &p));
     y.data.assign((float *)p, (float *)p + n);
+#ifdef VSE_OCR_PRECISION_DIAGNOSTIC
+    precision_diagnostic::trace(diagnostic_model, x, y);
+#endif
     return y;
   }
 };

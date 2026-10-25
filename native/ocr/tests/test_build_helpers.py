@@ -69,3 +69,9 @@ def test_runner_only_cannot_copy_redist():
         acknowledge_vc_redistribution_license=True,vc_runtime_dir=None,vc_license=None)
     with patch.object(build,'native_target'):
         with pytest.raises(ValueError):build.build(args)
+
+
+def test_windows_toolhelp_header_follows_win32_definitions():
+    source=(Path(build.__file__).parent/'worker.cpp').read_text(encoding='utf-8')
+    assert source.index('#include <windows.h>') < source.index('#include <tlhelp32.h>')
+    assert source.index('#define NOMINMAX') < source.index('#include <windows.h>')

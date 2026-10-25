@@ -1,0 +1,17 @@
+# CI-only, separate venv; none of this is copied to the native customer package.
+# Official CPython 3.12 macOS arm64 wheel; URL fragment verifies the reviewed SHA.
+paddlepaddle @ https://files.pythonhosted.org/packages/3b/97/62d061b4700a7020506f4db80c4721100b5b2fa0709f4e999c38dc7e2293/paddlepaddle-3.3.1-cp312-cp312-macosx_11_0_arm64.whl#sha256=d7827d867503b502a881c718e3743d9b91648a62d01f93bcd5ba3d7846de5ab5
+numpy==2.3.5
+protobuf==7.36.2
+httpx==0.28.1
+httpcore==1.0.9
+anyio==4.15.1
+certifi==2026.10.23
+idna==3.20
+h11==0.16.0
+Pillow==10.4.0
+opt_einsum==3.3.0
+networkx==3.7
+typing_extensions==4.16.0
+safetensors==0.8.0
+setuptools==80.10.2

@@ -156,15 +156,15 @@ def test_verify_version_legacy_crash_and_mismatch(monkeypatch):
         vsf.verify_binary("fake")
 
 
-@pytest.mark.parametrize("reported", ["6.10", "6.10.4", "6.10.5", "6.10.6"])
+@pytest.mark.parametrize("reported", ["6.10", "6.10.5", "6.10.6", "6.10.7"])
 def test_patch_release_version_must_match_exactly(monkeypatch, reported):
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw:
                         subprocess.CompletedProcess(a, 0, f"VideoSubFinderCli {reported}\n"))
-    if reported == "6.10.5":
-        assert vsf.verify_binary("fake", "v6.10.5") == reported
+    if reported == vsf.VSF_VERSION:
+        assert vsf.verify_binary("fake", f"v{vsf.VSF_VERSION}") == reported
     else:
-        with pytest.raises(vsf.VideoSubFinderError, match="Expected CLI 6.10.5"):
-            vsf.verify_binary("fake", "6.10.5")
+        with pytest.raises(vsf.VideoSubFinderError, match=f"Expected CLI {vsf.VSF_VERSION}"):
+            vsf.verify_binary("fake", vsf.VSF_VERSION)
 
 
 def test_default_release_pin_is_consistent_across_builds():

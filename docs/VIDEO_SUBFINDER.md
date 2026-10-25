@@ -1,6 +1,6 @@
 # VideoSubFinder CLI integration
 
-VSE 2.3.0 uses the official `eritpchy/videosubfinder-cli` **v6.10.5** release on
+VSE 2.3.0 uses the official `eritpchy/videosubfinder-cli` **v6.10.6** release on
 Linux, Windows and macOS. The CLI's version was aligned with upstream, so older
 fork tags with a higher-looking version must not be selected by sorting tags.
 The old bundled Windows GUI executable is not used as a CLI fallback.
@@ -13,7 +13,7 @@ python scripts/install_videosubfinder.py --verify-only
 ```
 
 The installer selects the native x64/arm64 release and downloads `SHA256SUMS`
-from the same official release. The default v6.10.5 manifest is itself pinned
+from the same official release. The default v6.10.6 manifest is itself pinned
 by SHA-256 in `backend/tools/videosubfinder_release.json`; that locks every
 archive listed in the manifest, rather than trusting a mutable download alone.
 It then checks the archive, rejects unsafe archive paths and links, and validates
@@ -22,12 +22,14 @@ installation. Missing releases, changed manifests and checksum/version
 mismatches fail without selecting a different release or replacing the old
 installation. It does not use the GitHub API or require a GitHub token.
 
-The selected [stable v6.10.5 release](https://github.com/eritpchy/videosubfinder-cli/releases/tag/v6.10.5)
-was published on 2026-10-25 at tag commit
-`c34c24c074310661c8174b176cd194a64defce4b`. Its 17 archive digests were checked
-against the official manifest and GitHub asset digests. This release line is
-separate from the pending AV1/CUDA fixes; selecting it does not claim those fixes
-have shipped. Historical audits of deleted v6.10 assets remain historical.
+The selected [stable v6.10.6 release](https://github.com/eritpchy/videosubfinder-cli/releases/tag/v6.10.6)
+was published on 2026-10-25 at 09:35:45 UTC from tag commit
+`71b309c8ab39c49c226c145dcbbca04c00ec9ce1`. Its 17 archive digests were checked
+against the official manifest and GitHub asset digests. This release includes
+the AV1 support and explicit decoder-failure diagnostics. Upstream portable CPU
+and build checks passed; the optional CUDA package's CPU-path/build checks do
+not certify actual GPU execution. Historical v6.10/v6.10.5 evidence stays tied
+to those versions, not relabeled as v6.10.6 verification.
 
 Installed files remain together in `backend/subfinder/<platform>/<arch>/`.
 Linux and Windows CPU releases are static; macOS includes its `lib` directory.

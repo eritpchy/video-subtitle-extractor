@@ -9,7 +9,7 @@ CI and native package verification for the exact release commit.
 - Merge upstream changes through `85746f7`.
 - Genuine PP-OCRv6 small and medium models, with pinned archive/file checksums,
   verified offline bundles and explicit legacy recognizers for other languages.
-- VideoSubFinder CLI v6.10.5 on Linux, Windows and macOS, using verified portable
+- VideoSubFinder CLI v6.10.6 on Linux, Windows and macOS, using verified portable
   downloads and preserved VSE settings.
 - Persistent light, dark and system appearance, including live updates, task
   status colors, logs and timeline controls.

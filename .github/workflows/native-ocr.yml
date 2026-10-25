@@ -52,13 +52,31 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Restore converted models by reviewed inputs (never by commit)
+        id: model-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build/native-models
+          # No restore-keys: stale conversion inputs must never skip conversion.
+          key: native-ocr-fp32-v1-${{ runner.os }}-${{ runner.arch }}-py312-${{ hashFiles('native/ocr/model-source-pins.json', 'native/ocr/prepare_models.py', 'native/ocr/requirements-model-build.txt', 'native/ocr/verify_model_cache.py', 'native/ocr/build.py', 'native/ocr/fetch_sources.py', 'native/ocr/fetch_ort.py', 'native/ocr/build_opencv.py') }}
       - name: Install explicitly pinned conversion tools (build side only)
+        if: steps.model-cache.outputs.cache-hit != 'true'
         run: python -m pip install -r native/ocr/requirements-model-build.txt
       - name: Convert all 15 verified official models without auto-install
+        if: steps.model-cache.outputs.cache-hit != 'true'
         env:
           PIP_NO_INDEX: '1'
           PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: 'True'
         run: python native/ocr/prepare_models.py --output build/native-models --cache build/model-cache
+      - name: Independently verify all 15 model/config bytes against committed pins
+        # Unconditional on cache-hit; -S proves this gate needs no Paddle/site packages.
+        run: python -S native/ocr/verify_model_cache.py build/native-models
+      - name: Cache only independently verified converted models
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/native-models
+          key: ${{ steps.model-cache.outputs.cache-primary-key }}
       - uses: actions/upload-artifact@v4
         with:
           name: native-ocr-fp32-models-${{ github.sha }}
@@ -123,7 +141,28 @@ jobs:
           --arch ${{ matrix.arch }} --models build/native-models --output build/native-ocr
           ${{ matrix.platform == 'windows' && ((inputs.acknowledge_vc_redistribution_license || vars.VSE_VC_REDISTRIBUTION_LICENSE_ACK == 'true') && '--acknowledge-vc-redistribution-license' || '--runner-test-only') || '' }}
       - name: Native worker protocol/model/GPU-refusal smoke
+        id: native-smoke
         run: python native/ocr/smoke.py --artifact build/native-ocr --output test-results/native-worker.json
+      - name: Capture macOS precision evidence after a hard parity failure
+        if: failure() && matrix.platform == 'macos' && steps.native-smoke.outcome == 'failure'
+        shell: bash
+        run: |
+          # Reuse the compiled OpenCV and exact SDK. Never rebuild or replace the staged worker.
+          cmake -S native/ocr -B build/native-build/worker-build -DVSE_OCR_BUILD_PRECISION_DIAGNOSTIC=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON > test-results/precision-build.log 2>&1
+          cmake --build build/native-build/worker-build --target native-ocr-precision --config Release --parallel 3 --verbose >> test-results/precision-build.log 2>&1
+          cp build/native-build/worker-build/CMakeCache.txt test-results/precision-CMakeCache.txt
+          cp build/native-build/worker-build/compile_commands.json test-results/precision-compile_commands.json
+          cp build/native-ocr/size-audit.json test-results/precision-stage-size-audit.json
+          xcrun --show-sdk-version > test-results/precision-macos-sdk.txt
+          python -S native/ocr/precision_diagnostic.py capture --artifact build/native-ocr --worker build/native-build/worker-build/native-ocr-precision --output test-results/native-precision
+      - name: Same-Mac independent Paddle reference (isolated build-side venv)
+        if: failure() && matrix.platform == 'macos' && steps.native-smoke.outcome == 'failure' && hashFiles('test-results/native-precision/capture.json') != ''
+        shell: bash
+        run: |
+          python -m venv build/precision-reference-venv
+          build/precision-reference-venv/bin/python -m pip install --only-binary=:all: -r native/ocr/requirements-precision-reference.txt
+          build/precision-reference-venv/bin/python -m pip check
+          build/precision-reference-venv/bin/python native/ocr/precision_diagnostic.py reference --output test-results/native-precision > test-results/precision-reference.log 2>&1
       - name: Resolve GUI/media wheels (no Paddle framework roots)
         run: python -m pip wheel -r requirements-native-inference.txt --wheel-dir build/all-wheels
       - name: Select minimal dependency closure with exact meta substitutions
@@ -134,7 +173,7 @@ jobs:
         run: >-
           python -c "import pathlib,subprocess,sys; subprocess.run([sys.executable,'-m','pip','install','--no-index','--no-deps','--no-compile',*map(str,sorted(pathlib.Path('build/wheelhouse').glob('*.whl')))],check=True)"
       - name: Install and verify fixed VideoSubFinder release
-        run: python scripts/install_videosubfinder.py --version 6.10.5
+        run: python scripts/install_videosubfinder.py --version 6.10.6
       - name: Native adapter and packaging regression tests
         env:
           VSE_RUN_NATIVE_INTEGRATION: '1'

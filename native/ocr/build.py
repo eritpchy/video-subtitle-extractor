@@ -46,6 +46,11 @@ def verify_models(root):
         name = row['name']
         if row['onnx_sha256'] != expected[name]['onnx_sha256'] or row['onnx_bytes'] != expected[name]['onnx_bytes']:
             raise ValueError('Model bytes differ from reviewed deterministic conversion: ' + name)
+        source_name = expected[name]['name']
+        config = ('config/' + source_name.split('_')[1] + '.json'
+                  if source_name.startswith('PP-OCRv6_') else 'config/' + source_name + '.json')
+        if row['config_file'] != config:
+            raise ValueError('Config identity differs from reviewed model binding: ' + name)
         if pins['config_sha256'].get(row['config_file']) != row['config_sha256']:
             raise ValueError('Config differs from reviewed source pins: ' + name)
         if not isinstance(name, str) or len(relative(name).parts) != 1 or not name.endswith('_infer'):

@@ -91,7 +91,7 @@ jobs:
       - name: Diagnose Linux Qt platform dependencies
         if: runner.os == 'Linux'
         run: python scripts/diagnose_qt_linux.py
-      - run: python scripts/install_videosubfinder.py --version 6.10.5
+      - run: python scripts/install_videosubfinder.py --version 6.10.6
       - name: Bundle verified small and medium PP-OCRv6 models
         run: python -m backend.tools.model_download --tiers small medium --output backend/models/V6
       - name: Resolve offline wheels for this native platform

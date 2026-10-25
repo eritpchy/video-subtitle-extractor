@@ -1,4 +1,4 @@
-> 本分支更新：支持真实 PP-OCRv6 small/medium、VideoSubFinder CLI v6.10.5、日间/夜间/跟随系统主题和无交互 CLI。安装、Docker 与测试说明见 [当前使用指南](docs/USAGE.md)。发布与跨平台验证状态以对应提交的 GitHub Actions 结果为准。
+> 本分支更新：支持真实 PP-OCRv6 small/medium、VideoSubFinder CLI v6.10.6、日间/夜间/跟随系统主题和无交互 CLI。安装、Docker 与测试说明见 [当前使用指南](docs/USAGE.md)。发布与跨平台验证状态以对应提交的 GitHub Actions 结果为准。
 
 简体中文 | [English](README_en.md)
 
@@ -135,7 +135,7 @@ CUDA 需要另外匹配的 Paddle GPU 环境，目前不属于 CPU 发布矩阵�
 ```shell
 python -m pip install -r requirements.txt
 python -m pip check
-python scripts/install_videosubfinder.py --version 6.10.5
+python scripts/install_videosubfinder.py --version 6.10.6
 python -m backend.tools.model_download --tiers small medium
 ```
 

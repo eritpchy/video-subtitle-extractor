@@ -139,7 +139,7 @@ def install(*, version=VSF_VERSION, system=None, arch=None, destination=None,
             cuda=False, archive=None, checksums=None, verify_only=False):
     version = version.lstrip("v")
     if not re.fullmatch(r"\d+\.\d+(?:\.\d+)?", version):
-        raise ValueError("Version must be a release number, for example 6.10.5")
+        raise ValueError("Version must be a release number, for example 6.10.6")
     system, arch = platform_target(system, arch)
     destination = Path(destination or default_install_dir(ROOT / "backend", system, arch)).resolve()
     host_system, host_arch = platform_target()

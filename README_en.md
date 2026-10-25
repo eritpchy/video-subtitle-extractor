@@ -1,4 +1,4 @@
-> This fork adds genuine PP-OCRv6 small/medium, VideoSubFinder CLI v6.10.5, light/dark/system themes and a noninteractive CLI. See the [current runtime guide](docs/USAGE.md) for installation, Docker and tests. Release/platform verification is tied to the exact commit's GitHub Actions results.
+> This fork adds genuine PP-OCRv6 small/medium, VideoSubFinder CLI v6.10.6, light/dark/system themes and a noninteractive CLI. See the [current runtime guide](docs/USAGE.md) for installation, Docker and tests. Release/platform verification is tied to the exact commit's GitHub Actions results.
 
 [简体中文](README.md) | English
 
@@ -138,7 +138,7 @@ together.
 ```shell
 python -m pip install -r requirements.txt
 python -m pip check
-python scripts/install_videosubfinder.py --version 6.10.5
+python scripts/install_videosubfinder.py --version 6.10.6
 python -m backend.tools.model_download --tiers small medium
 ```
 
