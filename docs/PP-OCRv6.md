@@ -30,8 +30,15 @@ python -m backend.tools.model_download --tiers small medium
 python -m backend.tools.model_download --tiers small medium --verify-only
 ```
 
-`backend/models/ppocrv6-manifest.json` records the official Baidu BOS URLs and
-SHA256 for each archive **and each inference file**. The downloader validates
+`backend/models/ppocrv6-manifest.json` records immutable revisions of the official
+`PaddlePaddle` Hugging Face repositories, the official Baidu BOS archive URLs,
+and SHA256 for each archive **and each inference file**. The default source is
+Hugging Face. All 12 inference files were independently downloaded and verified
+byte-for-byte against the existing BOS manifest; model architecture and weights
+are unchanged. `--source bos` explicitly selects the archive source, while
+`--archive-dir` uses existing offline archives. A denied or failed download is
+reported without retrying the URL or silently changing origins. Checksum
+failures are terminal, and partial files never become visible models. The downloader validates
 all hashes, extracts only the three expected regular files, and publishes the
 verified directory atomically under a per-model lock. Incomplete/modified
 existing directories fail without destroying their contents.
