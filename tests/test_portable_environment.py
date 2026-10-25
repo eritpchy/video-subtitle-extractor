@@ -94,6 +94,9 @@ def test_real_launcher_isolates_python_before_bootstrap(tmp_path, platform, app,
     assert not Path(fixture['marker']).exists()
     for key in ('PYTHONHOME', 'PYTHONUSERBASE', 'CONDA_PREFIX', 'VIRTUAL_ENV', 'QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH'):
         assert key not in after
+    for key in bootstrap.NATIVE_SEARCH_VARIABLES:
+        if key.startswith('FLAGS_') or key in ('CUDA_PATH', 'CUDA_HOME', 'CUDNN_PATH', 'CUDNN_HOME'):
+            assert key not in after
     assert os.environ == original  # The parent OS/process environment is untouched.
 
 

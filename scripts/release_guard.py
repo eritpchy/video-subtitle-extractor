@@ -7,8 +7,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
+import stat
 import subprocess
 import sys
 import zipfile
@@ -17,9 +18,150 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 try:
-    from .package_release import ROOT, read_version
+    from .package_release import ROOT, read_version, sha256
+    from .release_profiles import PROFILES, CANDIDATE_TARGETS, BLOCKED_PROFILES, archive_name
 except ImportError:
-    from package_release import ROOT, read_version
+    from package_release import ROOT, read_version, sha256
+    from release_profiles import PROFILES, CANDIDATE_TARGETS, BLOCKED_PROFILES, archive_name
+
+
+# The approved current matrix is not a claim that CUDA 10.2 supports the new
+# application. Its historic 2.2.0 download remains separate; never relabel a
+# current CPU package or silently package the old OCR application instead.
+ACCEPTANCE_CHECKS = (
+    'payload', 'launcher_smoke', 'clean_host_path',
+    'contaminated_host_environment', 'cpu_mode_fast',
+    'cpu_mode_accurate', 'cpu_mode_auto',
+)
+
+
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise RuntimeError(f'Duplicate JSON key: {key}')
+        result[key] = value
+    return result
+
+
+def _read_json(data: bytes, label: str) -> dict:
+    try:
+        result = json.loads(data, object_pairs_hook=_unique_json_object)
+    except (UnicodeError, ValueError) as error:
+        raise RuntimeError(f'Invalid JSON: {label}') from error
+    if not isinstance(result, dict):
+        raise RuntimeError(f'Expected JSON object: {label}')
+    return result
+
+
+def _checked_file(path: Path) -> Path:
+    if not path.is_file() or path.is_symlink():
+        raise RuntimeError(f'Missing or unsafe release asset: {path.name}')
+    return path
+
+
+def candidate_asset_names(version: str) -> dict[str, tuple]:
+    if not re.fullmatch(r'\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?', version):
+        raise RuntimeError('Invalid application version')
+    return {
+        archive_name(version, platform, arch, profile): (platform, arch, profile)
+        for platform, arch, profile in CANDIDATE_TARGETS
+    }
+
+
+def assert_complete_release_matrix(matrix: str) -> None:
+    if matrix != 'full':
+        raise RuntimeError('Publication requires the full approved current release matrix; candidates are build-only')
+    if BLOCKED_PROFILES:
+        details = '; '.join(f'{name}: {reason}' for name, reason in BLOCKED_PROFILES.items())
+        raise RuntimeError(f'Full release matrix is blocked: {details}')
+
+
+def validate_acceptance_receipt(path: Path, archive: Path, digest: str, manifest: dict) -> None:
+    _checked_file(path)
+    if path.stat().st_size > 1024 * 1024:
+        raise RuntimeError(f'Oversized acceptance receipt: {path.name}')
+    receipt = _read_json(path.read_bytes(), path.name)
+    expected = {'schema': 1, 'archive': archive.name, 'archive_sha256': digest,
+                **{name: manifest[name] for name in
+                   ('commit', 'version', 'platform', 'arch', 'build_profile')}}
+    for key, value in expected.items():
+        if receipt.get(key) != value or type(receipt.get(key)) is not type(value):
+            raise RuntimeError(f'Acceptance receipt does not match {key}: {archive.name}')
+    checks = receipt.get('checks')
+    if not isinstance(checks, dict) or any(checks.get(name) != 'passed' for name in ACCEPTANCE_CHECKS):
+        raise RuntimeError(f'Final package acceptance is missing or failed: {archive.name}')
+    # Hosted Server CI has no real GPU acceptance. It may validate an explicit
+    # CPU mode, but may not turn a fallback or a packaging pass into GPU proof.
+    if receipt.get('gpu_inference_verified') is not False:
+        raise RuntimeError(f'Unsupported GPU certification in Server CI receipt: {archive.name}')
+    if receipt.get('gpu_validation') != 'not-run-server-ci':
+        raise RuntimeError(f'Missing explicit GPU validation limit: {archive.name}')
+
+
+def validate_assets(directory: Path, sha: str, version: str, *, matrix: str = 'restored-candidates') -> list[str]:
+    """Validate exact final ZIPs and hash-bound acceptance without network I/O.
+
+    Receipts are emitted by the final-package acceptance runner only after its
+    real launcher/isolation/mode checks pass. They are not independent GPU or
+    cryptographic attestations, and are never a substitute for those checks.
+    """
+    if not re.fullmatch(r'[a-f0-9]{40}', sha):
+        raise RuntimeError('Asset validation requires an exact 40-character commit')
+    if matrix == 'full':
+        assert_complete_release_matrix(matrix)
+    elif matrix != 'restored-candidates':
+        raise RuntimeError(f'Unknown release matrix: {matrix}')
+    if not directory.is_dir() or directory.is_symlink():
+        raise RuntimeError('Release asset directory is missing or unsafe')
+    expected = candidate_asset_names(version)
+    # Reject older archives and unexpected split 7z/ZIP files as well as a
+    # missing candidate, instead of accidentally uploading a partial matrix.
+    archives = {path.name: path for path in directory.iterdir()
+                if path.name.lower().endswith('.zip') or '.7z' in path.name.lower()}
+    if set(archives) != set(expected):
+        raise RuntimeError('Release asset matrix mismatch: '
+                           f'missing={sorted(set(expected) - set(archives))}; '
+                           f'unexpected={sorted(set(archives) - set(expected))}')
+    assets = []
+    for filename, target in sorted(expected.items()):
+        platform, arch, profile = target
+        engine, accelerator = PROFILES[profile]['backend'], PROFILES[profile]['accelerator']
+        archive = _checked_file(archives[filename])
+        digest = sha256(archive)
+        checksum = _checked_file(archive.with_suffix('.zip.sha256'))
+        # Check both digest and filename, not just split()[0]. A checksum for
+        # another bundle must not accompany a newly named/replaced artifact.
+        expected_checksum = f'{digest}  {archive.name}'
+        if checksum.read_text(encoding='utf-8').strip() != expected_checksum:
+            raise RuntimeError(f'Archive checksum/name mismatch: {archive.name}')
+        with zipfile.ZipFile(archive) as bundle:
+            names = bundle.namelist()
+            if len(names) != len(set(names)) or (platform == 'windows' and len(names) != len({name.casefold() for name in names})):
+                raise RuntimeError(f'Duplicate ZIP entry: {archive.name}')
+            for entry in bundle.infolist():
+                name = entry.filename
+                relative = PurePosixPath(name)
+                if (relative.is_absolute() or '..' in relative.parts or '\\' in name or ':' in name
+                        or not name.startswith(archive.stem + '/') or str(relative) != name.rstrip('/')
+                        or stat.S_ISLNK(entry.external_attr >> 16) or entry.flag_bits & 1):
+                    raise RuntimeError(f'Unsafe or unexpected ZIP entry: {name}')
+            payload_root = archive.stem + ('/Video Subtitle Extractor.app/Contents/Resources' if platform == 'macos' else '')
+            manifest_path = payload_root + '/bundle-manifest.json'
+            manifests = [name for name in names if name.endswith('/bundle-manifest.json')]
+            if manifests != [manifest_path] or bundle.getinfo(manifest_path).file_size > 16 * 1024 * 1024:
+                raise RuntimeError(f'Missing unique expected bundle manifest: {archive.name}')
+            manifest = _read_json(bundle.read(manifest_path), archive.name)
+        identity = {'commit': sha, 'version': version, 'platform': platform, 'arch': arch,
+                    'ocr_backend': engine, 'accelerator': accelerator, 'build_profile': profile}
+        if any(manifest.get(key) != value for key, value in identity.items()):
+            raise RuntimeError(f'Bundle identity does not match commit/version/profile/filename: {archive.name}')
+        if manifest.get('format') != 2 or manifest.get('python') != '3.12':
+            raise RuntimeError(f'Unsupported self-contained bundle format/runtime: {archive.name}')
+        receipt = archive.with_suffix('.zip.acceptance.json')
+        validate_acceptance_receipt(receipt, archive, digest, manifest)
+        assets.extend(map(str, (archive, checksum, receipt)))
+    return assets
 
 
 def validate_tag(tag: str, version: str) -> None:
@@ -78,38 +220,32 @@ def preflight(tag: str, sha: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--tag", required=True)
+    parser.add_argument("--tag", help="Required only for immutable-target preflight/publication")
     parser.add_argument("--sha", required=True)
     parser.add_argument("--publish", choices=("draft", "prerelease", "release"))
+    parser.add_argument("--validate-assets", action="store_true", help="Offline, build-only final candidate validation; never publishes")
+    parser.add_argument("--matrix", choices=("restored-candidates", "full"), default="restored-candidates")
     parser.add_argument("--assets", type=Path, default=Path("dist"))
     args = parser.parse_args()
-    preflight(args.tag, args.sha)
-    if not args.publish:
+    if args.validate_assets and args.publish:
+        parser.error("--validate-assets is build-only and cannot be combined with --publish")
+    if not args.validate_assets and not args.tag:
+        parser.error("--tag is required for preflight/publication")
+    if args.validate_assets:
+        actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+        assert_target('', args.sha, actual, None, False)
+        assets = validate_assets(args.assets, args.sha, read_version(), matrix=args.matrix)
+        print(f"Validated {len(assets) // 3} exact candidates at {args.sha}; build-only, GPU inference not run")
         return 0
-    archives = sorted(args.assets.glob("*.zip"))
-    expected = {"linux-x64", "windows-x64", "macos-arm64"}
-    if len(archives) != 3 or any(not any(f"-{target}-cpu-python312.zip" in path.name for path in archives) for target in expected):
-        raise RuntimeError("Expected exactly Linux x64, Windows x64 and macOS arm64 CPU bundles")
-    try:
-        from .package_release import sha256
-    except ImportError:
-        from package_release import sha256
-    assets = []
-    for archive in archives:
-        checksum = archive.with_suffix(".zip.sha256")
-        if checksum.read_text(encoding="utf-8").split()[0] != sha256(archive):
-            raise RuntimeError(f"Archive checksum mismatch: {archive.name}")
-        with zipfile.ZipFile(archive) as bundle:
-            manifest_names = [name for name in bundle.namelist() if name.endswith("/bundle-manifest.json")]
-            if len(manifest_names) != 1:
-                raise RuntimeError(f"Missing unique bundle manifest: {archive.name}")
-            manifest = json.loads(bundle.read(manifest_names[0]))
-        if manifest.get("commit") != args.sha or manifest.get("version") != read_version():
-            raise RuntimeError(f"Bundle does not match release commit/version: {archive.name}")
-        target = f"{manifest.get('platform')}-{manifest.get('arch')}"
-        if target not in expected or not archive.name.endswith(f"-{target}-cpu-python312.zip"):
-            raise RuntimeError(f"Bundle platform does not match its filename: {archive.name}")
-        assets.extend([str(archive), str(checksum)])
+    if not args.publish:
+        preflight(args.tag, args.sha)
+        return 0
+    # Publication requires an explicit complete-current-matrix choice. The
+    # approved CUDA 10.2 legacy migration is not a claim of new model support;
+    # any new unresolved current-profile blocker still fails closed.
+    assert_complete_release_matrix(args.matrix)
+    assets = validate_assets(args.assets, args.sha, read_version(), matrix=args.matrix)
+    preflight(args.tag, args.sha)
     # An ordinary non-force push is race-safe and refuses a different existing tag.
     subprocess.run(["git", "push", "origin", f"{args.sha}:refs/tags/{args.tag}"], cwd=ROOT, check=True)
     command = ["gh", "release", "create", args.tag, "--verify-tag", "--title", f"Video Subtitle Extractor {args.tag}", "--generate-notes"]
@@ -126,6 +262,6 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+    except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, subprocess.SubprocessError) as exc:
         print(f"Release blocked: {exc}", file=sys.stderr)
         raise SystemExit(1)

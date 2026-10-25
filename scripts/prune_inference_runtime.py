@@ -121,7 +121,7 @@ def file_record(path, root):
 
 
 def build_plan(root, include_openvino=False, engine="paddle"):
-    if engine not in ("paddle", "native") or (engine == "native" and include_openvino):
+    if engine not in ("paddle", "native", "directml") or (engine != "paddle" and include_openvino):
         raise ValueError("Invalid inference engine / OpenVINO pruning combination")
     versions, records = installed(root)
     if include_openvino and not (
@@ -165,7 +165,7 @@ def child_path(root, relative):
 
 
 def verify(root, manifest):
-    if manifest.get('schema') != 1 or manifest.get('engine') not in ('paddle', 'native'):
+    if manifest.get('schema') != 1 or manifest.get('engine') not in ('paddle', 'native', 'directml'):
         raise ValueError('Unsupported compact-runtime manifest')
     actual = {p.relative_to(root).as_posix(): p for p in safe_files(root)}
     retained = {e['path']: e for e in manifest['retained']}
@@ -189,7 +189,7 @@ def resume_pending(root, manifest):
     Strict --verify still rejects partial deletion; --apply can recover files
     listed as removed that still exactly match their original recorded bytes.
     """
-    if manifest.get('schema') != 1 or manifest.get('engine') not in ('paddle', 'native'):
+    if manifest.get('schema') != 1 or manifest.get('engine') not in ('paddle', 'native', 'directml'):
         raise ValueError('Unsupported compact-runtime manifest')
     actual = {p.relative_to(root).as_posix(): p for p in safe_files(root)}
     retained = {e['path']: e for e in manifest['retained']}
@@ -246,7 +246,7 @@ def main(argv=None):
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--apply', action='store_true')
     modes.add_argument('--verify', action='store_true')
-    parser.add_argument('--engine', choices=('paddle', 'native'), default='paddle')
+    parser.add_argument('--engine', choices=('paddle', 'native', 'directml'), default='paddle')
     parser.add_argument('--include-unused-openvino', action='store_true')
     args = parser.parse_args(argv)
     root = args.site_packages.resolve()

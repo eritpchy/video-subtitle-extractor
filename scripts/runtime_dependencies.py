@@ -75,7 +75,7 @@ def runtime_wheels(wheelhouse, requirements):
         if name in records:
             raise RuntimeError(f'Duplicate wheel for {name}')
         records[name] = {'version': metadata['Version'], 'requires': metadata.get_all('Requires-Dist', []), 'path': path}
-    roots = [line.strip() for line in Path(requirements).read_text().splitlines() if line.strip() and not line.lstrip().startswith('#')]
+    roots = list(requirements) if isinstance(requirements, (list, tuple)) else [line.strip() for line in Path(requirements).read_text().splitlines() if line.strip() and not line.lstrip().startswith('#')]
     selected = resolve(records, roots)
     return [records[name]['path'] for name in sorted(selected)], roots
 

@@ -2,7 +2,8 @@
 """Real video -> VideoSubFinder -> PP-OCRv6 -> SRT smoke regression.
 
 Requires installed runtime dependencies, a verified VSF 6.10.7 runtime, and real
-PP-OCRv6 small models. No network or mocks are used by the fixture itself.
+PP-OCRv6 small models (also medium for accurate). No network or mocks are used
+by the fixture itself. Every mode explicitly forces CPU inference.
 """
 import argparse
 import json
@@ -14,6 +15,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED = (("HELLO WORLD", 1000, 3000), ("SECOND LINE", 4000, 6000))
+MODES = ("fast", "accurate", "auto")
 
 
 def generate_video(path):
@@ -62,38 +64,76 @@ def check_srt(path):
             "intervals_ms": [[item.start.ordinal, item.end.ordinal] for item in subtitles]}
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=ROOT / "artifacts/e2e")
-    parser.add_argument("--timeout", type=int, default=900)
-    args = parser.parse_args(argv)
-    output = args.output.resolve()
+def run_mode(output, mode, timeout):
+    if mode not in MODES:
+        raise ValueError(f"Unsupported smoke mode: {mode}")
     output.mkdir(parents=True, exist_ok=True)
     video = output / "input video.mp4"
     subtitles = output / "recognized.srt"
+    # A failed rerun must not leave a previous success report or reuse its SRT.
+    (output / "report.json").unlink(missing_ok=True)
+    subtitles.unlink(missing_ok=True)
     generate_video(video)
     # Deliberately conflicting GUI preferences catch leaked pre-crop settings
     # and failed language/mode propagation into spawned OCR workers.
     configuration = output / "isolated-config.json"
-    saved_configuration = json.dumps({"Main": {"Language": "korean", "Mode": "accurate", "SubtitleArea": 1}})
+    conflicting_mode = "fast" if mode == "accurate" else "accurate"
+    saved_configuration = json.dumps({"Main": {"Language": "korean", "Mode": conflicting_mode, "SubtitleArea": 1}})
     configuration.write_text(saved_configuration, encoding="utf-8")
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen", VSE_CONFIG_FILE=str(configuration),
                VSE_OFFLINE="1", PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK="True", PYTHONUNBUFFERED="1")
     command = [sys.executable, "-m", "backend.cli", str(video), "--output", str(subtitles),
-               "--language", "en", "--mode", "fast", "--cpu", "--threads", "2",
+               "--language", "en", "--mode", mode, "--cpu", "--threads", "2",
                "--area", "0.6,1,0,1", "--overwrite", "--no-word-segmentation"]
     started = time.monotonic()
     with (output / "extraction.log").open("w", encoding="utf-8") as log:
-        result = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=args.timeout)
+        result = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
     if result.returncode:
         raise RuntimeError(f"Extraction exited {result.returncode}; see {output / 'extraction.log'}")
     if configuration.read_text(encoding="utf-8") != saved_configuration:
         raise AssertionError("CLI changed saved GUI preferences")
     report = check_srt(subtitles)
     report.update({"result": "passed", "elapsed_seconds": round(time.monotonic() - started, 2),
+                   # These describe the executed CLI contract, not GPU/device telemetry.
+                   "mode": mode, "cpu_forced": True,
                    "video": str(video), "srt": str(subtitles), "command": command})
     (output / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    return report
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, default=ROOT / "artifacts/e2e")
+    parser.add_argument("--timeout", type=int, default=900, help="Extraction timeout in seconds per mode")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--mode", choices=MODES, default="fast")
+    selection.add_argument("--all-modes", action="store_true",
+                           help="Run all CPU modes in separate output subdirectories")
+    args = parser.parse_args(argv)
+    output = args.output.resolve()
+    if not args.all_modes:
+        report = run_mode(output, args.mode, args.timeout)
+    else:
+        output.mkdir(parents=True, exist_ok=True)
+        report_path = output / "report.json"
+        report_path.unlink(missing_ok=True)
+        # Clear unvisited modes too: an interrupted matrix cannot retain old passes.
+        for mode in MODES:
+            for name in ("report.json", "recognized.srt"):
+                (output / mode / name).unlink(missing_ok=True)
+        report = {"result": "running", "modes_requested": list(MODES),
+                  "cpu_forced": True, "cases": []}
+        for mode in MODES:
+            try:
+                report["cases"].append(run_mode(output / mode, mode, args.timeout))
+            except Exception as exc:
+                report.update(result="failed", failed_mode=mode, error=str(exc))
+                report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+                raise
+        report["result"] = "passed"
+        report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))
+    return report
 
 
 if __name__ == "__main__":

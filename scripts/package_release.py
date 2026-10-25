@@ -1,4 +1,4 @@
-"""Create and verify self-contained native CPU inference releases."""
+"""Create and verify self-contained, explicitly identified inference packages."""
 from __future__ import annotations
 
 import argparse
@@ -19,13 +19,19 @@ import zipfile
 try:
     from .bundle_bootstrap import host_platform, sha256, verify_payload
     from .runtime_dependencies import runtime_wheels
+    from .release_profiles import profile_identity, profile_requirements, archive_name
 except ImportError:
     from bundle_bootstrap import host_platform, sha256, verify_payload
     from runtime_dependencies import runtime_wheels
+    from release_profiles import profile_identity, profile_requirements, archive_name
 
 ROOT = Path(__file__).resolve().parents[1]
+# Direct-script build entry points must resolve trusted application helpers,
+# including DirectML staging, without depending on the caller's PYTHONPATH.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 SOURCE_DIRS = ("backend", "ui", "design", "scripts", "docs")
-SOURCE_FILES = ("gui.py", "requirements.txt", "requirements-inference.txt", "requirements-native-inference.txt", "LICENSE", "README.md", "README_en.md", "Dockerfile", ".dockerignore")
+SOURCE_FILES = ("gui.py", "requirements.txt", "requirements-inference.txt", "requirements-native-inference.txt", "requirements-directml-inference.txt", "LICENSE", "README.md", "README_en.md", "Dockerfile", ".dockerignore")
 EXCLUDED_PARTS = {"__pycache__", ".pytest_cache", ".venv", ".git"}
 
 
@@ -134,12 +140,15 @@ def finalize_portable_runtime(stage: Path, python: Path, env: dict) -> dict:
     return {'removed_bytes': sum(entry['size'] for entry in removed), 'alias_bytes_avoided': sum(entry['original_size'] for entry in aliases)}
 
 
-def build_runtime(stage: Path, wheels: list[Path], runtime_requirements: list[str], target_platform: str, target_arch: str, profile: str = "paddle") -> dict:
+def build_runtime(stage: Path, wheels: list[Path], runtime_requirements: list[str], target_platform: str, target_arch: str, profile: str = "paddle", *, accelerator: str = "cpu") -> dict:
     try:
         from .portable_python import prepare_runtime, write_windows_runtime_isolation
     except ImportError:
         from portable_python import prepare_runtime, write_windows_runtime_isolation
     info = prepare_runtime(stage / 'runtime', target_platform, target_arch)
+    info['source_wheels'] = [{'filename': wheel.name, 'bytes': wheel.stat().st_size,
+                             'sha256': sha256(wheel), 'hash_origin': 'build-observed complete wheel bytes'}
+                            for wheel in wheels]
     # Interpreter helper returns a path relative to the bundle root and pinned
     # provenance. The build host's pip drives the bundled interpreter; no pip
     # invocation or dependency installation occurs on customers' computers.
@@ -154,7 +163,14 @@ def build_runtime(stage: Path, wheels: list[Path], runtime_requirements: list[st
     if target_platform == 'windows':
         info['windows_isolation'] = write_windows_runtime_isolation(stage, python)
     profile_manifest = stage / 'runtime/runtime-profile.json'
-    profile_manifest.write_text(json.dumps({'runtime_requirements': runtime_requirements, 'ocr_backend': profile}), encoding='utf-8')
+    build_profile, identity = profile_identity(profile, accelerator)
+    profile_manifest.write_text(json.dumps({'runtime_requirements': runtime_requirements, 'ocr_backend': profile,
+                                            'accelerator': identity['accelerator'], 'build_profile': build_profile}), encoding='utf-8')
+    if accelerator.startswith('cuda'):
+        # Only the byte-pinned, audited static NVJitLink archive may be removed.
+        # Runtime DLLs and every language/model remain intact.
+        subprocess.run([str(python), '-m', 'scripts.cuda_package', '--root', str(stage),
+                        '--accelerator', accelerator, '--prepare'], check=True, env=env, cwd=stage)
     prune = [str(python), str(stage / 'scripts/prune_inference_runtime.py'), '--engine', profile, '--apply', '--manifest', str(stage / 'runtime/inference-prune.json')]
     if profile == 'paddle' and (target_platform, target_arch) == ('linux', 'x64'):
         prune.append('--include-unused-openvino')
@@ -162,6 +178,12 @@ def build_runtime(stage: Path, wheels: list[Path], runtime_requirements: list[st
     # The Windows ._pth deliberately excludes the direct script's directory.
     # Resolve sibling helpers through the trusted application package instead.
     subprocess.run([str(python), '-m', 'scripts.runtime_dependencies', '--manifest', str(profile_manifest)], check=True, env=env, cwd=stage)
+    if profile == 'directml':
+        from importlib import import_module
+        audit_directml_runtime = import_module('scripts.directml_package').audit_directml_runtime
+        # This is metadata/byte inspection only; never import Windows DLLs on a
+        # foreign host or substitute a newer DirectML runtime/license.
+        info['directml_runtime'] = audit_directml_runtime(stage / 'runtime/Lib/site-packages')
     info = dict(info, python=python.relative_to(stage.resolve()).as_posix())
     return info
 
@@ -174,9 +196,13 @@ def portable_launchers(stage: Path, target_platform: str, target_arch: str, runt
     write_launchers(stage, target_platform, target_arch, runtime_python, minimum_macos_version="14.0" if profile == "native" else "13.0")
 
 
-def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT, *, profile: str = "paddle", native_ocr: Path | None = None) -> Path:
-    if profile not in ("paddle", "native") or (profile == "native") != (native_ocr is not None):
-        raise ValueError("Select native profile together with --native-ocr; Paddle remains default")
+def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT, *, profile: str = "paddle", native_ocr: Path | None = None,
+                  accelerator: str = 'cpu', onnx_models: Path | None = None, paddle_models: Path | None = None) -> Path:
+    build_profile, identity = profile_identity(profile, accelerator)
+    if (profile == "native") != (native_ocr is not None) or (profile == 'directml') != (onnx_models is not None):
+        raise ValueError("Select native with --native-ocr, or directml with --onnx-models; Paddle remains default")
+    if profile != 'paddle' and paddle_models is not None:
+        raise ValueError('--paddle-models is only valid for Paddle CPU/CUDA packages')
     target_platform, target_arch = host_platform()
     version = read_version(root)
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
@@ -190,12 +216,15 @@ def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT, *, profile:
     if not native.is_dir() or not any(native.iterdir()):
         raise RuntimeError("Install the verified native VideoSubFinder release before packaging")
     if profile == 'paddle':
-        if not (root / "backend/models/V6").is_dir():
-            raise RuntimeError("Download PP-OCRv6 small and medium models before packaging")
-        subprocess.run([sys.executable, "-m", "backend.tools.model_download", "--tiers", "small", "medium", "--verify-only"], cwd=root, check=True)
+        paddle_models = paddle_models or root / 'backend/models'
+        # Fail closed on missing Tamil/Telugu/Kannada (or any other model),
+        # rather than relying on a customer-side PaddleX download.
+        subprocess.run([sys.executable, "scripts/paddle_package_models.py", "--verify-only", str(paddle_models)], cwd=root, check=True)
     subprocess.run([sys.executable, "scripts/install_videosubfinder.py", "--verify-only"], cwd=root, check=True)
-    requirements = 'requirements-native-inference.txt' if profile == 'native' else 'requirements-inference.txt'
-    wheels, runtime_requirements = runtime_wheels(wheelhouse, root / requirements)
+    requirements = identity['requirements']
+    if accelerator.startswith('cuda'):
+        requirements = profile_requirements(root, build_profile)
+    wheels, runtime_requirements = runtime_wheels(wheelhouse, requirements if isinstance(requirements, list) else root / requirements)
     # Resolve the dependency graph first, then lock only the selected untouched wheels.
     lock = wheel_lock(wheelhouse, selected=wheels)
     if profile == 'native':
@@ -205,8 +234,8 @@ def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT, *, profile:
             from native_package import assert_native_requirements, stage_native_artifact
         assert_native_requirements(lock)
     output.mkdir(parents=True, exist_ok=True)
-    name = f"vse-{version}-{target_platform}-{target_arch}-{'native-' if profile == 'native' else ''}cpu"
-    archive_path = output / f"{name}.zip"
+    archive_path = output / archive_name(version, target_platform, target_arch, build_profile)
+    name = archive_path.stem
     with tempfile.TemporaryDirectory(prefix="vse-package-") as temporary:
         archive_root = Path(temporary) / name
         stage = archive_root / 'Video Subtitle Extractor.app/Contents/Resources' if target_platform == 'macos' else archive_root
@@ -217,11 +246,9 @@ def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT, *, profile:
         # upstream checksums were verified above. Never sweep arbitrary local
         # untracked files or private scratch data into a release archive.
         source_paths.update(native.rglob("*"))
-        if profile == "paddle":
-            source_paths.update((root / "backend/models/V6").rglob("*"))
         for source in sorted(source_paths):
             relative = source.relative_to(root)
-            if profile == "native" and relative.parts[:2] == ("backend", "models"):
+            if relative.parts[:2] == ("backend", "models"):
                 continue
             if not source.is_file() or not include_source(relative, target_platform, target_arch):
                 continue
@@ -237,7 +264,22 @@ def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT, *, profile:
         shutil.copy2(root / "scripts/bundle_bootstrap.py", stage / "bootstrap.py")
         (stage / 'requirements-lock.txt').write_text('\n'.join(lock) + '\n', encoding='utf-8')
         native_info = stage_native_artifact(native_ocr, stage / 'native-ocr', target_platform) if profile == 'native' else None
-        runtime_info = build_runtime(stage, wheels, runtime_requirements, target_platform, target_arch, profile)
+        paddle_info = None
+        if profile == 'paddle':
+            try:
+                from .paddle_package_models import stage_paddle_models
+            except ImportError:
+                from paddle_package_models import stage_paddle_models
+            paddle_info = stage_paddle_models(paddle_models, stage / 'backend/models')
+        directml_info = None
+        if profile == 'directml':
+            try:
+                from .directml_package import stage_directml_models
+            except ImportError:
+                from directml_package import stage_directml_models
+            directml_info = stage_directml_models(onnx_models, stage / 'directml-models')
+        runtime_info = build_runtime(stage, wheels, runtime_requirements, target_platform, target_arch, profile,
+                                     **({'accelerator': accelerator} if accelerator != 'cpu' else {}))
         if target_platform == 'linux':
             try:
                 from .bundle_linux_runtime_libs import bundle_linux_libraries
@@ -249,14 +291,16 @@ def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT, *, profile:
         if target_platform == 'macos':
             app_root = stage.parent.parent
             app_files = {path.relative_to(app_root).as_posix(): sha256(path) for path in app_root.rglob('*') if path.is_file() and not path.is_relative_to(stage)}
-        manifest = {"ocr_backend": profile, "native_ocr": native_info, "app_files": app_files, "format": 2, "version": version, "commit": revision, "platform": target_platform, "arch": target_arch, "python": "3.12", "distribution": "self-contained CPU inference runtime", "runtime_python": runtime_info["python"], "runtime_provenance": runtime_info, "runtime_requirements": runtime_requirements, "files": {path.relative_to(stage).as_posix(): sha256(path) for path in sorted(stage.rglob("*")) if path.is_file()}}
+        manifest = {"ocr_backend": profile, "accelerator": identity['accelerator'], "build_profile": build_profile,
+                    "gpu_inference_verified": False, "directml_models": directml_info, "paddle_models": paddle_info,
+                    "native_ocr": native_info, "app_files": app_files, "format": 2, "version": version, "commit": revision, "platform": target_platform, "arch": target_arch, "python": "3.12", "distribution": "self-contained inference runtime", "runtime_python": runtime_info["python"], "runtime_provenance": runtime_info, "runtime_requirements": runtime_requirements, "files": {path.relative_to(stage).as_posix(): sha256(path) for path in sorted(stage.rglob("*")) if path.is_file()}}
         (stage / "bundle-manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
             for path in sorted(archive_root.rglob("*")):
                 if path.is_file():
                     archive.write(path, path.relative_to(archive_root.parent).as_posix())
         size_report = {"commit": revision, "platform": target_platform, "arch": target_arch,
-                       "ocr_backend": profile,
+                       "ocr_backend": profile, "accelerator": identity['accelerator'], "build_profile": build_profile,
                        "compressed_archive_bytes": archive_path.stat().st_size,
                        "extracted_payload_bytes": sum(path.stat().st_size for path in archive_root.rglob('*') if path.is_file()),
                        "build_only_wheel_bytes": sum(wheel.stat().st_size for wheel in wheels),
@@ -327,6 +371,8 @@ def verify_bundle(archive_path: Path, smoke: bool) -> None:
         verify_payload(root, manifest)
         if smoke:
             evidence = Path(temporary) / "verification-evidence"
+            evidence.mkdir()
+            verification_passed = False
             try:
                 import os
                 python = root / manifest['runtime_python']
@@ -357,11 +403,20 @@ def verify_bundle(archive_path: Path, smoke: bool) -> None:
                 command = launcher_command(root, manifest['platform'], ['--verify', '--results-dir', str(evidence),
                                                                          '--runtime-audit-dir', str(isolation_reports)])
                 subprocess.run(command, check=True, cwd=root, env=env)
-                summarize_reports(root, isolation_reports, required_modules=('PySide6.QtWidgets', 'cv2', 'qfluentwidgets') + (('paddle',) if manifest.get('ocr_backend', 'paddle') == 'paddle' else ()), forbidden_modules=('paddle', 'paddleocr', 'paddlex', 'onnxruntime') if manifest.get('ocr_backend') == 'native' else (), require_isolated=manifest['platform'] == 'windows', require_native_workers=manifest['platform'] == 'windows' and manifest.get('ocr_backend') == 'native')
+                required = ('PySide6.QtWidgets', 'cv2', 'qfluentwidgets') + ({'paddle': ('paddle',), 'directml': ('onnxruntime',)}.get(manifest.get('ocr_backend', 'paddle'), ()))
+                forbidden = ('paddle', 'paddleocr', 'paddlex', 'onnxruntime') if manifest.get('ocr_backend') == 'native' else ('paddle', 'paddleocr', 'paddlex') if manifest.get('ocr_backend') == 'directml' else ()
+                summarize_reports(root, isolation_reports, required_modules=required, forbidden_modules=forbidden, require_isolated=manifest['platform'] == 'windows', require_native_workers=manifest['platform'] == 'windows' and manifest.get('ocr_backend') == 'native')
+                verification_passed = True
             finally:
                 # Preserve extraction evidence before TemporaryDirectory cleanup,
                 # especially when the child reports a path in a failed smoke.
                 if evidence.is_dir():
+                    (evidence / 'package-verification.json').write_text(json.dumps({
+                        'schema': 1, 'result': 'passed' if verification_passed else 'failed',
+                        'archive': archive_path.name, 'archive_sha256': expected,
+                        **{key: manifest.get(key) for key in ('commit', 'version', 'platform', 'arch', 'build_profile')},
+                        'payload': 'passed', 'launcher_smoke': 'passed' if verification_passed else 'failed',
+                        'gpu_inference_verified': False}, indent=2) + '\n', encoding='utf-8')
                     prune_manifest = root / 'runtime/inference-prune.json'
                     if prune_manifest.is_file():
                         shutil.copy2(prune_manifest, evidence / 'inference-prune.json')
@@ -371,7 +426,10 @@ def verify_bundle(archive_path: Path, smoke: bool) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wheelhouse", type=Path)
-    parser.add_argument("--profile", choices=("paddle", "native"), default="paddle")
+    parser.add_argument("--profile", choices=("paddle", "native", "directml"), default="paddle")
+    parser.add_argument("--accelerator", choices=('cpu', 'cuda11.8', 'cuda12.6'), default='cpu')
+    parser.add_argument("--onnx-models", type=Path, help="Verified complete 15-model converted artifact for DirectML")
+    parser.add_argument("--paddle-models", type=Path, help="Verified complete 15-model Paddle source tree; no client downloads")
     parser.add_argument("--native-ocr", type=Path, help="Verified complete native CPU artifact (build-side only)")
     parser.add_argument("--output", type=Path, default=Path("dist"))
     parser.add_argument("--verify", type=Path, help="Verify all bundle ZIPs in this directory")
@@ -385,7 +443,8 @@ def main() -> int:
             verify_bundle(archive, args.smoke)
             print(f"Verified: {archive}")
     elif args.wheelhouse:
-        print(create_bundle(args.wheelhouse, args.output, profile=args.profile, native_ocr=args.native_ocr))
+        print(create_bundle(args.wheelhouse, args.output, profile=args.profile, native_ocr=args.native_ocr,
+                            accelerator=args.accelerator, onnx_models=args.onnx_models, paddle_models=args.paddle_models))
     else:
         parser.error("Specify --wheelhouse or --verify")
     return 0

@@ -1,154 +1,215 @@
-name: CPU release preview and publish
+name: Automatic one-click package candidates
 
-# No push/tag/release trigger: publication always requires an explicit dispatch.
+# Build-only. Never create/move tags or publish/replace release assets.
 on:
+  push:
+    branches: ['**']
+    paths: ['.github/workflows/**', 'native/ocr/**', 'requirements*.txt', 'backend/**', 'ui/**', 'gui.py', 'scripts/**', 'tests/**', 'docs/licenses/**']
+  pull_request:
+    paths: ['.github/workflows/**', 'native/ocr/**', 'requirements*.txt', 'backend/**', 'ui/**', 'gui.py', 'scripts/**', 'tests/**', 'docs/licenses/**']
   workflow_dispatch:
     inputs:
-      publication:
-        description: 'Artifacts only is a safe preview; other choices create a NEW GitHub release.'
-        type: choice
-        options: [artifacts, draft, prerelease, release]
-        default: artifacts
-        required: true
-      tag:
-        description: 'Required for publication; never replace an existing release or move a tag.'
-        type: string
-        default: ''
+      acknowledge_vc_redistribution_license:
+        description: Confirm applicable Microsoft Visual C++ redistributable distribution rights
+        type: boolean
+        default: false
         required: false
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
+  group: release-candidates-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   PYTHONUTF8: '1'
-  QT_QPA_PLATFORM: offscreen
+  PYTHONDONTWRITEBYTECODE: '1'
   PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: 'True'
+  POLYGRAPHY_AUTOINSTALL_DEPS: '0'
 
 jobs:
-  preflight:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Check immutable release target before building
-        if: inputs.publication != 'artifacts'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag }}
-        run: python scripts/release_guard.py --tag "$RELEASE_TAG" --sha "$GITHUB_SHA"
+  native:
+    name: Retained Native CPU matrix
+    uses: ./.github/workflows/native-ocr.yml
+    with:
+      acknowledge_vc_redistribution_license: ${{ inputs.acknowledge_vc_redistribution_license || false }}
 
-  checks:
-    needs: preflight
-    uses: ./.github/workflows/ci.yml
-    permissions:
-      contents: read
-
-  package:
-    needs: checks
-    name: Package / ${{ matrix.platform }}-${{ matrix.arch }}
+  windows-paddle:
+    name: ${{ matrix.profile }} / ${{ matrix.os }} (GPU hardware not tested)
     strategy:
       fail-fast: false
       matrix:
+        os: [windows-2022, windows-2025]
+        profile: [paddle-cpu, paddle-cuda11.8, paddle-cuda12.6]
         include:
-          - os: ubuntu-24.04
-            platform: linux
-            arch: x64
-          - os: windows-2022
-            platform: windows
-            arch: x64
-          - os: macos-15
-            platform: macos
-            arch: arm64
+          - profile: paddle-cpu
+            accelerator: cpu
+          - profile: paddle-cuda11.8
+            accelerator: cuda11.8
+          - profile: paddle-cuda12.6
+            accelerator: cuda12.6
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 100
     env:
-      QT_QPA_PLATFORM: ${{ matrix.os == 'macos-15' && 'cocoa' || 'offscreen' }}
-    timeout-minutes: 60
+      QT_QPA_PLATFORM: windows
+      VSE_WINDOWS_RUNNER_LABEL: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
-      - name: Install Linux Qt libraries
-        if: runner.os == 'Linux'
+          architecture: x64
+      - name: Install build-only packaging and test tools
+        run: python -m pip install packaging pytest==8.3.5
+      - name: Resolve original CPU or official CUDA wheels without mixing Paddle variants
+        run: python scripts/prepare_release_profile.py --profile ${{ matrix.profile }} --output build/wheelhouse
+      - name: Install selected untouched build-side wheels
         run: >-
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends
-          libgl1 libegl1 libglib2.0-0 libdbus-1-3 libxkbcommon0
-          libfontconfig1 libfreetype6 libx11-6 libx11-xcb1 libxext6 libxrender1
-          libxi6 libxfixes3 libsm6 libice6
-          libxcb1 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-image0
-          libxcb-util1 libxcb-randr0 libxcb-render0 libxcb-render-util0
-          libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-xkb1
-          libxcb-glx0 libxkbcommon-x11-0 xvfb xauth
-      - run: python -m pip install -r requirements.txt pytest==8.3.5
-      - run: python -m pip check
-      - name: Diagnose Linux Qt platform dependencies
-        if: runner.os == 'Linux'
-        run: python scripts/diagnose_qt_linux.py
-      - run: python scripts/install_videosubfinder.py --version 6.10.7
-      - name: Bundle verified small and medium PP-OCRv6 models
-        run: python -m backend.tools.model_download --tiers small medium --output backend/models/V6
-      - name: Resolve offline wheels for this native platform
-        run: python -m pip wheel -r requirements.txt -r requirements-inference.txt pytest==8.3.5 --wheel-dir build/wheelhouse
-      - name: Build self-contained inference package
-        run: python scripts/package_release.py --wheelhouse build/wheelhouse --output dist
-      - name: Verify self-contained Linux payload with native X11
-        if: runner.os == 'Linux'
-        shell: bash
-        run: xvfb-run -a -s "-screen 0 1280x1024x24" env QT_QPA_PLATFORM=xcb python scripts/package_release.py --verify dist --smoke
-      - name: Verify self-contained Windows or macOS payload
-        if: runner.os != 'Linux'
+          python -c "import pathlib,subprocess,sys; subprocess.run([sys.executable,'-m','pip','install','--no-index','--no-deps','--no-compile',*map(str,sorted(pathlib.Path('build/wheelhouse').glob('*.whl')))],check=True)"
+      - name: Release/profile/launcher safety tests
+        run: >-
+          python -m pytest tests/test_release_packaging.py tests/test_release_profiles.py
+          tests/test_release_guard.py tests/test_release_acceptance.py tests/test_cuda_package.py
+          tests/test_cuda_profile_audit.py tests/test_prune_cuda_development.py
+          tests/test_runtime_dependencies.py tests/test_portable_environment.py tests/test_e2e_modes.py
+          tests/test_paddle_package_models.py -q
+      - name: Install fixed verified VideoSubFinder
+        run: python scripts/install_videosubfinder.py --version 6.10.7
+      - name: Prepare all 15 pinned original Paddle models (including Tamil/Telugu/Kannada)
+        run: python scripts/paddle_package_models.py --output build/paddle-models --cache build/paddle-model-cache
+      - name: Build self-contained package with exact backend identity
+        run: >-
+          python scripts/package_release.py --profile paddle --accelerator ${{ matrix.accelerator }}
+          --paddle-models build/paddle-models --wheelhouse build/wheelhouse --output dist
+      - name: Final ZIP launcher, three CPU modes, media and dependency acceptance
         run: python scripts/package_release.py --verify dist --smoke
-      - name: Verify Linux payload in a clean offline OS container
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          for archive in dist/*linux-x64-cpu*.zip; do
-            python scripts/verify_clean_linux_bundle.py --archive "$archive" --output dist/test-results/clean-linux
-          done
-      - name: Preserve packaged extraction evidence
+      - name: Final ZIP under clean PATH and contaminated host environment
+        timeout-minutes: 45
+        run: python scripts/verify_portable_environment.py --archives dist --output test-results/windows/portable-environment
+      - name: Bind passed final-package evidence to exact ZIP bytes
+        run: python scripts/accept_release_archive.py --archives dist --portable-evidence test-results/windows/portable-environment
+      - name: Preserve final-package evidence even on failure
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: package-results-${{ matrix.platform }}-${{ matrix.arch }}
-          path: dist/test-results/
+          name: restored-profile-evidence-${{ matrix.os }}-${{ matrix.profile }}
+          path: |
+            test-results/
+            dist/test-results/
+            dist/*.size.json
+            dist/*.sha256
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+          retention-days: 14
+      - name: Preserve canonical candidate (Server 2025 independently validates)
+        if: matrix.os == 'windows-2022'
+        uses: actions/upload-artifact@v4
         with:
-          name: cpu-bundle-${{ matrix.platform }}-${{ matrix.arch }}
+          name: release-candidate-windows-x64-${{ matrix.profile }}
           path: |
             dist/*.zip
-            dist/*.sha256
+            dist/*.zip.sha256
+            dist/*.zip.acceptance.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
 
-  publish:
-    if: inputs.publication != 'artifacts'
-    needs: [checks, package]
-    runs-on: ubuntu-24.04
-    environment: release
-    permissions:
-      contents: write
+  windows-directml:
+    name: Original DirectML 1.20.1 / ${{ matrix.os }} (explicit CPU acceptance)
+    needs: native
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      QT_QPA_PLATFORM: windows
+      VSE_WINDOWS_RUNNER_LABEL: ${{ matrix.os }}
+      VSE_OCR_BACKEND: directml
+      VSE_DIRECTML_MODEL_ROOT: ${{ github.workspace }}/build/native-models
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          architecture: x64
       - uses: actions/download-artifact@v4
         with:
-          pattern: cpu-bundle-*
+          name: native-ocr-fp32-models-${{ github.sha }}
+          path: build/native-models
+      - name: Reverify every converted graph/config against committed pins
+        run: python -S native/ocr/verify_model_cache.py build/native-models
+      - run: python -m pip install packaging pytest==8.3.5
+      - name: Resolve original ORT DirectML 1.20.1 (no new SDK/client converter)
+        run: python scripts/prepare_release_profile.py --profile directml --output build/wheelhouse
+      - name: Install untouched selected build-side runtime
+        run: >-
+          python -c "import pathlib,subprocess,sys; subprocess.run([sys.executable,'-m','pip','install','--no-index','--no-deps','--no-compile',*map(str,sorted(pathlib.Path('build/wheelhouse').glob('*.whl')))],check=True)"
+      - name: DirectML provider, all-model integrity and packaging unit tests
+        run: python -m pytest tests/test_directml_ocr.py tests/test_directml_windows_verification.py tests/test_release_profiles.py tests/test_e2e_modes.py -q
+      - name: Frozen models and fixtures on explicit CPU (not GPU proof)
+        run: python scripts/check_directml.py --models build/native-models --provider cpu --report test-results/directml-cpu-parity.json
+      - run: python scripts/install_videosubfinder.py --version 6.10.7
+      - name: Package DirectML with all 15 FP32 models and original runtime notices
+        run: >-
+          python scripts/package_release.py --profile directml --onnx-models build/native-models
+          --wheelhouse build/wheelhouse --output dist
+      - name: Final DirectML ZIP with explicit CPU media tests
+        run: python scripts/package_release.py --verify dist --smoke
+      - name: Final DirectML ZIP in clean and contaminated host environments
+        timeout-minutes: 45
+        run: python scripts/verify_portable_environment.py --archives dist --output test-results/windows/portable-environment
+      - run: python scripts/accept_release_archive.py --archives dist --portable-evidence test-results/windows/portable-environment
+      - name: Preserve DirectML evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: restored-profile-evidence-${{ matrix.os }}-directml
+          path: |
+            test-results/
+            dist/test-results/
+            dist/*.size.json
+            dist/*.sha256
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Preserve canonical original-runtime DirectML candidate
+        if: matrix.os == 'windows-2022'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-windows-x64-directml
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256
+            dist/*.zip.acceptance.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  candidate-set:
+    name: Verify approved candidate matrix (not publication)
+    needs: [native, windows-paddle, windows-directml]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install packaging
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-candidate-*
           path: dist
           merge-multiple: true
-      - name: Recheck target and publish without overwriting tags or releases
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag }}
-          PUBLICATION: ${{ inputs.publication }}
-        run: python scripts/release_guard.py --tag "$RELEASE_TAG" --sha "$GITHUB_SHA" --publish "$PUBLICATION" --assets dist
+      - name: Reject missing, mislabeled, stale or unaccepted ZIPs
+        run: python scripts/release_guard.py --validate-assets --sha "$GITHUB_SHA" --matrix restored-candidates --assets dist
+      - name: Record compatibility and validation boundary
+        shell: bash
+        run: |
+          {
+            echo 'Seven hash-bound candidates validated. No tag or GitHub release was created or modified.'
+            echo 'CUDA 10.2 remains available in the immutable 2.2.0 release, not as a new PP-OCRv6 package.'
+            echo 'CUDA 11.8 includes SM61 in the vendor wheel; this is not real GTX 10-series/GPU OCR certification.'
+            echo 'Windows evidence covers Server 2022/2025 only. CUDA/DirectML GPU inference was not tested.'
+          } >> "$GITHUB_STEP_SUMMARY"

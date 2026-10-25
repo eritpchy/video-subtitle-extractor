@@ -1,4 +1,4 @@
-"""Launch/audit the included CPU inference runtime; never install on the client."""
+"""Launch/audit the included inference runtime; never install on the client."""
 from __future__ import annotations
 
 import argparse
@@ -23,6 +23,13 @@ NATIVE_SEARCH_VARIABLES = (
     'OPENCV_VIDEOIO_PLUGIN_PATH', 'OPENCV_CORE_PLUGIN_PATH', 'OPENCV_DNN_PLUGIN_PATH',
     'OPENCV_UI_PLUGIN_PATH', 'OPENCV_OPENCL_RUNTIME', 'OPENCV_FFMPEG_DLL_DIR',
     'OPENCV_DNN_IE_EXTRA_PLUGIN_PATH',
+    # Paddle's dynamic loader consults explicit library-directory flags before
+    # vendor package paths. Do not let a final CUDA package borrow host DLLs.
+    # Keep compute options (CUDA_VISIBLE_DEVICES, memory limits, etc.) intact.
+    'FLAGS_cuda_dir', 'FLAGS_cudnn_dir', 'FLAGS_cublas_dir', 'FLAGS_cupti_dir',
+    'FLAGS_curand_dir', 'FLAGS_cusparse_dir', 'FLAGS_cusparselt_dir',
+    'FLAGS_nccl_dir', 'FLAGS_tensorrt_dir', 'FLAGS_win_cuda_bin_dir',
+    'FLAGS_nvidia_package_dir', 'CUDA_PATH', 'CUDA_HOME', 'CUDNN_PATH', 'CUDNN_HOME',
 )
 
 
@@ -35,7 +42,7 @@ def sanitize_environment(root: Path, environment: dict[str, str], target_platfor
     """Return a child-only environment; never alter the caller's OS/installation."""
     env = {key: value for key, value in environment.items()
            if not key.upper().startswith(RUNTIME_SELECTOR_PREFIXES)
-           and key.upper() not in {*NATIVE_SEARCH_VARIABLES, 'VIRTUAL_ENV', 'VIRTUAL_ENV_PROMPT', '_CE_CONDA', '_CE_M', '__PYVENV_LAUNCHER__'}}
+           and key.upper() not in {*(name.upper() for name in NATIVE_SEARCH_VARIABLES), 'VIRTUAL_ENV', 'VIRTUAL_ENV_PROMPT', '_CE_CONDA', '_CE_M', '__PYVENV_LAUNCHER__'}}
     root = root.resolve()
     if target_platform == 'windows':
         windows = Path(env.get('SystemRoot') or env['SYSTEMROOT'])
@@ -117,7 +124,7 @@ def verify_windows_runtime_configuration(root: Path, manifest: dict) -> None:
 def environment_report(root: Path, manifest: dict) -> dict:
     selected = ('PATH', *NATIVE_SEARCH_VARIABLES, 'PYTHONHOME', 'PYTHONPATH', 'PYTHONUSERBASE',
                 'PYTHONNOUSERSITE', 'PYTHONUTF8', 'PYTHONIOENCODING', 'CONDA_PREFIX', 'CONDA_DEFAULT_ENV', 'VIRTUAL_ENV',
-                'VSE_CONFIG_FILE', 'VSE_WORK_DIR', 'VSE_OCR_BACKEND', 'VSE_NATIVE_OCR_ROOT',
+                'VSE_CONFIG_FILE', 'VSE_WORK_DIR', 'VSE_OCR_BACKEND', 'VSE_NATIVE_OCR_ROOT', 'VSE_DIRECTML_MODEL_ROOT',
                 'VSE_VSF_BINARY', 'VSE_VSF_DIR', 'IMAGEIO_FFMPEG_EXE')
     return {'schema': 1, 'bundle_root': str(root), 'platform': manifest['platform'], 'executable': sys.executable,
             'prefix': sys.prefix, 'base_prefix': sys.base_prefix, 'sys_path': sys.path,
@@ -181,7 +188,7 @@ def write_size_report(root: Path, manifest: dict, phase: str, results_dir: Path 
                    'arch': manifest['arch'], 'profile': manifest.get('ocr_backend', 'paddle'),
                    'byte_count_method': 'sum of regular file sizes; symlinks, original ZIPs and test-results excluded'})
     report['measurements'].append({'phase': phase, 'runtime_bytes': size(root / 'runtime'),
-                                   'model_bytes': size(root / 'backend/models') + size(root / 'native-ocr/models'),
+                                   'model_bytes': size(root / 'backend/models') + size(root / 'native-ocr/models') + size(root / 'directml-models/models'),
                                    'native_worker_bytes': size(root / 'native-ocr'),
                                    'wheelhouse_bytes': size(root / 'wheelhouse'),
                                    'total_installed_bytes': total})
@@ -254,9 +261,10 @@ def main(argv: list[str] | None = None) -> int:
     configure_user_paths()
     configure_runtime_tools(root, manifest)
     backend = manifest.get('ocr_backend', 'paddle')
-    if backend not in ('paddle', 'native'):
+    if backend not in ('paddle', 'native', 'directml'):
         raise RuntimeError('Unknown bundled OCR backend')
     os.environ['VSE_OCR_BACKEND'] = backend
+    os.environ.pop('VSE_DIRECTML_MODEL_ROOT', None)
     if backend == 'native':
         os.environ['VSE_NATIVE_OCR_ROOT'] = str(root / 'native-ocr')
         # Do not override a requested unsupported GPU provider: adapter rejects it.
@@ -264,6 +272,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         # A fixed Paddle profile must not retain an unrelated foreign worker.
         os.environ.pop('VSE_NATIVE_OCR_ROOT', None)
+        if backend == 'directml':
+            os.environ['VSE_DIRECTML_MODEL_ROOT'] = str(root / 'directml-models')
     os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
     os.environ['PYTHONNOUSERSITE'] = '1'
     os.environ['PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK'] = 'True'
@@ -283,12 +293,21 @@ def main(argv: list[str] | None = None) -> int:
             subprocess.run([str(python), 'scripts/windows_verification.py', 'capture', '--runner', os.environ['VSE_WINDOWS_RUNNER_LABEL'], '--profile', backend, '--output', str(results / 'bundled-windows-identity')], check=True)
         subprocess.run([str(python), 'scripts/prune_inference_runtime.py', '--verify', '--manifest', str(root / 'runtime/inference-prune.json')], check=True)
         subprocess.run([str(python), '-m', 'scripts.runtime_dependencies', '--manifest', str(manifest_path)], check=True)
+        if backend == 'paddle':
+            subprocess.run([str(python), '-I', '-S', 'scripts/paddle_package_models.py',
+                            '--verify-only', str(root / 'backend/models')], check=True)
+        if manifest.get('accelerator', '').startswith('cuda'):
+            subprocess.run([str(python), '-m', 'scripts.cuda_package', '--root', str(root),
+                            '--accelerator', manifest['accelerator']], check=True)
         subprocess.run([str(python), 'scripts/install_videosubfinder.py', '--verify-only'], check=True)
         subprocess.run([str(python), '-m', 'backend.cli', '--help'], check=True)
         qt_platform = 'cocoa' if platform.system() == 'Darwin' else 'windows' if os.name == 'nt' else 'xcb' if os.environ.get('DISPLAY') else 'offscreen'
         env = dict(os.environ, QT_QPA_PLATFORM=qt_platform, VSE_OFFLINE='1', VSE_SMOKE_SCREENSHOT_DIR=str(results / 'gui'))
         subprocess.run([str(python), 'gui.py', '--smoke-test'], check=True, env=env, timeout=120)
         subprocess.run([str(python), 'scripts/e2e_smoke.py', '--output', str(results / 'bundle-e2e')], check=True, env=env, timeout=960)
+        for mode in ('accurate', 'auto'):
+            subprocess.run([str(python), 'scripts/e2e_smoke.py', '--mode', mode,
+                            '--output', str(results / f'bundle-e2e-{mode}')], check=True, env=env, timeout=960)
         subprocess.run([str(python), 'scripts/e2e_issues.py', '--output', str(results / 'bundle-issues')], check=True, env=env, timeout=3660)
         write_size_report(root, manifest, 'verified-self-contained', results)
         return 0

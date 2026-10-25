@@ -82,7 +82,7 @@ def fixture_environment(directory: Path, contaminated: bool, inherited: dict[str
     directory.mkdir(parents=True)
     env = dict(os.environ if inherited is None else inherited)
     for key in list(env):
-        if key.upper().startswith(RUNTIME_SELECTOR_PREFIXES) or key.upper() in {*NATIVE_SEARCH_VARIABLES, 'VIRTUAL_ENV', 'VIRTUAL_ENV_PROMPT', '_CE_CONDA', '_CE_M', '__PYVENV_LAUNCHER__'}:
+        if key.upper().startswith(RUNTIME_SELECTOR_PREFIXES) or key.upper() in {*(name.upper() for name in NATIVE_SEARCH_VARIABLES), 'VIRTUAL_ENV', 'VIRTUAL_ENV_PROMPT', '_CE_CONDA', '_CE_M', '__PYVENV_LAUNCHER__'}:
             env.pop(key)
     paths = {name: directory / name for name in ('home', 'empty-path', 'foreign-bin', 'foreign-python', 'foreign-native', 'foreign-qt', 'user-base', 'config', 'cache', 'work', 'cwd', 'conda', 'venv')}
     for path in paths.values():
@@ -130,8 +130,13 @@ def fixture_environment(directory: Path, contaminated: bool, inherited: dict[str
                         IMAGEIO_FFMPEG_EXE=str(paths['foreign-bin'] / ('ffmpeg.cmd' if os.name == 'nt' else 'ffmpeg')),
                         LD_LIBRARY_PATH=str(paths['foreign-native']), DYLD_LIBRARY_PATH=str(paths['foreign-native']),
                         DYLD_FRAMEWORK_PATH=str(paths['foreign-native']), DYLD_FALLBACK_LIBRARY_PATH=str(paths['foreign-native']),
-                        VSE_OCR_BACKEND='deliberately-invalid-inherited-selection', VSE_NATIVE_OCR_ROOT=str(paths['foreign-native']))
+                        VSE_OCR_BACKEND='deliberately-invalid-inherited-selection', VSE_NATIVE_OCR_ROOT=str(paths['foreign-native']),
+                        VSE_DIRECTML_MODEL_ROOT=str(paths['foreign-native']))
         env.update(injected)
+        for key in NATIVE_SEARCH_VARIABLES:
+            if key.startswith('FLAGS_') or key in ('CUDA_PATH', 'CUDA_HOME', 'CUDNN_PATH', 'CUDNN_HOME'):
+                injected[key] = str(paths['foreign-native'])
+                env[key] = injected[key]
     metadata = {'kind': 'simulated fixtures, no host installation changed', 'injected': injected,
                 'fixture_root': str(directory), 'cwd': str(paths['cwd']), 'marker': str(marker),
                 'expected_config': str(config), 'expected_work': str(paths['work']),
@@ -236,6 +241,13 @@ def check_environment_evidence(evidence: Path, fixture: dict, profile: str, root
             raise RuntimeError('Packaged backend selection was lost in a Python child')
         if profile == 'native' and not is_packaged_native_worker(environment.get('VSE_NATIVE_OCR_ROOT'), root):
             raise RuntimeError('Inherited native-worker path replaced packaged worker')
+        if profile == 'directml':
+            expected_models = root.resolve() / 'directml-models'
+            if not environment.get('VSE_DIRECTML_MODEL_ROOT') or Path(environment['VSE_DIRECTML_MODEL_ROOT']).resolve(strict=True) != expected_models:
+                raise RuntimeError('Inherited DirectML model path replaced packaged models')
+        if any(key in environment for key in NATIVE_SEARCH_VARIABLES
+               if key.startswith('FLAGS_') or key in ('CUDA_PATH', 'CUDA_HOME', 'CUDNN_PATH', 'CUDNN_HOME')):
+            raise RuntimeError('Inherited CUDA native-library search path survived')
         for key in ('PYTHONHOME', 'PYTHONUSERBASE', 'CONDA_PREFIX', 'VIRTUAL_ENV', 'QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH', 'QML2_IMPORT_PATH',
                     'OPENCV_VIDEOIO_PLUGIN_PATH', 'OPENCV_CORE_PLUGIN_PATH', 'OPENCV_DNN_PLUGIN_PATH', 'OPENCV_UI_PLUGIN_PATH', 'OPENCV_OPENCL_RUNTIME',
                     'OPENCV_FFMPEG_DLL_DIR', 'OPENCV_DNN_IE_EXTRA_PLUGIN_PATH'):
@@ -295,8 +307,8 @@ def verify_archive(archive: Path, output: Path) -> dict:
                     case['command'] = command
                     with (evidence / 'launcher.log').open('w', encoding='utf-8') as stream:
                         subprocess.run(command, cwd=fixture['cwd'], env=env, stdout=stream, stderr=subprocess.STDOUT, check=True, timeout=4800)
-                    required = ('PySide6.QtWidgets', 'cv2', 'qfluentwidgets') + (('paddle',) if report['profile'] == 'paddle' else ())
-                    forbidden = ('paddle', 'paddleocr', 'paddlex', 'onnxruntime') if report['profile'] == 'native' else ()
+                    required = ('PySide6.QtWidgets', 'cv2', 'qfluentwidgets') + {'paddle': ('paddle',), 'directml': ('onnxruntime',)}.get(report['profile'], ())
+                    forbidden = ('paddle', 'paddleocr', 'paddlex', 'onnxruntime') if report['profile'] == 'native' else ('paddle', 'paddleocr', 'paddlex') if report['profile'] == 'directml' else ()
                     case['audit'] = summarize_reports(root, audit, required, forbidden, require_isolated=manifest['platform'] == 'windows', require_native_workers=manifest['platform'] == 'windows' and manifest.get('ocr_backend') == 'native')
                     check_environment_evidence(evidence, fixture, report['profile'], root)
                     if manifest['platform'] == 'macos':

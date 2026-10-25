@@ -297,6 +297,15 @@ def test_mac_source_wait_polls_pending_then_observes_success():
     assert result['records'][-1]['data']['source_job_conclusion'] == 'success'
 
 
+def test_mac_source_wait_accepts_unique_reusable_workflow_job_prefix():
+    script = _workflow_script('Wait read-only for same-run diagnostic source preparation')
+    job = _job('completed', 'success')
+    job['name'] = 'Retained Native CPU matrix / ' + job['name']
+    result = _run_workflow_script(script, [{'jobs': [job]}])
+    assert result['outputs']['available'] == 'true'
+    assert not result['failures']
+
+
 @pytest.mark.parametrize('download,reference_outcome', [('failure', 'skipped'), ('success', 'failure')])
 def test_artifact_or_reference_setup_failure_records_unavailable(download, reference_outcome):
     script = _workflow_script('Record explicit Mac reference availability and failure evidence')

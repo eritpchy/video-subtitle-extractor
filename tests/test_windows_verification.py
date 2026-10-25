@@ -192,18 +192,23 @@ class CoverageTests(unittest.TestCase):
 
 class WorkflowContractTests(unittest.TestCase):
     def test_native_push_covers_all_branches_but_not_release_tags(self):
-        text = (ROOT / '.github/workflows/native-ocr.yml').read_text()
+        text = (ROOT / '.github/workflows/release.yml').read_text()
         push = text.split('  push:\n', 1)[1].split('  pull_request:\n', 1)[0]
         # An explicit branches filter excludes tag pushes while '**' keeps
         # slash-containing branches such as release/2.3.0 in the existing CI.
         self.assertIn("    branches: ['**']\n", push)
         self.assertNotRegex(push, r'(?m)^    (?:tags|tags-ignore|branches-ignore):')
-        expected_paths = ['native/ocr/**', 'requirements*.txt', 'backend/**', 'ui/**',
-                          'gui.py', 'scripts/**', 'tests/**', '.github/workflows/native-ocr.yml']
-        pull_request = text.split('  pull_request:\n', 1)[1].split('\npermissions:', 1)[0]
+        expected_paths = ['.github/workflows/**', 'native/ocr/**', 'requirements*.txt', 'backend/**', 'ui/**',
+                          'gui.py', 'scripts/**', 'tests/**', 'docs/licenses/**']
+        pull_request = text.split('  pull_request:\n', 1)[1].split('  workflow_dispatch:\n', 1)[0]
+        import ast
         for section in (push, pull_request):
-            self.assertEqual(re.findall(r"^      - '(.+)'$", section, re.M), expected_paths)
-        dispatch = text.split('  workflow_dispatch:\n', 1)[1].split('  push:\n', 1)[0]
+            self.assertEqual(ast.literal_eval(re.search(r'^    paths: (\[.*\])$', section, re.M).group(1)), expected_paths)
+        native = (ROOT / '.github/workflows/native-ocr.yml').read_text()
+        self.assertNotIn('  push:', native)  # Parent owns automatic trigger, avoiding double builds.
+        self.assertIn('  workflow_call:', native)
+        self.assertIn('uses: ./.github/workflows/native-ocr.yml', text)
+        dispatch = native.split('  workflow_dispatch:\n', 1)[1].split('  workflow_call:\n', 1)[0]
         self.assertIn('acknowledge_vc_redistribution_license:', dispatch)
         self.assertIn('        default: false\n', dispatch)
         self.assertIn('        type: boolean\n', dispatch)

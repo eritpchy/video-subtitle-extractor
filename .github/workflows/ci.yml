@@ -133,7 +133,9 @@ jobs:
         run: python -m pip wheel -r requirements.txt -r requirements-inference.txt pytest==8.3.5 --wheel-dir build/wheelhouse
       - name: Build self-contained inference distribution
         id: package-build
-        run: python scripts/package_release.py --wheelhouse build/wheelhouse --output dist-ci
+        run: |
+          python scripts/paddle_package_models.py --output build/paddle-models --cache build/paddle-model-cache
+          python scripts/package_release.py --paddle-models build/paddle-models --wheelhouse build/wheelhouse --output dist-ci
       - name: Verify self-contained Linux distribution with native X11
         if: runner.os == 'Linux'
         shell: bash

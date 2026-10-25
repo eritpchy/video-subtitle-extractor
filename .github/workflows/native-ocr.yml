@@ -1,4 +1,4 @@
-name: Experimental native OCR one-click packages
+name: Native OCR one-click package validation
 
 on:
   workflow_dispatch:
@@ -8,33 +8,20 @@ on:
         required: false
         default: false
         type: boolean
-  push:
-    branches: ['**']
-    paths:
-      - 'native/ocr/**'
-      - 'requirements*.txt'
-      - 'backend/**'
-      - 'ui/**'
-      - 'gui.py'
-      - 'scripts/**'
-      - 'tests/**'
-      - '.github/workflows/native-ocr.yml'
-  pull_request:
-    paths:
-      - 'native/ocr/**'
-      - 'requirements*.txt'
-      - 'backend/**'
-      - 'ui/**'
-      - 'gui.py'
-      - 'scripts/**'
-      - 'tests/**'
-      - '.github/workflows/native-ocr.yml'
+  # Automatic builds are owned by release.yml, which calls this unchanged
+  # Native CPU validation chain alongside restored Windows GPU candidates.
+  workflow_call:
+    inputs:
+      acknowledge_vc_redistribution_license:
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: native-ocr-${{ github.ref }}
+  group: native-ocr-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -250,7 +237,7 @@ jobs:
                 const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
                   ...context.repo, run_id: context.runId, filter: 'latest', per_page: 100
                 });
-                const matches = jobs.filter(job => job.name === jobName);
+                const matches = jobs.filter(job => job.name === jobName || job.name.endsWith(' / ' + jobName));
                 if (matches.length > 1) throw new Error('Ambiguous diagnostic source jobs in this run');
                 if (matches.length === 1) {
                   const job = matches[0];
@@ -344,7 +331,7 @@ jobs:
           python -m pytest native/ocr/tests tests/test_native_ocr.py tests/test_native_ocr_integration.py
           tests/test_native_package.py tests/test_release_packaging.py
           tests/test_runtime_dependencies.py tests/test_prune_inference_runtime.py
-          tests/test_portable_environment.py tests/test_portable_python.py
+          tests/test_portable_environment.py tests/test_portable_python.py tests/test_macos_icon.py
           tests/test_windows_runtime_isolation.py tests/test_check_runtime.py
           tests/test_windows_app_local_runtime.py tests/test_windows_os_evidence.py tests/test_windows_native_worker_evidence.py
           tests/test_standalone_runtime_probe.py tests/test_windows_verification.py
@@ -436,6 +423,10 @@ jobs:
           for archive in dist-native/*linux-x64-native-cpu.zip; do
             python scripts/verify_clean_linux_bundle.py --archive "$archive" --output test-results/clean-native-linux
           done
+      - name: Bind final launcher and isolation acceptance to the exact ZIP
+        run: >-
+          python scripts/accept_release_archive.py --archives dist-native
+          --portable-evidence test-results/${{ matrix.platform }}/portable-environment
       - name: Report Windows coverage including failed and skipped stages
         if: always() && runner.os == 'Windows'
         env:
@@ -478,3 +469,15 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
+      - name: Preserve canonical Native candidate with hash-bound acceptance
+        if: matrix.os != 'windows-2025'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-${{ matrix.platform }}-${{ matrix.arch }}-native-cpu
+          path: |
+            dist-native/*.zip
+            dist-native/*.zip.sha256
+            dist-native/*.zip.acceptance.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

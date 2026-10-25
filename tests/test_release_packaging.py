@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
 import tempfile
 import unittest
@@ -137,8 +138,13 @@ class PackageTests(unittest.TestCase):
                 (stage / 'runtime/bin').mkdir(parents=True)
                 (stage / 'runtime/bin/python3.12').write_bytes(b'portable Python')
                 return {'python': 'runtime/bin/python3.12', 'provider': 'test'}
+            def fake_models(source, destination):
+                # Model integrity has its own fixed-pin tests; this fixture
+                # exercises archive selection without downloading real weights.
+                shutil.copytree(source, destination)
+                return {'fixture_only': True}
             outputs = ["a" * 40 + "\n", "", b"backend/config.py\0scripts/bundle_bootstrap.py\0"]
-            with patch("scripts.package_release.host_platform", return_value=("linux", "x64")), patch("scripts.package_release.subprocess.check_output", side_effect=outputs), patch("scripts.package_release.subprocess.run"), patch("scripts.package_release.runtime_wheels", return_value=([root / "wheelhouse/sample-1.0-py3-none-any.whl"], ["sample==1.0"])), patch("scripts.package_release.build_runtime", side_effect=fake_runtime), patch("scripts.package_release.portable_launchers"), patch("scripts.bundle_linux_runtime_libs.bundle_linux_libraries", return_value={}) as native_closure:
+            with patch("scripts.package_release.host_platform", return_value=("linux", "x64")), patch("scripts.package_release.subprocess.check_output", side_effect=outputs), patch("scripts.package_release.subprocess.run"), patch("scripts.package_release.runtime_wheels", return_value=([root / "wheelhouse/sample-1.0-py3-none-any.whl"], ["sample==1.0"])), patch("scripts.package_release.build_runtime", side_effect=fake_runtime), patch("scripts.package_release.portable_launchers"), patch("scripts.paddle_package_models.stage_paddle_models", side_effect=fake_models), patch("scripts.bundle_linux_runtime_libs.bundle_linux_libraries", return_value={}) as native_closure:
                 archive_path = create_bundle(root / "wheelhouse", root / "dist", root)
                 self.assertEqual(native_closure.call_args.kwargs, {"profile": "paddle"})
                 self.assertEqual(native_closure.call_count, 1)
