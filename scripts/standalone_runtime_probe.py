@@ -71,8 +71,10 @@ cryptdll samlib apphelp edputil policymanager vaultcli bcp47langs oleacc
 atlthunk cabinet urlmon iertutil winrnr pnrpnsp nlansp_c wshbth napinsp
 hid winusb normaliz rstrtmgr slc sppc windows.staterepositoryclient
 windows.staterepositorycore windows.staterepositoryps portcls wdmaud.drv
-msacm32.drv midimap explorerframe dataexchange twinapi.appcore twinapi
+msacm32.drv midimap explorerframe dataexchange twinapi.appcore twinapi avicap32
 """.split())
+# avicap32 is the Windows Video for Windows capture API, not a vendor runtime:
+# https://learn.microsoft.com/en-us/windows/win32/api/vfw/nf-vfw-capcreatecapturewindowa
 
 
 LINUX_BASE = re.compile(r"^(?:ld-linux[^/]*\.so(?:\.\d+)*|lib(?:c|m|dl|pthread|rt|util|resolv|anl|BrokenLocale|nss_(?:files|dns|compat|hesiod))\.so(?:\.\d+)*)$")

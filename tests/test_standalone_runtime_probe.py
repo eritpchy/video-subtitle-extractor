@@ -32,7 +32,7 @@ def test_windows_external_non_os_runtime_rejected(name):
     assert library_violation('C:\\VSE\\runtime\\' + name, r'C:\VSE', 'Windows') is None
 
 
-@pytest.mark.parametrize('name', ['kernel32.dll', 'ucrtbase.dll', 'msvcp_win.dll', 'DWrite.dll', 'api-ms-win-core-file-l1-1-0.dll'])
+@pytest.mark.parametrize('name', ['kernel32.dll', 'ucrtbase.dll', 'msvcp_win.dll', 'DWrite.dll', 'AVICAP32.dll', 'api-ms-win-core-file-l1-1-0.dll'])
 def test_windows_os_runtime_allowed(name):
     assert library_violation('C:\\Windows\\System32\\' + name, r'C:\VSE', 'Windows') is None
     assert library_violation('C:\\other\\' + name, r'C:\VSE', 'Windows')
@@ -42,6 +42,7 @@ def test_windows_case_prefix_and_neighbor_paths():
     assert library_violation(r'\\?\C:\VSE\runtime\VCRUNTIME140.dll', r'c:\vse', 'Windows') is None
     assert library_violation(r'C:\VSE-other\runtime\python312.dll', r'C:\VSE', 'Windows')
     assert library_violation(r'C:\Windows\System32-evil\kernel32.dll', r'C:\VSE', 'Windows')
+    assert library_violation(r'C:\Windows\System32-evil\AVICAP32.dll', r'C:\VSE', 'Windows')
 
 
 @pytest.mark.parametrize('path', ['/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation', '/usr/lib/libSystem.B.dylib'])
@@ -338,7 +339,7 @@ def test_windows_native_discovery_in_architecture_directory(tmp_path):
     exe = tmp_path / 'backend/subfinder/windows/x64/VideoSubFinderCli.exe'
     ffmpeg = tmp_path / 'runtime/Lib/site-packages/imageio_ffmpeg/binaries/ffmpeg-win-x86_64.exe'
     for path in (exe, ffmpeg):
-        _write_pe(path, ['kernel32.dll'])
+        _write_pe(path, ['kernel32.dll', 'AVICAP32.dll'])
     result = probe.audit_windows_executables(tmp_path, tmp_path / 'runtime/python.exe', tmp_path / 'reports')
     assert len(result['executables']) == 2
 
