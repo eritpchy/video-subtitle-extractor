@@ -44,7 +44,7 @@ python native/ocr/build.py --platform windows --arch x64 --generator Ninja --mod
 `vswhere` discovers installed C++ toolchains rather than assuming a Visual Studio
 year or installation path. The helper selects an installed v143/14.44 x64 toolset
 whose own `include/crtversion.h` CRT version is no newer than the committed
-`vc-runtime-manifest.json` **14.44.35211.0** runtime. It initializes that exact
+`vc-runtime-manifest.json` **14.51.36247.0** runtime. It initializes that exact
 toolset with `VsDevCmd.bat -arch=x64 -host_arch=x64 -vcvars_ver=<version>`, verifies
 compiler/linker and INCLUDE/LIB precedence, and keeps pinned CMake **4.1.2** and
 Ninja **1.13.0** ahead of Visual Studio's bundled tools. The compiler's 19.44
@@ -161,17 +161,31 @@ The workflow must not package or upload this as a customer candidate.
 
 Only when the distributor has confirmed applicable Microsoft redistribution rights
 may `--acknowledge-vc-redistribution-license` enable the pinned app-local VC source.
-The helper statically extracts the reviewed 14.44.35211.0 official package; it never
-executes the installer or copies ordinary System32 DLLs. Four DLLs and the exact
-license are hash-verified. `--vc-runtime-dir` + `--vc-license` can instead supply
-those same pinned bytes explicitly. Merely finding Visual Studio on a runner does
+The helper statically extracts the reviewed **14.51.36247.0** official package; it
+never executes the installer or copies ordinary System32 DLLs. This pin covers
+the actual **14.44.35220.0** CRT headers observed in Server 2022/2025 CI; neither
+the 14.44 compiler-family restriction nor the header/runtime comparison is relaxed.
+Four x64 DLLs and two independently hash-pinned official license documents are
+verified. The current package links to the 2026 terms instead of embedding an RTF;
+the original 2015–2022 notice is also preserved, without replacing the current
+terms. Downloads are content-addressed and verified even on cache hits.
+`--vc-runtime-dir` + `--vc-license` can instead supply those same pinned bytes
+explicitly (`license.docx` plus the historical notice and four DLLs). Merely finding Visual Studio on a runner does
 not establish the repository owner's licensing qualification.
 
 Microsoft's [redistribution guidance](https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files?view=msvc-170)
 limits redistribution to licensed Visual Studio users under applicable terms;
-[the runtime terms](https://visualstudio.microsoft.com/license-terms/vs2022-cruntime/)
+[the current runtime terms](https://visualstudio.microsoft.com/license-terms/vs2026-ga-visualcpp-v14-redist-runtime/),
+[the previous runtime notice](https://visualstudio.microsoft.com/license-terms/vs2022-cruntime/)
 and the applicable VS REDIST list must be retained/observed. Source hashes prove
 origin, not entitlement. No CI command should automatically assert unverified rights.
+The current [VS 2022 REDIST list](https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution)
+also references the latest downloadable runtime for licensed Visual Studio users;
+this is not a determination of any particular distributor's contractual rights.
+The 2026 terms have changed, including use/updated-terms, feedback and trade-law
+provisions. Reviewing/downloading these documents is not an explicit acceptance;
+the applicable qualification must be established before activating distribution.
+Python's existing Shiboken/PySide CRT source is separate and is not changed here.
 
 ## Remaining release gates
 

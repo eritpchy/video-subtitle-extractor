@@ -1,6 +1,7 @@
 """Explicit PaddleOCR model selection, without importing the inference runtime."""
 import os
 from pathlib import Path
+import sys
 
 
 class PaddleModelConfig:
@@ -127,7 +128,7 @@ class PaddleModelConfig:
         kwargs = {'model_name': self.DET_MODEL_NAME}
         local = self._local_model_dir(self.DET_MODEL_PATH, self.DET_MODEL_NAME)
         if local:
-            kwargs['model_dir'] = local
+            kwargs['model_dir'] = self._paddle_native_model_dir(local)
         return kwargs
 
     def ocr_kwargs(self):
@@ -141,7 +142,39 @@ class PaddleModelConfig:
         ):
             local = self._local_model_dir(path, name)
             if local:
-                kwargs[f'{prefix}_model_dir'] = local
+                kwargs[f'{prefix}_model_dir'] = self._paddle_native_model_dir(local)
             elif os.environ.get('VSE_OFFLINE') == '1':
                 raise FileNotFoundError(f'Missing {name} in offline mode. Pre-bundle the official model at {path}.')
         return kwargs
+
+    @staticmethod
+    def _paddle_native_model_dir(directory):
+        """Avoid Windows narrow-character model opens without moving weights.
+
+        Paddle 3.3.1 PIR ReadModule passes a std::string path to std::ifstream.
+        Its Python configuration can see a Unicode filename that that native
+        open may not read. Portable launchers already set the package as CWD;
+        its model suffix is ASCII, even when the containing package is not.
+        PaddleX preserves this relative directory through predictor creation.
+
+        Compute in the consuming process, not when a config is pickled. Never
+        chdir, copy/download weights, change the selected model or use 8.3 names
+        (which need not exist). Other paths/platforms keep their original form.
+        """
+        if sys.platform != 'win32' or directory.isascii():
+            return directory
+        absolute = Path(directory).resolve(strict=True)
+        try:
+            relative = os.path.relpath(absolute, Path.cwd())
+        except ValueError:  # Different drives cannot share a relative path.
+            return directory
+        if not relative.isascii():
+            return directory
+        candidate = Path(relative)
+        if not candidate.samefile(absolute):
+            raise RuntimeError('Paddle model path identity changed during native path preparation')
+        for filename in ('inference.yml', 'inference.json', 'inference.pdmodel', 'inference.pdiparams'):
+            original = absolute / filename
+            if original.is_file() and not (candidate / filename).samefile(original):
+                raise RuntimeError(f'Paddle model file identity changed: {filename}')
+        return relative

@@ -47,6 +47,17 @@ def test_compiler_patch_is_not_a_synthetic_crt_minimum():
     toolchain.check_versions('14.44.35207', '19.44.35299.7', '14.44.35299.7', '14.44.35207.0', RUNTIME)
 
 
+def test_actual_server_header_needs_updated_app_local_runtime_not_gate_relaxation():
+    runtime = json.loads((Path(toolchain.__file__).parent / 'vc-runtime-manifest.json').read_text())['version']
+    assert runtime == '14.51.36247.0'
+    observed = ('14.44.35207', '19.44.35222.0', '14.44.35222.0', '14.44.35220.0')
+    with pytest.raises(RuntimeError, match='newer than pinned VC runtime'):
+        toolchain.check_versions(*observed, '14.44.35211.0')
+    toolchain.check_versions(*observed, runtime)
+    with pytest.raises(RuntimeError, match='Require reviewed MSVC'):
+        toolchain.check_versions('14.51.36247', '19.51.36247.0', runtime, runtime, runtime)
+
+
 @pytest.mark.parametrize('versions', [
     ('14.50.35717', '19.50.35717.0', '14.50.35717.0', '14.50.35717.0'),
     ('14.44.35207', '19.50.35717.0', '14.44.35211.0', RUNTIME),
@@ -125,10 +136,13 @@ def test_prepare_discovers_installed_version_and_preserves_pinned_build_tools(tm
 
 def test_missing_compatible_installed_tools_records_mismatch_before_any_command(tmp_path):
     installation, _, _ = fixture_tools(tmp_path, crt='14.44.35212.0')
+    # Exercise the old ceiling independently of the reviewed current runtime pin.
+    pins = tmp_path / 'pins'; pins.mkdir()
+    (pins / 'vc-runtime-manifest.json').write_text(json.dumps({'version': RUNTIME}))
     fake_os = SimpleNamespace(name='nt', environ={'ProgramFiles(x86)': str(tmp_path)})
     discovery = json.dumps([{'installationPath': str(installation), 'installationVersion': '17.14.fixture'}])
     report = {}
-    with patch.object(toolchain, 'os', fake_os), patch.object(toolchain, 'pinned_build_tools', return_value={}), \
+    with patch.object(toolchain, 'ROOT', pins), patch.object(toolchain, 'os', fake_os), patch.object(toolchain, 'pinned_build_tools', return_value={}), \
             patch.object(toolchain, 'file_version', side_effect=file_version), \
             patch.object(toolchain.subprocess, 'check_output', return_value=discovery), \
             patch.object(toolchain.subprocess, 'run') as run, pytest.raises(RuntimeError, match='No installed'):

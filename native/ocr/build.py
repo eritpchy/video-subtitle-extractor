@@ -124,8 +124,15 @@ def vc_runtime(directory, license_file, stage, required, acknowledged=False):
             raise FileNotFoundError('Required redistributable DLL missing: ' + name)
         shutil.copy2(p, stage / name)
         records.append({'source': str(p), 'file': name, 'sha256': sha256(p), 'bytes': p.stat().st_size})
-    shutil.copy2(license_file, stage / 'licenses/Visual-Cpp-redistributable-license.txt')
-    return {'complete': True, 'files': records, 'license_sha256': sha256(license_file), 'official_source': manifest['installer'],
+    notices = []
+    for row in manifest['files']:
+        if row['name'].endswith('.dll'):
+            continue
+        source = license_file if row['name'] == manifest['license_file'] else directory / row['name']
+        target = stage / 'licenses' / ('Visual-Cpp-redistributable-' + row['name'])
+        shutil.copy2(source, target)  # Keep original document bytes/format, including the previous notice.
+        notices.append({'file': target.relative_to(stage).as_posix(), 'sha256': sha256(source), 'source': row['url']})
+    return {'complete': True, 'files': records, 'license_sha256': sha256(license_file), 'notices': notices, 'official_source': manifest['installer'],
             'scope': 'Caller-supplied licensed redistributable source; final PE/ownership audit remains required.'}
 
 
@@ -236,9 +243,9 @@ def build(a):
         (stage / 'dependency-source-manifest.json').write_text(json.dumps(dependency, indent=2) + '\n', encoding='utf-8')
         copy_notices(source, sdk, stage, sdk_record)
         if a.platform == 'windows' and a.acknowledge_vc_redistribution_license and a.vc_runtime_dir is None:
-            from vc_runtime_helper import fetch as fetch_vc
+            from vc_runtime_helper import fetch as fetch_vc, load_manifest as vc_manifest
             a.vc_runtime_dir = fetch_vc(work / 'vc-runtime', cache / 'vc-runtime', offline=a.offline, acknowledge_license=True)
-            a.vc_license = a.vc_runtime_dir / 'license.rtf'
+            a.vc_license = a.vc_runtime_dir / vc_manifest()['license_file']
         vc = vc_runtime(a.vc_runtime_dir, a.vc_license, stage, sdk_record.get('required_vc_runtime_dlls', []), a.acknowledge_vc_redistribution_license) if a.platform == 'windows' else None
         provenance = {'cmake': subprocess.check_output([a.cmake, '--version'], text=True).splitlines()[0],
                       'host': platform.platform(), 'ort_archive': sdk_record['archive'],
