@@ -59,7 +59,9 @@ class SubtitleExtractorGUI(FluentWindow):
         # 任何尺寸下都悬浮展开, 防止窗口撑大
         self.navigationInterface.panel.minimumExpandWidth = 999999
         # 设置窗口图标
-        icon = QtGui.QIcon(os.path.join(os.path.dirname(os.path.abspath(__file__)), "design", "vse.ico"))
+        from pathlib import Path
+        from ui.app_icon import load_app_icon
+        icon = load_app_icon(Path(__file__).resolve().parent)
         # Use the same alpha-preserving artwork for the title bar and app/dock.
         if application is not None:
             application.setWindowIcon(icon)

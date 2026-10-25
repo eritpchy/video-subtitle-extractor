@@ -290,10 +290,10 @@ def write_launchers(root: Path, target_platform: str | None = None, target_arch:
                 'NSHighResolutionCapable': True}
         png = root / 'design/icon_1024.png'
         if png.exists():
-            from PIL import Image
-            with Image.open(png) as icon:
-                if icon.convert('RGBA').getpixel((0, 0))[3] != 0:
-                    raise ValueError('App icon must retain rounded transparent corners')
-                icon.save(app / 'Resources/vse.icns', format='ICNS')
+            try:
+                from .build_macos_icon import export_macos_icon
+            except ImportError:
+                from build_macos_icon import export_macos_icon
+            export_macos_icon(png, root / 'vse.icns')
             info['CFBundleIconFile'] = 'vse.icns'
         (app / 'Info.plist').write_bytes(plistlib.dumps(info))
