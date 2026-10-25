@@ -45,3 +45,16 @@ docker rm vse-smoke
 ```
 
 This generates a synthetic subtitle video, invokes real VSF and PP-OCRv6, and checks recognized SRT text and timestamps. Read `report.json`, `recognized.srt`, and `extraction.log`. A successful `--help` alone is not an end-to-end test. The CI Docker job runs the same extraction and uploads its evidence; do not claim Docker passed until that job completes successfully for the intended commit.
+
+
+## Inference runtime size
+
+A multi-stage build resolves the same audited inference-only wheel closure as
+native bundles, then copies only `/opt/venv` into the final image. Build-only
+wheels, pip caches, Qt WebEngine/Addons/PDF, SciPy/scikit-image, LMDB and generated
+Python bytecode are not retained in runtime layers. The explicit Fluent Widgets
+PySide6 meta-package substitution is described in [release-and-ci.md](release-and-ci.md).
+The non-root runtime rechecks dependency compatibility and real native imports.
+All selected V6 tiers and reachable bundled language fallback models are retained.
+Measure final image size separately from builder cache size; build caches are not
+part of the shipped runtime image.

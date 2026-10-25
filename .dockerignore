@@ -23,3 +23,10 @@ backend/subfinder/macos
 backend/subfinder/linux/*
 !backend/subfinder/linux/settings
 backend/models/V6
+
+# V6 detector/recognizers supersede these unreachable generic V5 weights.
+# Keep all language-specific fallback recognizers.
+backend/models/V5/PP-OCRv5_server_det_infer
+backend/models/V5/PP-OCRv5_server_rec_infer
+backend/models/V5/PP-OCRv5_mobile_det_infer
+backend/models/V5/PP-OCRv5_mobile_rec_infer

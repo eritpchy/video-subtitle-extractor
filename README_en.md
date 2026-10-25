@@ -61,7 +61,7 @@ Key features:
 > This will replace all occurrences of "威筋" with "威胁" and delete all "性感荷官在线发牌" text
 
 - Spaces and Unicode in video paths are supported by the shell-free CLI and covered by regression tests.
-- Current CPU packages contain source, verified models/runtime and an offline wheelhouse. They require native Python 3.12; they are not standalone EXE/app installers. See [release instructions](docs/release-and-ci.md).
+- New CPU one-click packages include Python, curated inference libraries, models and VSF. Customers do not install Python or dependencies. Run `Start-VSE.bat` on Windows, open the `.app` on macOS, or run `Start-VSE.sh` on Linux. See [release instructions](docs/release-and-ci.md) for tested OS limits and validation status.
 
 **Downloads**: [this fork's releases](https://github.com/eritpchy/video-subtitle-extractor/releases). Historical assets do not certify the new PP-OCRv6 changes; check the exact release commit and completed CI.
 

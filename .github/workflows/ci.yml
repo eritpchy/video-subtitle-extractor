@@ -103,6 +103,31 @@ jobs:
         env:
           VSE_OFFLINE: '1'
         run: python scripts/e2e_issues.py --output test-results/issues
+      - name: Resolve native inference bundle wheels
+        run: python -m pip wheel -r requirements.txt -r requirements-inference.txt pytest==8.3.5 --wheel-dir build/wheelhouse
+      - name: Build self-contained inference distribution
+        run: python scripts/package_release.py --wheelhouse build/wheelhouse --output dist-ci
+      - name: Verify self-contained Linux distribution with native X11
+        if: runner.os == 'Linux'
+        shell: bash
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" env QT_QPA_PLATFORM=xcb python scripts/package_release.py --verify dist-ci --smoke
+      - name: Verify self-contained Windows or macOS distribution
+        if: runner.os != 'Linux'
+        run: python scripts/package_release.py --verify dist-ci --smoke
+      - name: Verify Linux package without host Python or native libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          for archive in dist-ci/*linux-x64-cpu*.zip; do
+            python scripts/verify_clean_linux_bundle.py --archive "$archive" --output test-results/clean-linux
+          done
+      - name: Preserve inference distribution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inference-package-results-${{ matrix.os }}
+          path: dist-ci/test-results/
+          if-no-files-found: warn
       - name: Publish test evidence
         if: always()
         uses: actions/upload-artifact@v4

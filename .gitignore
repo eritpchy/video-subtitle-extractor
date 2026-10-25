@@ -381,3 +381,6 @@ $RECYCLE.BIN/
 
 # Native GUI test evidence
 /test-results/
+
+# Runtime dependency roots are release source, not local text output.
+!requirements-inference.txt

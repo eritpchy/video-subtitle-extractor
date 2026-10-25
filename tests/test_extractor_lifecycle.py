@@ -82,3 +82,12 @@ def test_failed_worker_with_pending_tasks_exits_python(tmp_path):
                             env=env, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "FAILED_WORKER_CLEANUP_OK" in result.stdout
+
+
+def test_packaged_work_directory_avoids_read_only_application(tmp_path, monkeypatch):
+    from backend.main import default_extraction_work_dir
+    writable = tmp_path / 'user-cache/work'
+    monkeypatch.setenv('VSE_WORK_DIR', str(writable))
+    assert Path(default_extraction_work_dir('movie')) == writable / 'movie'
+    monkeypatch.delenv('VSE_WORK_DIR')
+    assert Path(default_extraction_work_dir('movie')).name == 'movie'

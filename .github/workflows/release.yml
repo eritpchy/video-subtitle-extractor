@@ -95,11 +95,23 @@ jobs:
       - name: Bundle verified small and medium PP-OCRv6 models
         run: python -m backend.tools.model_download --tiers small medium --output backend/models/V6
       - name: Resolve offline wheels for this native platform
-        run: python -m pip wheel -r requirements.txt pytest==8.3.5 --wheel-dir build/wheelhouse
-      - name: Build source plus offline-wheelhouse package
+        run: python -m pip wheel -r requirements.txt -r requirements-inference.txt pytest==8.3.5 --wheel-dir build/wheelhouse
+      - name: Build self-contained inference package
         run: python scripts/package_release.py --wheelhouse build/wheelhouse --output dist
-      - name: Validate archived payload and install from its offline wheelhouse
+      - name: Verify self-contained Linux payload with native X11
+        if: runner.os == 'Linux'
+        shell: bash
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" env QT_QPA_PLATFORM=xcb python scripts/package_release.py --verify dist --smoke
+      - name: Verify self-contained Windows or macOS payload
+        if: runner.os != 'Linux'
         run: python scripts/package_release.py --verify dist --smoke
+      - name: Verify Linux payload in a clean offline OS container
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          for archive in dist/*linux-x64-cpu*.zip; do
+            python scripts/verify_clean_linux_bundle.py --archive "$archive" --output dist/test-results/clean-linux
+          done
       - name: Preserve packaged extraction evidence
         if: always()
         uses: actions/upload-artifact@v4

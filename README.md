@@ -60,7 +60,7 @@ Video-subtitle-extractor (VSE) 是一款将视频中的硬字幕提取为外挂�
 > 这样就可以把文本中出现的所有“威筋”替换为“威胁”，所有的“性感荷官在线发牌”文本删除
 
 - 新的无 shell CLI 支持视频路径中的空格与中文，相关行为已有回归测试。
-- 当前 CPU 软件包包含源码、已校验的模型与 VSF 运行时、离线 Python 依赖，需要原生 Python 3.12，并非独立 EXE/app 安装程序。详见[发布说明](docs/release-and-ci.md)。
+- 新版 CPU 一键包内置 Python、精简推理环境、模型和 VSF，客户无需安装 Python 或依赖。Windows 运行 `Start-VSE.bat`，macOS 打开应用 `.app`，Linux 运行 `Start-VSE.sh`。具体系统支持范围及验收状态见[发布说明](docs/release-and-ci.md)。
 
 **下载地址**：[本分支 Releases](https://github.com/eritpchy/video-subtitle-extractor/releases)。历史附件不代表已包含新的 PP-OCRv6 改动，请核对发布提交与对应 CI 结果。
 

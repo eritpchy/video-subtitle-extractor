@@ -1,10 +1,12 @@
-"""Create and verify native CPU source + offline-wheelhouse release archives."""
+"""Create and verify self-contained native CPU inference releases."""
 from __future__ import annotations
 
 import argparse
+from functools import lru_cache
 import ast
 from email.parser import BytesParser
 import json
+import importlib.util
 from pathlib import Path, PurePosixPath
 import re
 import shutil
@@ -16,12 +18,14 @@ import zipfile
 
 try:
     from .bundle_bootstrap import host_platform, sha256, verify_payload
+    from .runtime_dependencies import runtime_wheels
 except ImportError:
     from bundle_bootstrap import host_platform, sha256, verify_payload
+    from runtime_dependencies import runtime_wheels
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_DIRS = ("backend", "ui", "design", "scripts", "docs", "tests")
-SOURCE_FILES = ("gui.py", "requirements.txt", "LICENSE", "README.md", "README_en.md", "Dockerfile", ".dockerignore")
+SOURCE_DIRS = ("backend", "ui", "design", "scripts", "docs")
+SOURCE_FILES = ("gui.py", "requirements.txt", "requirements-inference.txt", "LICENSE", "README.md", "README_en.md", "Dockerfile", ".dockerignore")
 EXCLUDED_PARTS = {"__pycache__", ".pytest_cache", ".venv", ".git"}
 
 
@@ -35,8 +39,35 @@ def read_version(root: Path = ROOT) -> str:
     raise RuntimeError("backend/config.py must define a literal semantic VERSION")
 
 
+@lru_cache(maxsize=1)
+def inference_model_directories() -> frozenset[str]:
+    # Derive this from production selection, not a hand-maintained language list.
+    # Supplying every argument avoids importing GUI config or Paddle runtime.
+    spec = importlib.util.spec_from_file_location("vse_packaging_models", ROOT / "backend/tools/paddle_model_config.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    PaddleModelConfig = module.PaddleModelConfig
+
+    class Hardware:
+        def has_cuda(self):
+            return True  # Includes auto's largest possible tier too.
+
+    selected = set()
+    for language in PaddleModelConfig.MULTI_LANG:
+        for mode in ('fast', 'accurate', 'auto'):
+            model = PaddleModelConfig(Hardware(), language, mode, model_base='models')
+            for path in (model.DET_MODEL_PATH, model.REC_MODEL_PATH):
+                selected.add(Path(path).relative_to('models').as_posix())
+    return frozenset(selected)
+
+
 def include_source(relative: Path, target_platform: str, target_arch: str) -> bool:
     if any(part in EXCLUDED_PARTS for part in relative.parts) or relative.suffix in {".pyc", ".pyo", ".log"}:
+        return False
+    if relative.parts[:2] == ("backend", "models") and len(relative.parts) > 3:
+        if "/".join(relative.parts[2:4]) not in inference_model_directories():
+            return False
+    if relative.parts[0] == "design" and relative.name not in {"vse.ico", "icon_1024.png"}:
         return False
     if relative.parts[:2] == ("backend", "subfinder"):
         # Only the verified new native install, never obsolete bundled binaries.
@@ -44,9 +75,9 @@ def include_source(relative: Path, target_platform: str, target_arch: str) -> bo
     return True
 
 
-def wheel_lock(wheelhouse: Path) -> list[str]:
+def wheel_lock(wheelhouse: Path, selected: list[Path] | None = None) -> list[str]:
     packages: dict[str, str] = {}
-    wheels = sorted(wheelhouse.glob("*.whl"))
+    wheels = sorted(wheelhouse.glob("*.whl")) if selected is None else sorted(selected)
     if not wheels:
         raise RuntimeError("Wheelhouse is empty; run pip wheel -r requirements.txt first")
     for wheel in wheels:
@@ -63,6 +94,73 @@ def wheel_lock(wheelhouse: Path) -> list[str]:
             raise RuntimeError(f"Duplicate wheel for {normalized}; build with a clean wheelhouse")
         packages[normalized] = version
     return [f"{name}=={version}" for name, version in sorted(packages.items())]
+
+
+def finalize_portable_runtime(stage: Path, python: Path, env: dict) -> dict:
+    """Drop build-only pip/ensurepip without touching runtime package licenses."""
+    query = 'import json,sysconfig; print(json.dumps({k:sysconfig.get_path(k) for k in ("purelib","stdlib","scripts")}))'
+    paths = json.loads(subprocess.check_output([str(python), '-c', query], text=True, env=env))
+    runtime = stage / 'runtime'
+    roots = [Path(paths['purelib']) / 'pip', Path(paths['stdlib']) / 'ensurepip']
+    candidates = []
+    for directory in roots:
+        if directory.is_dir():
+            candidates.extend(path for path in directory.rglob('*') if path.is_file())
+    candidates.extend(path for path in Path(paths['scripts']).glob('pip*') if path.is_file() and re.fullmatch(r'pip(?:3(?:\.12)?)?(?:\.exe)?', path.name))
+    removed = []
+    for path in candidates:
+        if path.is_symlink() or not path.resolve().is_relative_to(runtime.resolve()):
+            raise RuntimeError(f'Unsafe interpreter build-tool path: {path}')
+        if path.name.lower().startswith(('license', 'licence', 'copying', 'notice', 'copyright')):
+            continue
+        removed.append({'path': path.relative_to(runtime).as_posix(), 'size': path.stat().st_size, 'sha256': sha256(path), 'reason': 'build-only installer; no client package installation'})
+    for entry in removed:
+        (runtime / entry['path']).unlink()
+    aliases = []
+    if python.name == 'python3.12':
+        # PBS archive aliases are materialized as files for safe ZIP extraction.
+        # Tiny shell aliases avoid shipping two redundant 31 MB interpreters.
+        for name in ('python', 'python3'):
+            alias = python.parent / name
+            if alias.is_file() and not alias.is_symlink() and sha256(alias) == sha256(python):
+                aliases.append({'path': alias.relative_to(runtime).as_posix(), 'original_size': alias.stat().st_size, 'original_sha256': sha256(alias)})
+                alias.write_text('#!/bin/sh\nexec "${0%/*}/python3.12" "$@"\n', encoding='utf-8')
+                alias.chmod(0o755)
+    report = {'removed': removed, 'interpreter_alias_wrappers': aliases, 'licenses_and_original_RECORD_retained': True}
+    (runtime / 'build-tool-prune.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+    return {'removed_bytes': sum(entry['size'] for entry in removed), 'alias_bytes_avoided': sum(entry['original_size'] for entry in aliases)}
+
+
+def build_runtime(stage: Path, wheels: list[Path], runtime_requirements: list[str], target_platform: str, target_arch: str) -> dict:
+    try:
+        from .portable_python import prepare_runtime
+    except ImportError:
+        from portable_python import prepare_runtime
+    info = prepare_runtime(stage / 'runtime', target_platform, target_arch)
+    # Interpreter helper returns a path relative to the bundle root and pinned
+    # provenance. The build host's pip drives the bundled interpreter; no pip
+    # invocation or dependency installation occurs on customers' computers.
+    python = Path(info["python"]).resolve()
+    env = dict(__import__('os').environ, PYTHONDONTWRITEBYTECODE='1', PYTHONNOUSERSITE='1')
+    subprocess.run([sys.executable, '-m', 'pip', '--python', str(python), 'install', '--no-cache-dir', '--no-index', '--no-deps', '--no-compile', *map(str, wheels)], check=True, env=env)
+    info['build_tools'] = finalize_portable_runtime(stage, python, env)
+    profile = stage / 'runtime/runtime-profile.json'
+    profile.write_text(json.dumps({'runtime_requirements': runtime_requirements}), encoding='utf-8')
+    prune = [str(python), str(stage / 'scripts/prune_inference_runtime.py'), '--apply', '--manifest', str(stage / 'runtime/inference-prune.json')]
+    if (target_platform, target_arch) == ('linux', 'x64'):
+        prune.append('--include-unused-openvino')
+    subprocess.run(prune, check=True, env=env)
+    subprocess.run([str(python), str(stage / 'scripts/runtime_dependencies.py'), '--manifest', str(profile)], check=True, env=env)
+    info = dict(info, python=python.relative_to(stage.resolve()).as_posix())
+    return info
+
+
+def portable_launchers(stage: Path, target_platform: str, target_arch: str, runtime_python: str) -> None:
+    try:
+        from .portable_python import write_launchers
+    except ImportError:
+        from portable_python import write_launchers
+    write_launchers(stage, target_platform, target_arch, runtime_python)
 
 
 def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT) -> Path:
@@ -82,13 +180,16 @@ def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT) -> Path:
         raise RuntimeError("Download PP-OCRv6 small and medium models before packaging")
     subprocess.run([sys.executable, "-m", "backend.tools.model_download", "--tiers", "small", "medium", "--verify-only"], cwd=root, check=True)
     subprocess.run([sys.executable, "scripts/install_videosubfinder.py", "--verify-only"], cwd=root, check=True)
-    lock = wheel_lock(wheelhouse)
+    wheels, runtime_requirements = runtime_wheels(wheelhouse, root / "requirements-inference.txt")
+    # Resolve the dependency graph first, then lock only the selected untouched wheels.
+    lock = wheel_lock(wheelhouse, selected=wheels)
     output.mkdir(parents=True, exist_ok=True)
-    name = f"vse-{version}-{target_platform}-{target_arch}-cpu-python312"
+    name = f"vse-{version}-{target_platform}-{target_arch}-cpu"
     archive_path = output / f"{name}.zip"
     with tempfile.TemporaryDirectory(prefix="vse-package-") as temporary:
-        stage = Path(temporary) / name
-        stage.mkdir()
+        archive_root = Path(temporary) / name
+        stage = archive_root / 'Video Subtitle Extractor.app/Contents/Resources' if target_platform == 'macos' else archive_root
+        stage.mkdir(parents=True)
         tracked = subprocess.check_output(["git", "ls-files", "-z"], cwd=root).decode("utf-8").split("\0")
         source_paths = {root / path for path in tracked if path and Path(path).parts[0] in SOURCE_DIRS}
         # These runtime additions are deliberately not committed; their own
@@ -110,20 +211,32 @@ def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT) -> Path:
             if source.is_file():
                 shutil.copy2(source, stage / relative)
         shutil.copy2(root / "scripts/bundle_bootstrap.py", stage / "bootstrap.py")
-        shutil.copytree(wheelhouse, stage / "wheelhouse", ignore=lambda _, names: [name for name in names if not name.endswith(".whl")])
-        (stage / "requirements-lock.txt").write_text("\n".join(lock) + "\n", encoding="utf-8")
-        (stage / "Start VSE.cmd").write_text('@echo off\r\ncd /d "%~dp0"\r\npy -3.12 bootstrap.py %*\r\nif errorlevel 1 pause\r\n', encoding="utf-8")
-        launcher = '#!/bin/sh\nset -eu\ncd -- "$(dirname -- "$0")"\nexec python3.12 bootstrap.py "$@"\n'
-        for filename in ("start-vse.sh", "Start VSE.command"):
-            path = stage / filename
-            path.write_text(launcher, encoding="utf-8")
-            path.chmod(0o755)
-        manifest = {"format": 1, "version": version, "commit": revision, "platform": target_platform, "arch": target_arch, "python": "3.12", "distribution": "CPU source and offline wheels; requires Python 3.12", "files": {path.relative_to(stage).as_posix(): sha256(path) for path in sorted(stage.rglob("*")) if path.is_file()}}
+        (stage / 'requirements-lock.txt').write_text('\n'.join(lock) + '\n', encoding='utf-8')
+        runtime_info = build_runtime(stage, wheels, runtime_requirements, target_platform, target_arch)
+        if target_platform == 'linux':
+            try:
+                from .bundle_linux_runtime_libs import bundle_linux_libraries
+            except ImportError:
+                from bundle_linux_runtime_libs import bundle_linux_libraries
+            runtime_info['native_libraries'] = bundle_linux_libraries(stage, stage / runtime_info['python'])
+        portable_launchers(stage, target_platform, target_arch, runtime_info["python"])
+        app_files = {}
+        if target_platform == 'macos':
+            app_root = stage.parent.parent
+            app_files = {path.relative_to(app_root).as_posix(): sha256(path) for path in app_root.rglob('*') if path.is_file() and not path.is_relative_to(stage)}
+        manifest = {"app_files": app_files, "format": 2, "version": version, "commit": revision, "platform": target_platform, "arch": target_arch, "python": "3.12", "distribution": "self-contained CPU inference runtime", "runtime_python": runtime_info["python"], "runtime_provenance": runtime_info, "runtime_requirements": runtime_requirements, "files": {path.relative_to(stage).as_posix(): sha256(path) for path in sorted(stage.rglob("*")) if path.is_file()}}
         (stage / "bundle-manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
-            for path in sorted(stage.rglob("*")):
+        with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+            for path in sorted(archive_root.rglob("*")):
                 if path.is_file():
-                    archive.write(path, path.relative_to(stage.parent).as_posix())
+                    archive.write(path, path.relative_to(archive_root.parent).as_posix())
+        size_report = {"commit": revision, "platform": target_platform, "arch": target_arch,
+                       "compressed_archive_bytes": archive_path.stat().st_size,
+                       "extracted_payload_bytes": sum(path.stat().st_size for path in archive_root.rglob('*') if path.is_file()),
+                       "build_only_wheel_bytes": sum(wheel.stat().st_size for wheel in wheels),
+                       "shipped_wheelhouse_bytes": 0,
+                       "note": "Payload includes interpreter and installed inference runtime; no client installation or wheel cache."}
+        archive_path.with_suffix(".zip.size.json").write_text(json.dumps(size_report, indent=2) + "\n", encoding="utf-8")
     archive_path.with_suffix(".zip.sha256").write_text(f"{sha256(archive_path)}  {archive_path.name}\n", encoding="utf-8")
     return archive_path
 
@@ -155,23 +268,70 @@ def extract_checked(archive_path: Path, destination: Path) -> Path:
     return destination / next(iter(roots))
 
 
+def verification_path(python: Path, evidence: Path, target_platform: str) -> str:
+    """Expose explicit base OS tools, never the host's Python/pip directories."""
+    import os
+    tools_dir = evidence / 'base-os-tools'
+    tools_dir.mkdir(parents=True, exist_ok=False)
+    allowed = ['dirname'] if target_platform in ('linux', 'macos') else []
+    records = []
+    for name in allowed:
+        executable = shutil.which(name)
+        if not executable:
+            raise RuntimeError(f'Required base OS verification tool is missing: {name}')
+        source = Path(executable).resolve()
+        if not source.is_file():
+            raise RuntimeError(f'Invalid base OS verification tool: {source}')
+        (tools_dir / name).symlink_to(source)
+        records.append({'command': name, 'path': str(source), 'sha256': sha256(source), 'purpose': 'OS shell/coreutils used by verified upstream VSF launcher; not shipped'})
+    (evidence / 'base-os-tools.json').write_text(json.dumps(records, indent=2) + '\n', encoding='utf-8')
+    return os.pathsep.join((str(python.parent), str(tools_dir)))
+
+
 def verify_bundle(archive_path: Path, smoke: bool) -> None:
     expected = archive_path.with_suffix(".zip.sha256").read_text(encoding="utf-8").split()[0]
     if sha256(archive_path) != expected:
         raise RuntimeError(f"Archive checksum mismatch: {archive_path.name}")
     with tempfile.TemporaryDirectory(prefix="vse-verify-") as temporary:
         root = extract_checked(archive_path, Path(temporary))
+        app_payload = root / 'Video Subtitle Extractor.app/Contents/Resources'
+        if (app_payload / 'bundle-manifest.json').is_file():
+            root = app_payload
         manifest = json.loads((root / "bundle-manifest.json").read_text(encoding="utf-8"))
         verify_payload(root, manifest)
         if smoke:
+            evidence = Path(temporary) / "verification-evidence"
             try:
-                subprocess.run([sys.executable, str(root / "bootstrap.py"), "--verify"], check=True, cwd=root)
+                import os
+                python = root / manifest['runtime_python']
+                # No system Python, pip or package manager can be found on PATH.
+                env = dict(os.environ, PATH=verification_path(python, evidence, manifest['platform']), PYTHONDONTWRITEBYTECODE='1', PYTHONNOUSERSITE='1')
+                env.pop('PYTHONPATH', None)
+                env.pop('PYTHONHOME', None)
+                if manifest['platform'] == 'linux':
+                    env['LD_LIBRARY_PATH'] = str(root / 'native-libs')
+                if (root / 'wheelhouse').exists() or (root / '.venv').exists():
+                    raise RuntimeError('Self-contained release must not ship installer wheels or a host venv')
+                try:
+                    from .standalone_runtime_probe import audit_environment, summarize_reports, audit_windows_executables, audit_macos_executables
+                except ImportError:
+                    from standalone_runtime_probe import audit_environment, summarize_reports, audit_windows_executables, audit_macos_executables
+                isolation_reports = evidence / 'dependency-isolation'
+                env.update(audit_environment(root, isolation_reports))
+                if manifest['platform'] == 'windows':
+                    audit_windows_executables(root, python, isolation_reports)
+                elif manifest['platform'] == 'macos':
+                    audit_macos_executables(root, isolation_reports)
+                subprocess.run([str(python), str(root / 'bootstrap.py'), '--verify', '--results-dir', str(evidence)], check=True, cwd=root, env=env)
+                summarize_reports(root, isolation_reports, required_modules=('PySide6.QtWidgets', 'paddle', 'cv2', 'qfluentwidgets'))
             finally:
                 # Preserve extraction evidence before TemporaryDirectory cleanup,
                 # especially when the child reports a path in a failed smoke.
-                evidence = root / "test-results"
                 if evidence.is_dir():
-                    shutil.copytree(evidence, archive_path.parent / "test-results" / archive_path.stem, dirs_exist_ok=True)
+                    prune_manifest = root / 'runtime/inference-prune.json'
+                    if prune_manifest.is_file():
+                        shutil.copy2(prune_manifest, evidence / 'inference-prune.json')
+                    shutil.copytree(evidence, archive_path.parent / "test-results" / archive_path.stem, dirs_exist_ok=True, ignore=lambda directory, names: ["base-os-tools"] if Path(directory) == evidence else [])
 
 
 def main() -> int:
@@ -179,7 +339,7 @@ def main() -> int:
     parser.add_argument("--wheelhouse", type=Path)
     parser.add_argument("--output", type=Path, default=Path("dist"))
     parser.add_argument("--verify", type=Path, help="Verify all bundle ZIPs in this directory")
-    parser.add_argument("--smoke", action="store_true", help="Offline-install extracted bundle and test real GUI/CLI")
+    parser.add_argument("--smoke", action="store_true", help="Test included interpreter/runtime with no client installation or host Python")
     args = parser.parse_args()
     if args.verify:
         archives = sorted(args.verify.glob("*.zip"))

@@ -10,8 +10,8 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-from scripts.bundle_bootstrap import sha256, verify_payload
-from scripts.package_release import create_bundle, extract_checked, include_source, read_version, wheel_lock, verify_bundle
+from scripts.bundle_bootstrap import sha256, verify_payload, write_size_report, main as bootstrap_main, configure_user_paths
+from scripts.package_release import create_bundle, extract_checked, include_source, read_version, wheel_lock, verify_bundle, verification_path
 from scripts.release_guard import assert_target, remote_tag_commit, validate_tag
 
 
@@ -53,6 +53,23 @@ class PackageTests(unittest.TestCase):
         for path in ("backend/subfinder/windows/x64/VideoSubFinderCli.exe", "backend/subfinder/linux/VideoSubFinderCli", "backend/__pycache__/config.pyc"):
             self.assertFalse(include_source(Path(path), "linux", "x64"))
 
+    def test_models_follow_every_language_and_mode(self):
+        from scripts.package_release import inference_model_directories
+        selected = inference_model_directories()
+        self.assertIn('V6/PP-OCRv6_small_rec_infer', selected)
+        self.assertIn('V6/PP-OCRv6_medium_rec_infer', selected)
+        for model in ('korean', 'arabic', 'cyrillic', 'latin', 'eslav', 'devanagari', 'th', 'el'):
+            self.assertTrue(include_source(Path(f'backend/models/V5/{model}_PP-OCRv5_mobile_rec_infer/inference.pdiparams'), 'linux', 'x64'))
+        self.assertTrue(include_source(Path('backend/models/V3/ka_PP-OCRv3_mobile_rec_infer/inference.pdiparams'), 'linux', 'x64'))
+        for model in ('server_det', 'server_rec', 'mobile_det', 'mobile_rec'):
+            self.assertFalse(include_source(Path(f'backend/models/V5/PP-OCRv5_{model}_infer/inference.pdiparams'), 'linux', 'x64'))
+
+    def test_design_keeps_rounded_icon_not_marketing_media(self):
+        for name in ("vse.ico", "icon_1024.png"):
+            self.assertTrue(include_source(Path("design") / name, "linux", "x64"))
+        for name in ("demo.gif", "paper (2020).pdf", "demo.png"):
+            self.assertFalse(include_source(Path("design") / name, "linux", "x64"))
+
     def test_payload_checksum_detects_change_and_traversal(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -81,17 +98,21 @@ class PackageTests(unittest.TestCase):
     def test_bundle_roundtrip_excludes_untracked_source(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "repo"
-            for directory in ("backend/subfinder/linux/x64", "backend/models/V6", "scripts", "wheelhouse"):
+            for directory in ("backend/subfinder/linux/x64", "backend/models/V6/PP-OCRv6_small_rec_infer", "scripts", "wheelhouse"):
                 (root / directory).mkdir(parents=True)
             (root / "backend/config.py").write_text('VERSION = "2.3.0"\n', encoding="utf-8")
             (root / "backend/private-untracked.json").write_text("must not ship", encoding="utf-8")
             (root / "backend/subfinder/linux/x64/VideoSubFinderCli").write_text("runtime", encoding="utf-8")
-            (root / "backend/models/V6/model.json").write_text("model", encoding="utf-8")
+            (root / "backend/models/V6/PP-OCRv6_small_rec_infer/model.json").write_text("model", encoding="utf-8")
             (root / "scripts/bundle_bootstrap.py").write_text("# bootstrap", encoding="utf-8")
             with zipfile.ZipFile(root / "wheelhouse/sample-1.0-py3-none-any.whl", "w") as archive:
                 archive.writestr("sample-1.0.dist-info/METADATA", "Name: sample\nVersion: 1.0\n")
+            def fake_runtime(stage, *args):
+                (stage / 'runtime/bin').mkdir(parents=True)
+                (stage / 'runtime/bin/python3.12').write_bytes(b'portable Python')
+                return {'python': 'runtime/bin/python3.12', 'provider': 'test'}
             outputs = ["a" * 40 + "\n", "", b"backend/config.py\0scripts/bundle_bootstrap.py\0"]
-            with patch("scripts.package_release.host_platform", return_value=("linux", "x64")), patch("scripts.package_release.subprocess.check_output", side_effect=outputs), patch("scripts.package_release.subprocess.run"):
+            with patch("scripts.package_release.host_platform", return_value=("linux", "x64")), patch("scripts.package_release.subprocess.check_output", side_effect=outputs), patch("scripts.package_release.subprocess.run"), patch("scripts.package_release.runtime_wheels", return_value=([root / "wheelhouse/sample-1.0-py3-none-any.whl"], ["sample==1.0"])), patch("scripts.package_release.build_runtime", side_effect=fake_runtime), patch("scripts.package_release.portable_launchers"), patch("scripts.bundle_linux_runtime_libs.bundle_linux_libraries", return_value={}):
                 archive_path = create_bundle(root / "wheelhouse", root / "dist", root)
             verify_bundle(archive_path, smoke=False)
             with zipfile.ZipFile(archive_path) as archive:
@@ -99,8 +120,71 @@ class PackageTests(unittest.TestCase):
                 self.assertFalse(any("private-untracked" in name for name in names))
                 manifest = json.loads(archive.read(next(name for name in names if name.endswith("/bundle-manifest.json"))))
                 self.assertEqual(manifest["commit"], "a" * 40)
-                self.assertIn("backend/models/V6/model.json", manifest["files"])
+                self.assertEqual(manifest['format'], 2)
+                self.assertEqual(manifest['runtime_python'], 'runtime/bin/python3.12')
+                self.assertFalse(any('/wheelhouse/' in name or '/.venv/' in name for name in names))
+                self.assertIn("backend/models/V6/PP-OCRv6_small_rec_infer/model.json", manifest["files"])
                 self.assertIn("backend/subfinder/linux/x64/VideoSubFinderCli", manifest["files"])
+
+    def test_size_report_separates_runtime_models_and_cache(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for directory, name, data in (('runtime', 'python', b'abc'), ('backend/models', 'weights', b'12345'), ('wheelhouse', 'runtime.whl', b'xx')):
+                (root / directory).mkdir(parents=True)
+                (root / directory / name).write_bytes(data)
+            (root / 'original.zip').write_bytes(b'not counted')
+            write_size_report(root, {'platform': 'linux', 'arch': 'x64', 'commit': 'a' * 40}, 'test')
+            report = json.loads((root / 'test-results/runtime-size.json').read_text())
+            measurement = report['measurements'][0]
+            self.assertEqual(measurement['runtime_bytes'], 3)
+            self.assertEqual(measurement['model_bytes'], 5)
+            self.assertEqual(measurement['wheelhouse_bytes'], 2)
+            self.assertEqual(measurement['total_installed_bytes'], 10)
+
+
+
+
+    def test_packaged_preferences_use_writable_user_location(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.dict(os.environ, {'XDG_CONFIG_HOME': temporary, 'XDG_CACHE_HOME': temporary}, clear=True), patch('scripts.bundle_bootstrap.sys.platform', 'linux'):
+                configure_user_paths()
+                config = Path(os.environ['VSE_CONFIG_FILE'])
+                self.assertEqual(config, Path(temporary) / 'video-subtitle-extractor/config.json')
+                self.assertTrue(config.parent.is_dir())
+                self.assertEqual(Path(os.environ["VSE_WORK_DIR"]), Path(temporary) / "video-subtitle-extractor/work")
+            with patch.dict(os.environ, {'VSE_CONFIG_FILE': '/explicit/preferences.json', 'VSE_WORK_DIR': '/explicit/work'}, clear=True):
+                configure_user_paths()
+                self.assertEqual(os.environ['VSE_CONFIG_FILE'], '/explicit/preferences.json')
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX base-tool symlinks are only used on Unix')
+    def test_verification_path_excludes_host_python(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            env_path = verification_path(root / 'runtime/bin/python3.12', root / 'evidence', 'linux')
+            parts = env_path.split(os.pathsep)
+            self.assertEqual(parts, [str(root / 'runtime/bin'), str(root / 'evidence/base-os-tools')])
+            self.assertEqual([p.name for p in (root / 'evidence/base-os-tools').iterdir()], ['dirname'])
+            self.assertFalse((root / 'evidence/base-os-tools/python').exists())
+            records = json.loads((root / 'evidence/base-os-tools.json').read_text())
+            self.assertEqual(records[0]['command'], 'dirname')
+
+    def test_self_contained_launcher_never_installs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "app"
+            root.mkdir()
+            (root / 'runtime').mkdir()
+            python = root / 'runtime/python'
+            python.write_bytes(b'portable interpreter')
+            manifest = {'format': 2, 'distribution': 'self-contained CPU inference runtime', 'platform': 'linux', 'arch': 'x64', 'runtime_python': 'runtime/python', 'files': {}}
+            (root / 'bundle-manifest.json').write_text(json.dumps(manifest))
+            with patch('scripts.bundle_bootstrap.__file__', str(root / 'bootstrap.py')), patch('scripts.bundle_bootstrap.host_platform', return_value=('linux', 'x64')), patch('scripts.bundle_bootstrap.sys.executable', str(python)), patch('scripts.bundle_bootstrap.os.chdir'), patch.dict(os.environ, {'VSE_CONFIG_FILE': str(root.parent / 'user-config.json'), 'VSE_WORK_DIR': str(root.parent / 'user-work')}), patch('scripts.bundle_bootstrap.subprocess.run') as run, patch('scripts.bundle_bootstrap.subprocess.call', return_value=0) as launch:
+                self.assertEqual(bootstrap_main([]), 0)
+                run.assert_not_called()
+                launch.assert_called_once_with([str(python), 'gui.py'])
+                self.assertEqual(bootstrap_main(['--verify']), 0)
+                commands = [call.args[0] for call in run.call_args_list]
+                self.assertTrue(commands)
+                self.assertFalse(any('pip' in command or 'venv' in command or 'install' in command for command in commands))
 
     def test_archive_rejects_escape_and_symlink(self):
         for name in ("../escape", "/absolute", "root/../../escape", "C:/escape", "root\\escape", "root/file\x00hidden"):

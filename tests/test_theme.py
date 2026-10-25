@@ -124,11 +124,29 @@ class ThemeControllerTests(ThemeTestCase):
         listener = self.listener()
         listener._timer.setInterval(10)
         self.set_mode(Theme.AUTO)
-        listener._readSystemTheme = lambda: Theme.DARK
-        QtTest.QTest.qWait(40)
+        self.assertTrue(listener._timer.isActive())
+        self.assertEqual(listener._timer.interval(), 10)
+        timer_ticks = QtTest.QSignalSpy(listener._timer.timeout)
+        theme_changes = QtTest.QSignalSpy(listener.systemThemeChanged)
+        detector_threads = []
+
+        def detect_dark():
+            detector_threads.append(QtCore.QThread.currentThread())
+            return Theme.DARK
+
+        listener._readSystemTheme = detect_dark
+        # Native timer delivery is not guaranteed within a nominal 40 ms on a
+        # loaded Cocoa runner. Await the actual timer-driven theme-change signal
+        # while Qt processes events, without calling refresh/the callback here.
+        self.assertTrue(theme_changes.count() or theme_changes.wait(2000),
+                        'The active fallback timer did not apply the changed system theme')
+        self.assertGreater(timer_ticks.count(), 0)
+        self.assertTrue(detector_threads)
+        self.assertTrue(all(thread == self.app.thread() for thread in detector_threads))
         self.assertEqual(qconfig.theme, Theme.DARK)
         self.assertEqual(listener.thread(), self.app.thread())
         self.assertEqual(config.themeMode.value, Theme.AUTO)
+        self.assertTrue(listener._timer.isActive())
         self.set_mode(Theme.LIGHT)
         self.assertFalse(listener._timer.isActive())
 
@@ -204,6 +222,23 @@ class WindowThemeTests(ThemeTestCase):
         self.assertIs(self.window.stackedWidget.currentWidget(), interface)
         self.assertTrue(interface.isVisible())
         wait_for_widget_animations([self.window])
+
+    def test_theme_wait_uses_queued_paint_without_synchronous_rendering(self):
+        # Isolate the waiter from Fluent animations' own legitimate update()
+        # calls so exactly one queued request is measurable.
+        widget = QtWidgets.QWidget()
+        self.widgets.append(widget)
+        widget.show()
+        self.app.processEvents()
+        # Forbidden-method mocks detect the old implementation deterministically
+        # without needing to reproduce Windows style-filter recursion.
+        with patch.object(widget, 'repaint') as repaint, \
+                patch.object(widget, 'ensurePolished') as polish, \
+                patch.object(widget, 'update', wraps=widget.update) as update:
+            wait_for_widget_animations([widget])
+        repaint.assert_not_called()
+        polish.assert_not_called()
+        update.assert_called_once_with()
 
     def test_theme_wait_awaits_real_completion_beyond_nominal_duration(self):
         card = self.window.timelineSyncInterface.findChild(QtWidgets.QWidget, 'timelineButtons')

@@ -44,6 +44,11 @@ import multiprocessing
 import time
 import pysrt
 
+def default_extraction_work_dir(video_name):
+    root = os.environ.get('VSE_WORK_DIR') or os.path.join(os.path.dirname(BASE_DIR), 'output')
+    return os.path.join(root, str(video_name))
+
+
 class SubtitleExtractor:
     """
     视频字幕提取类
@@ -71,7 +76,7 @@ class SubtitleExtractor:
         self.vd_name = Path(self.video_path).stem
         # 临时存储文件夹
         self.temp_output_dir = (str(Path(work_dir).resolve()) if work_dir is not None else
-                                os.path.join(os.path.dirname(BASE_DIR), 'output', str(self.vd_name)))
+                                default_extraction_work_dir(self.vd_name))
         # 视频帧总数
         self.frame_count = self.video_cap.get(cv2.CAP_PROP_FRAME_COUNT)
         # 视频帧率

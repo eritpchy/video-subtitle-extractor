@@ -48,19 +48,19 @@ CI and native package verification for the exact release commit.
 
 ## Distribution and verification
 
-CPU archives contain source, native offline Python wheels, verified VSF runtime
-and PP-OCRv6 small/medium models. They require **native Python 3.12** and are not
-standalone EXE/app installers. Read [installation](USAGE.md) and
+CPU archives contain source, a portable Python interpreter and preinstalled inference libraries, verified VSF runtime
+and PP-OCRv6 small/medium models. Customers do not install Python, pip or a
+virtual environment; launchers use the included interpreter. Read [usage](USAGE.md) and
 [release verification](release-and-ci.md) before running them.
 
 The CI matrix covers Linux x64, Windows x64, macOS ARM64 and Linux amd64 Docker,
 including actual OCR, video-to-SRT, GUI theme tests, and native GUI startup.
-Archive verification installs dependencies offline in a fresh environment and
+Archive verification runs the included interpreter without system Python and
 repeats GUI/CLI/extraction checks. A workflow definition or source-only result
 does not certify a platform; check the completed run for the final commit.
 Issue-specific real-media gates additionally cover multiline subtitles, AV1
 extraction and an exact two-second timeline shift, including offline Docker
-and freshly installed archive execution.
+and freshly extracted self-contained archive execution.
 
 GPU, DirectML/ONNX runtime acceleration, Intel macOS, Linux ARM64 and Windows
 ARM64 are not certified by this CPU release matrix. Some fallback language

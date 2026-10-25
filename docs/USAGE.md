@@ -1,9 +1,29 @@
-# Current source build and CPU runtime
+# One-click CPU packages and source development
 
 This fork integrates upstream `YaoFANGUK/video-subtitle-extractor` through
 `85746f7`, genuine PP-OCRv6 small/medium inference models, and the pinned
 `eritpchy/videosubfinder-cli` v6.10 release. A version string in source is not
 evidence that a GitHub release or all platform checks have completed.
+
+## Run a one-click package
+
+Extract the complete release for the matching operating system and architecture.
+No customer Python, pip or virtual-environment installation is required.
+
+- Windows: double-click `Start-VSE.bat`.
+- macOS: open `Video Subtitle Extractor.app`; the complete `.app` may be moved together.
+- Linux: run `Start-VSE.sh` on the supported OS baseline documented by the release.
+
+Configuration, temporary extraction files and model caches use user-writable
+locations, not application resources. The package includes its interpreter and
+curated inference libraries; there is no first-run dependency installation.
+Some optional legacy language models have never been bundled; consult
+[model coverage](PP-OCRv6.md) before relying on those languages offline.
+Unsigned/unnotarized builds may require the operating system's normal user
+approval. This project does not disable or bypass OS security checks.
+
+The instructions below are for developers running a source checkout, not for
+customers of a self-contained release.
 
 ## Install from source
 
