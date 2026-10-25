@@ -114,6 +114,48 @@ print('FINISH', file=sys.stderr)
     assert logs == ["late output on stdout"]
 
 
+def test_runner_retains_av1_frame_interleaved_with_native_progress():
+    # Exact damaged line from Windows Server 2022 run 40219500516. The
+    # separately emitted progress value arrives on the next line; neither
+    # that split nor the preceding EOF diagnostics may discard SECOND LINE.
+    damaged = (
+        "Video ended or cannot read new frames." * 3
+        + "Progress: Frame: 0_00_04_000__0_00_06_039_0000002160640014406400360"
+    )
+    output = [
+        "Frame: 0_00_01_000__0_00_03_039_0000002160640014406400360",
+        damaged,
+        "97% elapsed=1s",
+        "Video ended or cannot read new frames.Progress: 100%",
+        "FINISH",
+    ]
+    progress = []
+    result = vsf.run_command(
+        fake_command(f"import sys; sys.stderr.write({chr(10).join(output) + chr(10)!r})"),
+        on_progress=progress.append,
+    )
+    assert result.timestamps_ms == (1000, 4000)
+    assert progress == [99, 100]
+
+
+def test_all_complete_events_on_one_line_are_retained():
+    line = ("Progress: 100% Frame: 0_00_04_000__0_00_06_039_meta "
+            "Frame: 0_00_00_000__0_00_01_000_meta\n")
+    assert vsf.parse_events(line) == [("progress", 99), ("frame", 4000), ("frame", 0)]
+    result = vsf.run_command(fake_command(f"print({line!r}); print('FINISH')"))
+    assert result.timestamps_ms == (0, 4000)
+
+
+@pytest.mark.parametrize("line", [
+    "Progress: Frame: 0_60_04_000__0_60_06_039_meta",
+    "Progress: Frame: 0_00_60_000__0_01_02_039_meta",
+    "Progress: Frame: 0_00_04_1000__0_00_06_039_meta",
+    "NotAFrame: 0_00_04_000__0_00_06_039_meta",
+])
+def test_embedded_invalid_frame_tokens_are_not_ocr_tasks(line):
+    assert vsf.parse_events(line) == [("log", line)]
+
+
 @pytest.mark.parametrize("source,reason", [
     ("import sys; print('Progress: 100%'); print('ERROR: decoder failure'); sys.exit(4)", "exit 4"),
     ("print('Progress: 100%')", "missing FINISH"),

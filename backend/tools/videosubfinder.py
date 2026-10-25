@@ -16,8 +16,8 @@ from typing import Callable, Optional
 
 VSF_VERSION = "6.10.6"
 VSF_RELEASE_BASE = "https://github.com/eritpchy/videosubfinder-cli/releases/download"
-_FRAME_RE = re.compile(r"^Frame:\s+(\d+)_(\d+)_(\d+)_(\d+)__")
-_PROGRESS_RE = re.compile(r"^Progress:\s*(\d+(?:\.\d+)?)%")
+_FRAME_RE = re.compile(r"\bFrame:\s+(\d+)_(\d+)_(\d+)_(\d+)__")
+_PROGRESS_RE = re.compile(r"\bProgress:\s*(\d+(?:\.\d+)?)%")
 _VERSION_RE = re.compile(r"^VideoSubFinderCli (\d+)\.(\d+)(?:\.(\d+))?\s*$")
 _DECODE_ERROR_RE = re.compile(
     r"^(?:\[[^\]\r\n]+ @ [0-9a-fx]+\]\s+(?:Failed to get pixel format\.?|Get current frame error\.?)\s*$"
@@ -121,18 +121,29 @@ def timestamp_to_frame(timestamp_ms, fps):
     return round(timestamp_ms * fps / 1000.0)
 
 
-def parse_event(line):
-    match = _FRAME_RE.match(line)
-    if match:
+def parse_events(line):
+    """Recover complete records even when native output shares a line.
+
+    VSF writes diagnostics without a newline and constructs progress with
+    several stream writes. A worker's complete ``Frame: ...`` record can
+    therefore follow diagnostics or interrupt ``Progress: ``. Anchoring at
+    column zero silently drops that frame and its subtitle from OCR.
+    """
+    events = []
+    for match in _FRAME_RE.finditer(line):
         hours, minutes, seconds, millis = map(int, match.groups())
         if minutes < 60 and seconds < 60 and millis < 1000:
-            return "frame", ((hours * 60 + minutes) * 60 + seconds) * 1000 + millis
-    match = _PROGRESS_RE.match(line)
-    if match:
-        return "progress", min(99.0, max(0.0, float(match.group(1))))
+            events.append((match.start(), "frame", ((hours * 60 + minutes) * 60 + seconds) * 1000 + millis))
+    for match in _PROGRESS_RE.finditer(line):
+        events.append((match.start(), "progress", min(99.0, max(0.0, float(match.group(1))))))
     if line.strip() == "FINISH":
-        return "finish", None
-    return "log", line.rstrip()
+        return [("finish", None)]
+    return [(event, value) for _, event, value in sorted(events)] or [("log", line.rstrip())]
+
+
+def parse_event(line):
+    """Compatibility helper for callers expecting a single event."""
+    return parse_events(line)[0]
 
 
 def build_command(binary, video_path, output_dir, subtitle_path, *, crop, threads=2,
@@ -178,7 +189,6 @@ def run_command(command, *, on_progress: Optional[Callable] = None,
         if on_spawn:
             on_spawn(process)
         for line in process.stdout:
-            event, value = parse_event(line)
             tail.append(line.rstrip())
             # Older portable OpenCV builds can fail AV1 while Python's wheel
             # decodes it. These are decoder errors, unlike the normal EOF log
@@ -186,15 +196,16 @@ def run_command(command, *, on_progress: Optional[Callable] = None,
             if _DECODE_ERROR_RE.search(line):
                 if len(decode_errors) < 8:
                     decode_errors.append(line.rstrip())
-            if event == "frame":
-                timestamps.add(value)
-            elif event == "progress":
-                if on_progress:
-                    on_progress(value)
-            elif event == "finish":
-                finished = True
-            elif value and on_log:
-                on_log(value)
+            for event, value in parse_events(line):
+                if event == "frame":
+                    timestamps.add(value)
+                elif event == "progress":
+                    if on_progress:
+                        on_progress(value)
+                elif event == "finish":
+                    finished = True
+                elif value and on_log:
+                    on_log(value)
         returncode = process.wait()
     except BaseException:
         if process.poll() is None:
