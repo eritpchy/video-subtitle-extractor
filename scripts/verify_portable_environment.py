@@ -182,6 +182,27 @@ def verify_vendor_qt_plugin_path(root: Path, value: str) -> None:
     raise RuntimeError(f'Unverified regenerated Qt platform plugin path: {value}')
 
 
+def is_packaged_native_worker(value: str | None, root: Path) -> bool:
+    """Compare filesystem identity, including macOS /var -> /private/var.
+
+    Only the actual native-ocr directory of this verified bundle is accepted;
+    a missing directory or a payload link redirecting it elsewhere still fails.
+    Archive/manifest hashes remain checked separately before this evidence gate.
+    """
+    if not value:
+        return False
+    try:
+        canonical_root = root.resolve(strict=True)
+        expected = canonical_root / 'native-ocr'
+        observed = Path(value)
+        return (observed.is_absolute() and expected.is_dir()
+                and expected.resolve(strict=True) == expected
+                and observed.resolve(strict=True) == expected
+                and observed.samefile(expected))
+    except (OSError, ValueError, RuntimeError):
+        return False
+
+
 def check_environment_evidence(evidence: Path, fixture: dict, profile: str, root: Path) -> None:
     if Path(fixture['marker']).exists():
         raise RuntimeError('Foreign fixture code/command was executed')
@@ -213,7 +234,7 @@ def check_environment_evidence(evidence: Path, fixture: dict, profile: str, root
             raise RuntimeError('Documented application config/work override was lost')
         if environment.get('VSE_OCR_BACKEND') != profile:
             raise RuntimeError('Packaged backend selection was lost in a Python child')
-        if profile == 'native' and environment.get('VSE_NATIVE_OCR_ROOT') != str(root / 'native-ocr'):
+        if profile == 'native' and not is_packaged_native_worker(environment.get('VSE_NATIVE_OCR_ROOT'), root):
             raise RuntimeError('Inherited native-worker path replaced packaged worker')
         for key in ('PYTHONHOME', 'PYTHONUSERBASE', 'CONDA_PREFIX', 'VIRTUAL_ENV', 'QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH', 'QML2_IMPORT_PATH',
                     'OPENCV_VIDEOIO_PLUGIN_PATH', 'OPENCV_CORE_PLUGIN_PATH', 'OPENCV_DNN_PLUGIN_PATH', 'OPENCV_UI_PLUGIN_PATH', 'OPENCV_OPENCL_RUNTIME',

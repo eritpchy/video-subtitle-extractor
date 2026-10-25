@@ -149,6 +149,7 @@ def test_sanitizer_preserves_preferences_and_clears_only_runtime_selectors(tmp_p
 
 def valid_environment_report(tmp_path):
     root = tmp_path / 'bundle'
+    (root / 'native-ocr').mkdir(parents=True)
     fixture = {'marker': str(tmp_path / 'marker'), 'expected_config': '/preferences', 'expected_work': '/work',
                'forbidden_roots': ['/foreign'], 'user_sites': ['/usersite']}
     report = {'isolated': 1, 'ignore_environment': 1, 'no_user_site': 1, 'user_site_enabled': False,
@@ -186,6 +187,59 @@ def test_evidence_gate_fails_closed(tmp_path, regression):
         (tmp_path / 'dependency-isolation/process-1.json').unlink()
     (tmp_path / 'environment-report.json').write_text(json.dumps(report))
     with pytest.raises(RuntimeError):
+        check_environment_evidence(tmp_path, fixture, 'native', root)
+
+
+@pytest.mark.parametrize('reverse', [False, True])
+def test_native_worker_root_accepts_filesystem_alias_not_only_equal_spelling(tmp_path, reverse):
+    root, fixture, report = valid_environment_report(tmp_path)
+    alias = tmp_path / 'var-alias'
+    try:
+        alias.symlink_to(root, target_is_directory=True)
+    except OSError:
+        pytest.skip('Host does not permit the temporary directory-alias fixture')
+    report['environment']['VSE_NATIVE_OCR_ROOT'] = str((alias if reverse else root) / 'native-ocr')
+    for path in (tmp_path / 'environment-report.json', tmp_path / 'dependency-isolation/process-1.json'):
+        path.write_text(json.dumps(report))
+    check_environment_evidence(tmp_path, fixture, 'native', root if reverse else alias)
+
+
+@pytest.mark.skipif(sys.platform != 'darwin', reason='Actual /var -> /private/var identity requires macOS')
+def test_native_worker_root_accepts_actual_macos_var_alias(tmp_path):
+    root, fixture, report = valid_environment_report(tmp_path)
+    canonical = root.resolve(strict=True)
+    if not canonical.is_relative_to('/private/var'):
+        pytest.skip('This macOS runner temporary directory is not below /private/var')
+    alias = Path('/var') / canonical.relative_to('/private/var')
+    assert alias.samefile(canonical)
+    report['environment']['VSE_NATIVE_OCR_ROOT'] = str(canonical / 'native-ocr')
+    for path in (tmp_path / 'environment-report.json', tmp_path / 'dependency-isolation/process-1.json'):
+        path.write_text(json.dumps(report))
+    check_environment_evidence(tmp_path, fixture, 'native', alias)
+
+
+@pytest.mark.parametrize('replacement', ['foreign-directory', 'missing', 'relative', 'redirected-payload', 'foreign-symlink'])
+def test_native_worker_alias_check_never_accepts_a_foreign_or_missing_worker(tmp_path, replacement):
+    root, fixture, report = valid_environment_report(tmp_path)
+    foreign = tmp_path / 'unrelated-worker'
+    foreign.mkdir()
+    value = str(foreign)
+    if replacement == 'missing':
+        value = str(tmp_path / 'missing-worker')
+    elif replacement == 'relative':
+        value = 'native-ocr'
+    elif replacement in ('redirected-payload', 'foreign-symlink'):
+        link = root / 'native-ocr' if replacement == 'redirected-payload' else tmp_path / 'worker-alias'
+        if link.exists():
+            link.rmdir()
+        try:
+            link.symlink_to(foreign, target_is_directory=True)
+        except OSError:
+            pytest.skip('Host does not permit the temporary directory-alias fixture')
+        value = str(link)
+    report['environment']['VSE_NATIVE_OCR_ROOT'] = value
+    (tmp_path / 'dependency-isolation/process-1.json').write_text(json.dumps(report))
+    with pytest.raises(RuntimeError, match='native-worker path replaced'):
         check_environment_evidence(tmp_path, fixture, 'native', root)
 
 
