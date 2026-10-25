@@ -12,6 +12,17 @@ import os
 import configparser
 import cv2
 import multiprocessing
+
+# Keep package/source smoke runs offline and away from the user's preferences.
+_smoke_config_directory = None
+if __name__ == '__main__' and '--smoke-test' in sys.argv:
+    import json
+    import tempfile
+    _smoke_config_directory = tempfile.TemporaryDirectory(prefix='vse-gui-smoke-')
+    os.environ['VSE_CONFIG_FILE'] = os.path.join(_smoke_config_directory.name, 'config.json')
+    with open(os.environ['VSE_CONFIG_FILE'], 'w', encoding='utf-8') as smoke_config:
+        json.dump({'Window': {'Interface': 'en'}, 'Main': {'CheckUpdateOnStartup': False}}, smoke_config)
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6 import QtCore, QtWidgets, QtGui
 from PySide6.QtWidgets import QApplication, QWidget
@@ -35,21 +46,16 @@ class SubtitleExtractorGUI(FluentWindow):
         super().__init__()
         # 禁用云母效果
         self.setMicaEffectEnabled(False)
-        # 设置深色主题并跟随系统主题色
-        # setTheme(Theme.LIGHT)
-        # setThemeColor(getSystemAccentColor(), save=True)
-
-        # 初始化系统主题监听器并连接信号
-        # self.themeListener = SystemThemeListener(self)
-        # self.themeListener.start()
         # 任何尺寸下都悬浮展开, 防止窗口撑大
         self.navigationInterface.panel.minimumExpandWidth = 999999
         # 设置窗口图标
-        self.setWindowIcon(QtGui.QIcon("design/vse.ico"))
+        self.setWindowIcon(QtGui.QIcon(os.path.join(os.path.dirname(os.path.abspath(__file__)), "design", "vse.ico")))
         self.setWindowTitle(tr['SubtitleExtractorGUI']['Title'] + " v" + VERSION)
         # 创建界面布局
         self._create_layout()
         self._connectSignalToSlot()
+        self.themeListener = SystemThemeListener(self)
+        self.themeListener.start()
         self._lazy_check_update()
 
     def _lazy_check_update(self):
@@ -97,9 +103,7 @@ class SubtitleExtractorGUI(FluentWindow):
     def closeEvent(self, event):
         """程序关闭时保存窗口位置并恢复标准输出和标准错误"""
         self.save_window_position()
-        # 断开信号连接
-        # self.themeListener.terminate()
-        # self.themeListener.deleteLater()
+        self.themeListener.stop()
         ProcessManager().instance().terminate_all()
         super().closeEvent(event)
 
@@ -171,12 +175,20 @@ class SubtitleExtractorGUI(FluentWindow):
 
 
 if __name__ == '__main__':
+    multiprocessing.freeze_support()
     multiprocessing.set_start_method("spawn")
     QApplication.setHighDpiScaleFactorRoundingPolicy(
     Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QtWidgets.QApplication(sys.argv)
     app.setAttribute(Qt.AA_DontCreateNativeWidgetSiblings)
     window = SubtitleExtractorGUI()
+    if _smoke_config_directory is not None:
+        from ui.smoke_test import run_gui_smoke
+        try:
+            smoke_result = run_gui_smoke(app, window)
+        finally:
+            _smoke_config_directory.cleanup()
+        sys.exit(smoke_result)
     # 先设置透明, 再显示, 否则会有闪烁的效果
     window.setWindowOpacity(0.0)
     window.show()

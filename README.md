@@ -1,3 +1,5 @@
+> 本分支更新：支持真实 PP-OCRv6 small/medium、VideoSubFinder CLI v6.10、日间/夜间/跟随系统主题和无交互 CLI。安装、Docker 与测试说明见 [当前使用指南](docs/USAGE.md)。发布与跨平台验证状态以对应提交的 GitHub Actions 结果为准。
+
 简体中文 | [English](README_en.md)
 
 <p align="center"><img src="https://github.com/YaoFANGUK/video-subtitle-extractor/raw/main/design/icon_1024.png" alt="VSE Logo" width="128"/></p>
@@ -136,74 +138,23 @@ cd <源码所在目录>
 > cd D:/tools/video-subtitle-extractor-main
 > ```
 
-#### 4. 安装合适的运行环境
+#### 4. 安装当前 CPU 运行环境
 
-本项目支持 CUDA（NVIDIA显卡加速）、CPU（无 GPU）、DirectML（AMD、Intel等GPU/APU加速）、ONNX四种运行模式
+当前维护和测试的依赖组合为原生 Python 3.12 与 Paddle CPU 推理引擎。
+本版本**不使用 DirectML、ONNX Runtime、CoreML 或 ROCm 作为推理后端**；
+旧的加速安装教程和 `requirements_directml.txt` 仅为历史遗留内容，安装它们不会启用加速。
+CUDA 需要另外匹配的 Paddle GPU 环境，目前不属于 CPU 发布矩阵的验证范围，
+请勿将 Paddle CPU 与 GPU 软件包同时安装。
 
-##### (1) CUDA（NVIDIA 显卡用户）
+```shell
+python -m pip install -r requirements.txt
+python -m pip check
+python scripts/install_videosubfinder.py --version 6.10
+python -m backend.tools.model_download --tiers small medium
+```
 
-> 请确保您的 NVIDIA 显卡驱动支持所选 CUDA 版本
-
-- 推荐 CUDA 11.8，对应 cuDNN 8.6.0
-
-- 安装 CUDA：
-  - Windows：[CUDA 11.8 下载](https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_522.06_windows.exe)
-  - Linux：
-    ```shell
-    wget https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_520.61.05_linux.run
-    sudo sh cuda_11.8.0_520.61.05_linux.run
-    ```
-  - MacOS 不支持 CUDA
-
-- 安装 cuDNN（CUDA 11.8 对应 cuDNN 8.6.0）：
-  - [Windows cuDNN 8.6.0 下载](https://developer.download.nvidia.cn/compute/redist/cudnn/v8.6.0/local_installers/11.8/cudnn-windows-x86_64-8.6.0.163_cuda11-archive.zip)
-  - [Linux cuDNN 8.6.0 下载](https://developer.download.nvidia.cn/compute/redist/cudnn/v8.6.0/local_installers/11.8/cudnn-linux-x86_64-8.6.0.163_cuda11-archive.tar.xz)
-  - 安装方法请参考 NVIDIA 官方文档
-
-- 安装 PaddlePaddle GPU 版本（CUDA 11.8）：
-  ```shell
-  pip install paddlepaddle-gpu==3.3.1 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/
-  pip install -r requirements.txt
-  ```
-
-##### (2) DirectML（AMD、Intel等GPU/APU加速卡用户）
-
-- 适用于 Windows 设备的 AMD/NVIDIA/Intel GPU
-- 安装 ONNX Runtime DirectML 版本：
-  ```shell
-  pip install paddlepaddle==3.3.1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
-  pip install -r requirements.txt
-  pip install -r requirements_directml.txt
-  ```
-
-##### (3) ONNX (适合macOS、AMD ROCm等环境加速用户, 基础环境与DirectML方式一致，未测试！)
-
-- 使用这个方式部署请勿反馈Issues
-- 适用于 Linux 或 macOS 设备的 AMD/Metal GPU/Apple Silicon GPU
-- 安装 ONNX Runtime DirectML 版本：
-  ```shell
-  pip install paddlepaddle==3.3.1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
-  pip install -r requirements.txt
-
-  # 阅读文档 https://onnxruntime.ai/docs/execution-providers/
-  # 根据你的设备选择合适的执行后端, 参考requirements_directml.txt文件修改成合适你环境的依赖
-
-  # 例如:
-  # requirements_coreml.txt
-  #   paddle2onnx==1.3.1
-  #   onnxruntime-coreml==1.13.1
-
-  pip install -r requirements_coreml.txt
-  ```
-
-##### (4) CPU 运行（无 GPU 加速）
-
-- 适用于没有 GPU 或不希望使用 GPU 的情况
-- 直接安装 CPU 版本 PaddlePaddle：
-  ```shell
-  pip install paddlepaddle==3.3.1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
-  pip install -r requirements.txt
-  ```
+支持的模型、离线部署和硬件行为请参阅[当前使用指南](docs/USAGE.md)及
+[PP-OCRv6 模型说明](docs/PP-OCRv6.md)。
 
 #### 5. 运行程序
 
@@ -216,14 +167,14 @@ python gui.py
 - 运行命令行版本（CLI）
 
 ```shell
-python ./backend/main.py
+python -m backend.cli "input.mp4" --language en --cpu
 ```
 
 ## 常见问题与解决方案
 
 #### 1. 运行不正常/没有结果/cuda及cudnn问题
 
-解决方案：根据自己的显卡型号、显卡驱动版本，安装对应的cuda与cudnn
+请先使用以上 CPU 安装步骤，检查 `python -m pip check`、模型校验、VSF 安装校验和提取日志。OCR 出错时会返回非零退出码，不再把失败当作成功的空字幕。
 
 #### 2. 7z文件解压错误
 

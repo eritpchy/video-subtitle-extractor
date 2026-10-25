@@ -7,7 +7,7 @@ from tqdm import tqdm
 from backend.tools.ocr import OcrRecogniser, get_coordinates
 from backend.tools.constant import SubtitleArea
 from backend.tools import constant
-from threading import Thread
+from threading import Event, Thread
 import queue
 from types import SimpleNamespace
 import shutil
@@ -122,180 +122,166 @@ def paint_chinese_opencv(im, chinese, pos, color):
     return img
 
 
-def ocr_task_consumer(ocr_queue, raw_subtitle_path, sub_area, video_path, options, progress_queue):
-    """
-    消费者： 消费ocr_queue，将ocr队列中的数据取出，进行ocr识别，写入字幕文件中
-    :param ocr_queue (current_frame_no当前帧帧号, frame 视频帧, dt_box检测框, rec_res识别结果)
-    :param raw_subtitle_path
-    :param sub_area
-    :param video_path
-    :param options
-    """
-    data = {'i': 1}
-    # 初始化文本识别对象
-    text_recogniser = OcrRecogniser()
-    text_recogniser.hardware_accelerator = options.HARDWARD_ACCELERATOR
-    # 丢失字幕的存储路径
+def _queue_get(work_queue, stop_event):
+    while not stop_event.is_set():
+        try:
+            return work_queue.get(timeout=0.2)
+        except queue.Empty:
+            continue
+    return None
+
+
+def _queue_put(work_queue, value, stop_event):
+    while not stop_event.is_set():
+        try:
+            work_queue.put(value, timeout=0.2)
+            return True
+        except queue.Full:
+            continue
+    return False
+
+
+def ocr_task_consumer(ocr_queue, raw_subtitle_path, sub_area, video_path, options, progress_queue, stop_event=None):
+    """Recognize frames; publish raw subtitles only after all tasks succeed."""
+    stop_event = stop_event or Event()
+    text_recogniser = OcrRecogniser(
+        language=options.REC_CHAR_TYPE,
+        mode=options.MODE,
+        rec_batch_number=options.REC_BATCH_NUMBER,
+        hardware_accelerator=options.HARDWARD_ACCELERATOR,
+    )
     ocr_loss_debug_path = os.path.join(os.path.abspath(os.path.splitext(video_path)[0]), 'loss')
-    # 删除之前的缓存垃圾
     if os.path.exists(ocr_loss_debug_path):
         shutil.rmtree(ocr_loss_debug_path, True)
-
     raw_subtitles = []
     processed_count = 0
-    try:
-        while True:
+    while not stop_event.is_set():
+        item = _queue_get(ocr_queue, stop_event)
+        if item is None:
+            return
+        frame_no, frame, dt_box, rec_res = item
+        if frame_no == -1:
+            temporary_path = raw_subtitle_path + '.partial'
             try:
-                frame_no, frame, dt_box, rec_res = ocr_queue.get(block=True)
-                if frame_no == -1:
-                    # frame 是生产者统计的总帧数
-                    total_tasks = frame if frame is not None else processed_count
-                    progress_queue.put((-1, total_tasks))
-                    return
-                data['i'] = frame_no
-                extract_subtitles(data, text_recogniser, frame, raw_subtitles, sub_area, options, dt_box,
-                                    rec_res, ocr_loss_debug_path)
-                processed_count += 1
-                progress_queue.put((frame_no, processed_count))
-            except Exception as e:
-                print(e)
-                progress_queue.put(-1)
-                break
-    finally:
-        with open(raw_subtitle_path, mode='w+', encoding='utf-8') as raw_subtitle_file:
-            for line in raw_subtitles:
-                raw_subtitle_file.write(line)
+                with open(temporary_path, 'w', encoding='utf-8') as output:
+                    output.writelines(raw_subtitles)
+                os.replace(temporary_path, raw_subtitle_path)
+            finally:
+                if os.path.exists(temporary_path):
+                    os.remove(temporary_path)
+            progress_queue.put((-1, frame if frame is not None else processed_count))
+            return
+        extract_subtitles({'i': frame_no}, text_recogniser, frame, raw_subtitles,
+                          sub_area, options, dt_box, rec_res, ocr_loss_debug_path)
+        processed_count += 1
+        progress_queue.put((frame_no, processed_count))
 
 
-def ocr_task_producer(ocr_queue, task_queue, progress_queue, video_path, raw_subtitle_path):
-    """
-    生产者：负责生产用于OCR识别的数据，将需要进行ocr识别的数据加入ocr_queue中
-    :param ocr_queue (current_frame_no当前帧帧号, frame 视频帧, dt_box检测框, rec_res识别结果)
-    :param task_queue (total_frame_count总帧数, current_frame_no当前帧帧号, dt_box检测框, rec_res识别结果, subtitle_area字幕区域)
-    :param progress_queue
-    :param video_path
-    :param raw_subtitle_path
-    """
+def ocr_task_producer(ocr_queue, task_queue, progress_queue, video_path, raw_subtitle_path, stop_event=None):
+    """Decode requested frames, cancelling bounded queue waits after failures."""
+    stop_event = stop_event or Event()
     cap = cv2.VideoCapture(video_path)
     tbar = None
     frame_count = 0
-    while True:
-        try:
-            # 从任务队列中提取任务信息
-            total_frame_count, current_frame_no, dt_box, rec_res, total_ms, default_subtitle_area = task_queue.get(block=True)
+    try:
+        if not cap.isOpened():
+            raise RuntimeError(f'Cannot open video for OCR: {video_path}')
+        while not stop_event.is_set():
+            item = _queue_get(task_queue, stop_event)
+            if item is None:
+                return
+            total_frame_count, current_frame_no, dt_box, rec_res, total_ms, default_subtitle_area = item
             if tbar is None:
                 tbar = tqdm(total=round(total_frame_count), position=1)
-            # current_frame 等于-1说明所有视频帧已经读完
             if current_frame_no == -1:
-                # ocr识别队列加入结束标志，附带总帧数
-                ocr_queue.put((-1, frame_count, None, None))
-                # 通过 progress_queue 提前通知总帧数，让主进程可以精确计算进度
-                progress_queue.put((-2, frame_count))
-                # 更新进度条
-                tbar.update(tbar.total - tbar.n)
-                break
+                if _queue_put(ocr_queue, (-1, frame_count, None, None), stop_event):
+                    progress_queue.put((-2, frame_count))
+                    tbar.update(tbar.total - tbar.n)
+                return
             tbar.update(round(current_frame_no - tbar.n))
-            # 设置当前视频帧
-            # 如果total_ms不为空，则使用了VSF提取字幕
             if total_ms is not None:
                 cap.set(cv2.CAP_PROP_POS_MSEC, total_ms)
             else:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame_no - 1)
-            # 读取视频帧
             ret, frame = cap.read()
-            # 如果读取成功
-            if ret:
-                frame_count += 1
-                # 根据默认字幕位置，则对视频帧进行裁剪，裁剪后处理
-                if default_subtitle_area is not None:
-                    frame = frame_preprocess(default_subtitle_area, frame)
-                # print(f"current_frame_no: {current_frame_no}")
-                ocr_queue.put((current_frame_no, frame, dt_box, rec_res))
-        except Exception as e:
-            print(e)
-            break
-    cap.release()
+            if not ret or frame is None:
+                raise RuntimeError(f'Cannot decode OCR frame {current_frame_no} at {total_ms} ms: {video_path}')
+            if default_subtitle_area is not None:
+                frame = frame_preprocess(default_subtitle_area, frame)
+            if not _queue_put(ocr_queue, (current_frame_no, frame, dt_box, rec_res), stop_event):
+                return
+            frame_count += 1
+    finally:
+        cap.release()
+        if tbar is not None:
+            tbar.close()
 
 
 def subtitle_extract_handler(task_queue, progress_queue, video_path, raw_subtitle_path, sub_area, options):
-    """
-    创建并开启一个视频帧提取线程与一个ocr识别线程
-    :param task_queue 任务队列，(total_frame_count总帧数, current_frame_no当前帧, dt_box检测框, rec_res识别结果, subtitle_area字幕区域)
-    :param progress_queue 进度队列
-    :param video_path 视频路径
-    :param raw_subtitle_path 原始字幕文件路径
-    :param sub_area 字幕区域
-    :param options 选项
-    """
-    # 删除缓存
+    """Propagate thread failures as a nonzero OCR process exit, not a fake SRT."""
     if os.path.exists(raw_subtitle_path):
         os.remove(raw_subtitle_path)
-    # 创建一个OCR队列，大小建议值8-20
     ocr_queue = queue.Queue(20)
-    # 创建一个OCR事件生产者线程
-    ocr_event_producer_thread = Thread(target=ocr_task_producer,
-                                       args=(ocr_queue, task_queue, progress_queue, video_path, raw_subtitle_path,),
-                                       daemon=True)
-    # 创建一个OCR事件消费者提取线程
-    ocr_event_consumer_thread = Thread(target=ocr_task_consumer,
-                                       args=(ocr_queue, raw_subtitle_path, sub_area, video_path, options, progress_queue,),
-                                       daemon=True)
-    # 开启消费者线程
-    ocr_event_producer_thread.start()
-    # 开启生产者线程
-    ocr_event_consumer_thread.start()
-    # join方法让主线程任务结束之后，进入阻塞状态，一直等待其他的子线程执行结束之后，主线程再终止
-    ocr_event_producer_thread.join()
-    ocr_event_consumer_thread.join()
+    stop_event = Event()
+    errors = queue.Queue()
+
+    def guarded(target, *args):
+        try:
+            target(*args, stop_event=stop_event)
+        except BaseException as error:
+            errors.put(error)
+            stop_event.set()
+            progress_queue.put(-1)
+
+    producer = Thread(target=guarded, args=(ocr_task_producer, ocr_queue, task_queue,
+                      progress_queue, video_path, raw_subtitle_path), daemon=True)
+    consumer = Thread(target=guarded, args=(ocr_task_consumer, ocr_queue, raw_subtitle_path,
+                      sub_area, video_path, options, progress_queue), daemon=True)
+    producer.start()
+    consumer.start()
+    producer.join()
+    consumer.join()
+    if not errors.empty():
+        error = errors.get()
+        raise RuntimeError(f'OCR worker failed: {error}') from error
 
 
 def async_start(video_path, raw_subtitle_path, sub_area, options):
-    """
-    开始进程处理异步任务
-    options.REC_CHAR_TYPE
-    options.DROP_SCORE
-    options.SUB_AREA_DEVIATION_RATE
-    options.DEBUG_OCR_LOSS
-    options.HARDWARD_ACCELERATOR
-    """
-    assert 'REC_CHAR_TYPE' in options, "options缺少参数：REC_CHAR_TYPE"
-    assert 'DROP_SCORE' in options, "options缺少参数: DROP_SCORE'"
-    assert 'SUB_AREA_DEVIATION_RATE' in options, "options缺少参数: SUB_AREA_DEVIATION_RATE"
-    assert 'DEBUG_OCR_LOSS' in options, "options缺少参数: DEBUG_OCR_LOSS"
-    assert 'HARDWARD_ACCELERATOR' in options, "options缺少参数: HARDWARD_ACCELERATOR"
-    # 创建一个任务队列
-    # 任务格式为：(total_frame_count总帧数, current_frame_no当前帧, dt_box检测框, rec_res识别结果, subtitle_area字幕区域)
+    """Snapshot all OCR settings before spawning on Windows/macOS/Linux."""
+    required = ('REC_CHAR_TYPE', 'DROP_SCORE', 'SUB_AREA_DEVIATION_RATE',
+                'DEBUG_OCR_LOSS', 'HARDWARD_ACCELERATOR')
+    missing = [key for key in required if key not in options]
+    if missing:
+        raise ValueError(f'Missing OCR options: {", ".join(missing)}')
+    from backend.config import config
+    options = dict(options)
+    options.setdefault('MODE', config.mode.value)
+    options.setdefault('REC_BATCH_NUMBER', config.recBatchNumber.value)
     task_queue = Queue()
-    # 创建一个进度更新队列
     progress_queue = Queue()
-    # 新建一个进程
-    p = Process(target=subtitle_extract_handler,
-                args=(task_queue, progress_queue, video_path, raw_subtitle_path, sub_area, SimpleNamespace(**options),))
-    # 启动进程
-    p.start()
-    return p, task_queue, progress_queue
+    process = Process(target=subtitle_extract_handler,
+                      args=(task_queue, progress_queue, video_path, raw_subtitle_path,
+                            sub_area, SimpleNamespace(**options)))
+    process.start()
+    return process, task_queue, progress_queue
 
 
 def frame_preprocess(subtitle_area, frame):
+    """Mask the unwanted half without changing full-frame OCR coordinates.
+
+    Both explicit GUI/CLI selections and cached detector polygons use the
+    original video coordinate system. Cropping off the upper half shifted new
+    OCR boxes upward and incorrectly rejected captions against the full ROI.
     """
-    将视频帧进行裁剪
-    """
-    # 对于分辨率大于1920*1080的视频，将其视频帧进行等比缩放至1280*720进行识别
-    # paddlepaddle会将图像压缩为640*640
-    # if self.frame_width > 1280:
-    #     scale_rate = round(float(1280 / self.frame_width), 2)
-    #     frames = cv2.resize(frames, None, fx=scale_rate, fy=scale_rate, interpolation=cv2.INTER_AREA)
-    # 如果字幕出现的区域在下部分
+    if subtitle_area not in (SubtitleArea.LOWER_PART, SubtitleArea.UPPER_PART):
+        return frame
+    processed = frame.copy()
+    midpoint = frame.shape[0] // 2
     if subtitle_area == SubtitleArea.LOWER_PART:
-        cropped = int(frame.shape[0] // 2)
-        # 将视频帧切割为下半部分
-        frame = frame[cropped:]
-    # 如果字幕出现的区域在上半部分
-    elif subtitle_area == SubtitleArea.UPPER_PART:
-        cropped = int(frame.shape[0] // 2)
-        # 将视频帧切割为下半部分
-        frame = frame[:cropped]
-    return frame
+        processed[:midpoint] = 0
+    else:
+        processed[midpoint:] = 0
+    return processed
 
 
 if __name__ == "__main__":

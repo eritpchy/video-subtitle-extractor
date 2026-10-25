@@ -6,7 +6,7 @@ from functools import cached_property
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QAbstractItemView, QTableWidgetItem, QHeaderView
 from PySide6.QtCore import Qt, Signal, QModelIndex, QUrl
-from qfluentwidgets import TableWidget, InfoBar, RoundMenu
+from qfluentwidgets import TableWidget, InfoBar, RoundMenu, isDarkTheme, qconfig
 from PySide6.QtGui import QAction, QColor, QBrush
 from showinfm import show_in_file_manager
 
@@ -71,6 +71,7 @@ class TaskListComponent(QWidget):
         
         # 创建布局
         self.__init_widgets()
+        qconfig.themeChangedFinished.connect(self._refresh_status_colors)
         
     def __init_widgets(self):
         """初始化组件"""
@@ -186,13 +187,7 @@ class TaskListComponent(QWidget):
             if status_item:
                 status_item.setText(status.value)
                 
-                # 根据状态设置不同颜色
-                if status == TaskStatus.COMPLETED:
-                    status_item.setForeground(QBrush(QColor("#2ecc71")))  # 绿色
-                elif status == TaskStatus.PROCESSING:
-                    status_item.setForeground(QBrush(QColor("#3498db")))  # 蓝色
-                elif status == TaskStatus.FAILED:
-                    status_item.setForeground(QBrush(QColor("#e74c3c")))  # 红色
+                self._set_status_color(status_item, status)
             
             # 如果是当前处理的任务，滚动到可见区域
             if index == self.current_task_index:
@@ -200,6 +195,23 @@ class TaskListComponent(QWidget):
                 
             # 选中当前行
             self.table.selectRow(index)
+
+    def _set_status_color(self, item, status):
+        # Darker text on light cards, lighter text on dark cards. Pending uses
+        # the widget palette, including after resetting a failed/completed task.
+        colors = {
+            TaskStatus.COMPLETED: ("#16753b", "#6ccb8c"),
+            TaskStatus.PROCESSING: ("#1565a0", "#70b7ee"),
+            TaskStatus.FAILED: ("#c42b1c", "#ff998f"),
+        }
+        color = colors.get(status)
+        item.setForeground(QBrush(QColor(color[isDarkTheme()])) if color else QBrush())
+
+    def _refresh_status_colors(self):
+        for row, task in enumerate(self.tasks):
+            item = self.table.item(row, 2)
+            if item is not None:
+                self._set_status_color(item, task.status)
     
     def get_pending_tasks(self):
         """获取所有待处理的任务

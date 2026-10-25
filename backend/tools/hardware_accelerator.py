@@ -1,16 +1,17 @@
-from backend.config import tr
-import paddle
+"""Report the device actually used by the Paddle inference engine."""
+import logging
+import os
+
+logger = logging.getLogger(__name__)
+
 
 class HardwareAccelerator:
-
-    # 类变量，用于存储单例实例
     _instance = None
 
     @classmethod
     def instance(cls):
-        """获取单例实例"""
         if cls._instance is None:
-            cls._instance = HardwareAccelerator()
+            cls._instance = cls()
             cls._instance.initialize()
         return cls._instance
 
@@ -21,74 +22,50 @@ class HardwareAccelerator:
 
     def initialize(self):
         self.check_paddle()
-        self.check_onnx()
 
     def check_paddle(self):
-        # 如果paddlepaddle编译了gpu的版本
-        if paddle.is_compiled_with_cuda():
-        # 查看是否有可用的gpu
-            if len(paddle.static.cuda_places()) > 0:
-                # 如果有GPU则使用GPU
-                self.__cuda = True
+        import paddle
+        self.__cuda = False
+        try:
+            self.__cuda = paddle.is_compiled_with_cuda() and paddle.device.cuda.device_count() > 0
+        except (RuntimeError, OSError) as error:
+            logger.warning('CUDA unavailable, using CPU: %s', error)
 
     def check_onnx(self):
-        if self.__cuda:
-            return
+        # Provider discovery is retained for callers, but the installed Paddle
+        # path must not advertise DirectML/CoreML while actually executing CPU.
         try:
             import onnxruntime as ort
-            available_providers = ort.get_available_providers()
-            for provider in available_providers:
-                if provider in [
-                    "CPUExecutionProvider"
-                ]:
-                    continue
-                if provider not in [
-                    "DmlExecutionProvider",         # DirectML，适用于 Windows GPU
-                    "ROCMExecutionProvider",        # AMD ROCm
-                    "MIGraphXExecutionProvider",    # AMD MIGraphX
-                    "VitisAIExecutionProvider",     # AMD VitisAI，适用于 RyzenAI & Windows, 实测和DirectML性能似乎差不多
-                    "OpenVINOExecutionProvider",    # Intel GPU
-                    "MetalExecutionProvider",       # Apple macOS
-                    "CoreMLExecutionProvider",      # Apple macOS
-                    "CUDAExecutionProvider",        # Nvidia GPU
-                ]:
-                    print(tr['Main']['OnnxExectionProviderNotSupportedSkipped'].format(provider))
-                    continue
-                print(tr['Main']['OnnxExecutionProviderDetected'].format(provider))
-                self.__onnx_providers.append(provider)
-        except ModuleNotFoundError as e:
-            print(tr['Main']['OnnxRuntimeNotInstall'])
+            self.__onnx_providers = [name for name in ort.get_available_providers() if name not in ('CPUExecutionProvider', 'AzureExecutionProvider')]
+        except ImportError:
+            self.__onnx_providers = []
 
     def has_accelerator(self):
-        if not self.__enabled:
-            return False
-        return self.__cuda or len(self.__onnx_providers) > 0
+        return self.has_cuda()
 
     @property
     def accelerator_name(self):
-        if not self.__enabled:
-            return "CPU"
-        if self.__cuda:
-            return "GPU"
-        elif len(self.__onnx_providers) > 0:
-            return ", ".join(self.__onnx_providers)
-        else:
-            return "CPU"
+        return 'GPU (CUDA)' if self.has_cuda() else 'CPU'
 
     @property
     def onnx_providers(self):
-        if not self.__enabled:
-            return []
-        return self.__onnx_providers
+        return list(self.__onnx_providers) if self.__enabled else []
 
     def has_cuda(self):
-        if not self.__enabled:
-            return False
-        return self.__cuda
-    
+        return self.__enabled and self.__cuda
+
     def set_enabled(self, enable):
-        self.__enabled = enable
+        self.__enabled = bool(enable)
 
-        
-
-    
+    def inference_kwargs(self):
+        threads = int(os.environ.get('VSE_OCR_CPU_THREADS', min(4, os.cpu_count() or 1)))
+        if threads < 1:
+            raise ValueError('VSE_OCR_CPU_THREADS must be at least 1')
+        # Paddle 3.3.1 oneDNN/PIR fails on PP-OCRv6 with DoubleAttribute.
+        # Keep the tested CPU path portable; allow explicit future opt-in.
+        return {
+            'device': 'gpu:0' if self.has_cuda() else 'cpu',
+            'engine': 'paddle',
+            'cpu_threads': threads,
+            'enable_mkldnn': os.environ.get('VSE_ENABLE_MKLDNN', '0') == '1',
+        }

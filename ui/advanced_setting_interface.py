@@ -9,7 +9,7 @@ from qfluentwidgets import (ScrollArea, ExpandLayout, CardWidget, SubtitleLabel,
                            FluentIcon, NavigationWidget, NavigationItemPosition,
                            SettingCardGroup, RangeSettingCard, SwitchSettingCard,
                            HyperlinkCard, PrimaryPushSettingCard, ComboBoxSettingCard, PushSettingCard,
-                           MessageBox)
+                           MessageBox, Theme)
 from backend.config import config, tr, VERSION, PROJECT_HOME_URL, PROJECT_ISSUES_URL, PROJECT_RELEASES_URL
 from backend.tools.version_service import VersionService
 from backend.tools.concurrent import TaskExecutor
@@ -44,6 +44,9 @@ class AdvancedSettingInterface(ScrollArea):
         self.setup_layout()
 
     def setup_layout(self):
+        self.appearance_group.addSettingCard(self.theme_mode)
+        self.expandLayout.addWidget(self.appearance_group)
+
         self.advanced_group.addSettingCard(self.rec_batch_number)
         self.advanced_group.addSettingCard(self.max_batch_size)
         self.advanced_group.addSettingCard(self.subtitle_area)
@@ -78,6 +81,20 @@ class AdvancedSettingInterface(ScrollArea):
         
     def setup_ui(self):
         """设置UI"""
+        self.appearance_group = SettingCardGroup(tr["Setting"]["Appearance"], self.scrollWidget)
+        theme_labels = {
+            Theme.LIGHT: tr["Setting"]["ThemeLight"],
+            Theme.DARK: tr["Setting"]["ThemeDark"],
+            Theme.AUTO: tr["Setting"]["ThemeSystem"],
+        }
+        self.theme_mode = ComboBoxSettingCard(
+            configItem=config.themeMode,
+            icon=FluentIcon.PALETTE,
+            title=tr["Setting"]["Theme"],
+            content=tr["Setting"]["ThemeDesc"],
+            texts=[theme_labels[mode] for mode in config.themeMode.options],
+            parent=self.appearance_group,
+        )
         # 高级设置组
         self.advanced_group = SettingCardGroup(tr["Setting"]["AdvancedSetting"], self.scrollWidget)
         # VideoSubFinder设置组

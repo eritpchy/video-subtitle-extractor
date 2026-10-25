@@ -1,0 +1,129 @@
+name: CPU release preview and publish
+
+# No push/tag/release trigger: publication always requires an explicit dispatch.
+on:
+  workflow_dispatch:
+    inputs:
+      publication:
+        description: 'Artifacts only is a safe preview; other choices create a NEW GitHub release.'
+        type: choice
+        options: [artifacts, draft, prerelease, release]
+        default: artifacts
+        required: true
+      tag:
+        description: 'Required for publication; never replace an existing release or move a tag.'
+        type: string
+        default: ''
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHONUTF8: '1'
+  QT_QPA_PLATFORM: offscreen
+  PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: 'True'
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check immutable release target before building
+        if: inputs.publication != 'artifacts'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: python scripts/release_guard.py --tag "$RELEASE_TAG" --sha "$GITHUB_SHA"
+
+  checks:
+    needs: preflight
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  package:
+    needs: checks
+    name: Package / ${{ matrix.platform }}-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+            arch: x64
+          - os: windows-2022
+            platform: windows
+            arch: x64
+          - os: macos-15
+            platform: macos
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install Linux Qt libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libegl1 libglib2.0-0 libdbus-1-3 libxkbcommon0
+      - run: python -m pip install -r requirements.txt pytest==8.3.5
+      - run: python -m pip check
+      - run: python scripts/install_videosubfinder.py --version 6.10
+      - name: Bundle verified small and medium PP-OCRv6 models
+        run: python -m backend.tools.model_download --tiers small medium --output backend/models/V6
+      - name: Resolve offline wheels for this native platform
+        run: python -m pip wheel -r requirements.txt pytest==8.3.5 --wheel-dir build/wheelhouse
+      - name: Build source plus offline-wheelhouse package
+        run: python scripts/package_release.py --wheelhouse build/wheelhouse --output dist
+      - name: Validate archived payload and install from its offline wheelhouse
+        run: python scripts/package_release.py --verify dist --smoke
+      - name: Preserve packaged extraction evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-results-${{ matrix.platform }}-${{ matrix.arch }}
+          path: dist/test-results/
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cpu-bundle-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  publish:
+    if: inputs.publication != 'artifacts'
+    needs: [checks, package]
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cpu-bundle-*
+          path: dist
+          merge-multiple: true
+      - name: Recheck target and publish without overwriting tags or releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          PUBLICATION: ${{ inputs.publication }}
+        run: python scripts/release_guard.py --tag "$RELEASE_TAG" --sha "$GITHUB_SHA" --publish "$PUBLICATION" --assets dist

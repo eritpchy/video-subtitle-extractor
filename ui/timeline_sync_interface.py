@@ -73,11 +73,8 @@ class TimelineSyncInterface(QWidget):
         # 操作按钮容器
         button_container = CardWidget()
         button_container.setMinimumHeight(60)
-        button_container.setStyleSheet("""
-            background-color: #fcfdfe;
-            border: 1px solid #eeeff0;
-            border-radius: 6px;
-        """)
+        # CardWidget paints the appropriate background for the current theme.
+        button_container.setObjectName("timelineButtons")
         button_layout = QHBoxLayout()
         button_layout.setContentsMargins(16, 16, 16, 16)
         button_layout.setSpacing(8)

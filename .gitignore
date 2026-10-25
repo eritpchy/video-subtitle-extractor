@@ -365,3 +365,16 @@ $RECYCLE.BIN/
 /.claude/
 /installer_output/
 /entitlements.plist
+
+# Downloaded release runtimes, models, and local verification artifacts.
+/.venv
+/backend/models/V6/
+/backend/subfinder/linux/x64/
+/backend/subfinder/linux/arm64/
+/backend/subfinder/windows/x64/
+/backend/subfinder/windows/arm64/
+/backend/subfinder/macos/x64/
+/backend/subfinder/macos/arm64/
+/backend/subfinder/macos/universal/
+/artifacts/
+/.cache/

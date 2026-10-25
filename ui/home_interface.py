@@ -6,12 +6,13 @@ import time
 import traceback
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout
 from PySide6.QtCore import Slot, QRect, Signal
-from PySide6.QtGui import QTextCharFormat, QColor
+from PySide6.QtGui import QTextCharFormat
 from PySide6 import QtWidgets
 from qfluentwidgets import (PushButton, CardWidget, PlainTextEdit, FluentIcon)
 from ui.setting_interface import SettingInterface
 from ui.component.video_display_component import VideoDisplayComponent
 from ui.component.task_list_component import TaskListComponent, TaskStatus, TaskOptions
+from ui.component.log_highlighter import LogHighlighter
 from ui.icon.my_fluent_icon import MyFluentIcon
 from backend.config import config, tr
 from backend.tools.subtitle_extractor_remote_call import SubtitleExtractorRemoteCall
@@ -73,6 +74,7 @@ class HomeInterface(QWidget):
         self.output_text = PlainTextEdit()
         self.output_text.setMinimumHeight(150)
         self.output_text.setReadOnly(True)
+        self.log_highlighter = LogHighlighter(self.output_text.document())
         self.output_text.document().setDocumentMargin(10)
         # 连接滚动条值变化信号
         self.output_text.verticalScrollBar().valueChanged.connect(self.on_scroll_change)
@@ -522,26 +524,10 @@ class HomeInterface(QWidget):
         """
         text = ' '.join(str(arg) for arg in args).rstrip()
 
-        # 根据消息类型选择颜色
-        fmt = QTextCharFormat()
-        if '【完成】' in text or '【结束】' in text:
-            fmt.setForeground(QColor('#10b981'))
-        elif '【处理中】' in text:
-            fmt.setForeground(QColor('#3b82f6'))
-        elif '【警告】' in text or '【重要提示】' in text:
-            fmt.setForeground(QColor('#f59e0b'))
-        elif text.startswith('---'):
-            fmt.setForeground(QColor('#d1d5db'))
-        elif '成功打开视频' in text:
-            fmt.setForeground(QColor('#10b981'))
-        elif '无法打开视频' in text or '请先打开视频' in text or '错误' in text or 'Error' in text:
-            fmt.setForeground(QColor('#ef4444'))
-        elif text.startswith('  '):
-            fmt.setForeground(QColor('#6b7280'))
-
+        # The highlighter updates both new and existing messages on theme changes.
         cursor = self.output_text.textCursor()
         cursor.movePosition(cursor.MoveOperation.End)
-        cursor.insertText(text + '\n', fmt)
+        cursor.insertText(text + '\n', QTextCharFormat())
         print(*args)  # 保持原始的 print 行为
         # 如果启用了自动滚动，则滚动到底部
         if self.auto_scroll:
@@ -624,4 +610,3 @@ class HomeInterface(QWidget):
         except Exception as e:
             print(f"Error during close window:", e)
         super().closeEvent(event)
-    

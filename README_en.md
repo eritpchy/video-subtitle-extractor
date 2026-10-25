@@ -1,3 +1,5 @@
+> This fork adds genuine PP-OCRv6 small/medium, VideoSubFinder CLI v6.10, light/dark/system themes and a noninteractive CLI. See the [current runtime guide](docs/USAGE.md) for installation, Docker and tests. Release/platform verification is tied to the exact commit's GitHub Actions results.
+
 [简体中文](README.md) | English
 
 <p align="center"><img src="https://github.com/YaoFANGUK/video-subtitle-extractor/raw/main/design/icon_1024.png" alt="VSE Logo" width="128"/></p>
@@ -139,75 +141,26 @@ cd <source-code-directory>
 > cd D:/tools/video-subtitle-extractor-main
 > ```
 
-#### 4. Install the Appropriate Runtime Environment
+#### 4. Install the Current CPU Runtime
 
-This project supports four runtime modes: CUDA (NVIDIA GPU acceleration), CPU (no GPU), DirectML (AMD, Intel GPU/APU acceleration), and ONNX.
+The maintained/tested dependency set is native Python 3.12 with the Paddle CPU
+engine. DirectML, ONNX Runtime providers, CoreML and ROCm are **not inference
+backends in this version**. The old accelerator recipes and
+`requirements_directml.txt` are legacy and do not enable acceleration here.
+CUDA may work with a separately compatible Paddle GPU installation, but is not
+certified by the CPU release matrix; do not install CPU and GPU Paddle packages
+together.
 
-##### (1) CUDA (NVIDIA GPU Users)
+```shell
+python -m pip install -r requirements.txt
+python -m pip check
+python scripts/install_videosubfinder.py --version 6.10
+python -m backend.tools.model_download --tiers small medium
+```
 
-> Please ensure your NVIDIA GPU driver supports the selected CUDA version.
-
-- Recommended: CUDA 11.8 with cuDNN 8.6.0
-
-- Install CUDA:
-  - Windows: [CUDA 11.8 Download](https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_522.06_windows.exe)
-  - Linux:
-    ```shell
-    wget https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_520.61.05_linux.run
-    sudo sh cuda_11.8.0_520.61.05_linux.run
-    ```
-  - MacOS does not support CUDA
-
-- Install cuDNN (CUDA 11.8 requires cuDNN 8.6.0):
-  - [Windows cuDNN 8.6.0 Download](https://developer.download.nvidia.cn/compute/redist/cudnn/v8.6.0/local_installers/11.8/cudnn-windows-x86_64-8.6.0.163_cuda11-archive.zip)
-  - [Linux cuDNN 8.6.0 Download](https://developer.download.nvidia.cn/compute/redist/cudnn/v8.6.0/local_installers/11.8/cudnn-linux-x86_64-8.6.0.163_cuda11-archive.tar.xz)
-  - Please refer to NVIDIA official documentation for installation instructions
-
-- Install PaddlePaddle GPU version (CUDA 11.8):
-  ```shell
-  pip install paddlepaddle-gpu==3.3.1 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/
-  pip install -r requirements.txt
-  ```
-
-##### (2) DirectML (AMD, Intel GPU/APU Users)
-
-- Suitable for AMD/NVIDIA/Intel GPUs on Windows
-- Install ONNX Runtime DirectML version:
-  ```shell
-  pip install paddlepaddle==3.3.1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
-  pip install -r requirements.txt
-  pip install -r requirements_directml.txt
-  ```
-
-##### (3) ONNX (For macOS, AMD ROCm, etc. — uses the same base setup as DirectML, untested!)
-
-- Please do not submit issues if using this deployment method
-- Suitable for AMD/Metal GPU/Apple Silicon GPU on Linux or macOS
-- Install ONNX Runtime:
-  ```shell
-  pip install paddlepaddle==3.3.1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
-  pip install -r requirements.txt
-
-  # Read the documentation at https://onnxruntime.ai/docs/execution-providers/
-  # Choose the appropriate execution backend for your device.
-  # Refer to requirements_directml.txt and modify the dependencies for your environment.
-
-  # For example:
-  # requirements_coreml.txt
-  #   paddle2onnx==1.3.1
-  #   onnxruntime-coreml==1.13.1
-
-  pip install -r requirements_coreml.txt
-  ```
-
-##### (4) CPU Mode (No GPU Acceleration)
-
-- Suitable for systems without a GPU or when GPU usage is not desired
-- Install the CPU version of PaddlePaddle directly:
-  ```shell
-  pip install paddlepaddle==3.3.1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
-  pip install -r requirements.txt
-  ```
+Use [the current runtime guide](docs/USAGE.md) and
+[PP-OCRv6 model documentation](docs/PP-OCRv6.md) for supported models, offline
+operation and hardware behavior.
 
 #### 5. Run the Program
 
@@ -220,14 +173,14 @@ python gui.py
 - Run the CLI version:
 
 ```shell
-python ./backend/main.py
+python -m backend.cli "input.mp4" --language en --cpu
 ```
 
 ## FAQ
 
 #### 1. Program not working / no results / CUDA and cuDNN issues
 
-Solution: Install the appropriate CUDA and cuDNN versions based on your GPU model and driver version.
+Start with the CPU setup above. Check `python -m pip check`, model verification, the VSF installer verification and the extraction log. An OCR error now returns a nonzero exit status rather than a successful empty result.
 
 #### 2. 7z file extraction error
 

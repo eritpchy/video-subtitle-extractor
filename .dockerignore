@@ -1,0 +1,25 @@
+.git
+.github
+.venv
+venv
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+build
+dist
+output
+config
+test
+tests
+test-results
+.agent*
+.codex
+.env
+.env.*
+# Preserve the legacy Linux tuning for installer migration, not old binaries.
+backend/subfinder/windows
+backend/subfinder/macos
+backend/subfinder/linux/*
+!backend/subfinder/linux/settings
+backend/models/V6

@@ -1,4 +1,4 @@
-opencv-python~=4.11
+opencv-contrib-python==4.10.0.84
 Levenshtein==0.26.0
 pillow==10.4.0
 tqdm~=4.67
@@ -13,7 +13,8 @@ numpy~=2.2
 shapely~=2.1
 six~=1.17
 setuptools~=80.9
-paddlepaddle~=3.3
-paddleocr~=3.4.0
+paddlepaddle==3.3.1
+paddleocr==3.7.0
+paddlex[ocr-core]==3.7.2
 je-showinfilemanager==1.1.6a4
 imageio-ffmpeg~=0.6

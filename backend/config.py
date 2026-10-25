@@ -8,12 +8,11 @@ import configparser
 
 # 项目版本号
 VERSION = "2.2.0"
-PROJECT_HOME_URL = "https://github.com/YaoFANGUK/video-subtitle-extractor"
+PROJECT_HOME_URL = "https://github.com/eritpchy/video-subtitle-extractor"
 PROJECT_ISSUES_URL = PROJECT_HOME_URL + "/issues"
 PROJECT_RELEASES_URL = PROJECT_HOME_URL + "/releases"
 PROJECT_UPDATE_URLS = [
-    "https://api.github.com/repos/YaoFANGUK/video-subtitle-extractor/releases/latest",
-    "https://accelerate.xdow.net/api/repos/YaoFANGUK/video-subtitle-extractor/releases/latest",
+    "https://api.github.com/repos/eritpchy/video-subtitle-extractor/releases/latest",
 ] 
 # 硬件加速选项开关
 HARDWARD_ACCELERATION_OPTION = True
@@ -93,11 +92,11 @@ class Config(QConfig):
     # 视频保存目录
     saveDirectory = ConfigItem("Main", "SaveDirectory", "", ConfigValidator())
     # VideoSubFinder CPU核心数
-    videoSubFinderCpuCores = RangeConfigItem("Main", "VideoSubFinderCpuCores", 0, RangeValidator(0, os.cpu_count()))
+    videoSubFinderCpuCores = RangeConfigItem("Main", "VideoSubFinderCpuCores", 0, RangeValidator(0, os.cpu_count() or 1))
     # VideoSubFinder 视频解码组件
     videoSubFinderDecoder = OptionsConfigItem("Main", "VideoSubFinderDecoder", VideoSubFinderDecoder.OPENCV, OptionsValidator(VideoSubFinderDecoder), EnumSerializer(VideoSubFinderDecoder))
 
-CONFIG_FILE = 'config/config.json'
+CONFIG_FILE = os.environ.get('VSE_CONFIG_FILE', 'config/config.json')
 config = Config()
 qconfig.load(CONFIG_FILE, config)
 

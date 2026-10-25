@@ -8,8 +8,10 @@
 import os
 import re
 import random
+import math
 import shutil
 import traceback
+import queue
 from collections import Counter, namedtuple
 import unicodedata
 from threading import Thread
@@ -30,6 +32,8 @@ from backend.tools.ocr import OcrRecogniser, get_coordinates
 from backend.tools import subtitle_ocr
 from backend.tools.paddle_model_config import PaddleModelConfig
 from backend.tools.process_manager import ProcessManager
+from backend.tools.videosubfinder import (build_command, resolve_binary, run_command,
+                                         timestamp_to_frame, verify_binary, VideoSubFinderError)
 from backend.tools.subtitle_detect import SubtitleDetect
 from backend.bean.subtitle_area import SubtitleArea
 import threading
@@ -43,7 +47,7 @@ class SubtitleExtractor:
     视频字幕提取类
     """
 
-    def __init__(self, vd_path):
+    def __init__(self, vd_path, work_dir=None):
         # 线程锁
         self.lock = threading.RLock()
         # 用户指定的字幕区域位置
@@ -53,14 +57,19 @@ class SubtitleExtractor:
         self.hardware_accelerator.set_enabled(config.hardwareAcceleration.value)
         self.model_config = PaddleModelConfig(self.hardware_accelerator)
         # 创建字幕检测对象
-        self.sub_detector = SubtitleDetect()
+        # The VSF path does not need a second detection model in the parent.
+        self.sub_detector = None
         # 视频路径
-        self.video_path = vd_path
-        self.video_cap = cv2.VideoCapture(vd_path)
+        self.video_path = str(Path(vd_path).expanduser().resolve())
+        self.video_cap = cv2.VideoCapture(self.video_path)
+        if not self.video_cap.isOpened():
+            self.video_cap.release()
+            raise ValueError(f"Cannot open video: {self.video_path}")
         # 通过视频路径获取视频名称
         self.vd_name = Path(self.video_path).stem
         # 临时存储文件夹
-        self.temp_output_dir = os.path.join(os.path.dirname(BASE_DIR), 'output', str(self.vd_name))
+        self.temp_output_dir = (str(Path(work_dir).resolve()) if work_dir is not None else
+                                os.path.join(os.path.dirname(BASE_DIR), 'output', str(self.vd_name)))
         # 视频帧总数
         self.frame_count = self.video_cap.get(cv2.CAP_PROP_FRAME_COUNT)
         # 视频帧率
@@ -68,6 +77,11 @@ class SubtitleExtractor:
         # 视频尺寸
         self.frame_height = int(self.video_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         self.frame_width = int(self.video_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        if (not math.isfinite(self.fps) or self.fps <= 0 or
+                not math.isfinite(self.frame_count) or self.frame_count <= 0 or
+                self.frame_width <= 0 or self.frame_height <= 0):
+            self.video_cap.release()
+            raise ValueError(f"Invalid video dimensions, frame rate or duration: {self.video_path}")
         # 提取的视频帧储存目录
         self.frame_output_dir = os.path.join(self.temp_output_dir, 'frames')
         # 提取的字幕文件存储目录
@@ -102,12 +116,53 @@ class SubtitleExtractor:
         self.progress_listeners = []
 
     def run(self):
+        """Run extraction, releasing the lock and child process on every path."""
+        with self.lock:
+            self._ocr_process = None
+            self._ocr_process_id = None
+            self._ocr_progress_stop = threading.Event()
+            self._ocr_progress_thread = None
+            self.isFinished = False
+            self.use_vsf = False
+            try:
+                return self._run_impl()
+            finally:
+                self.vsf_running = False
+                process = self._ocr_process
+                if process is not None:
+                    if process.is_alive():
+                        process.terminate()
+                        process.join(timeout=5)
+                        if process.is_alive():
+                            process.kill()
+                            process.join(timeout=5)
+                    if self._ocr_process_id is not None:
+                        ProcessManager.instance().remove_process(self._ocr_process_id)
+                self._ocr_progress_stop.set()
+                if self._ocr_progress_thread is not None:
+                    self._ocr_progress_thread.join(timeout=2)
+                # A failed consumer can leave thousands of pending task writes.
+                # Do not let multiprocessing's feeder-thread finalizer wait
+                # forever on a pipe whose reader has already exited.
+                for name in ('subtitle_ocr_task_queue', 'subtitle_ocr_progress_queue'):
+                    channel = getattr(self, name, None)
+                    if channel is not None:
+                        for method in ('cancel_join_thread', 'close'):
+                            close = getattr(channel, method, None)
+                            if close is not None:
+                                try:
+                                    close()
+                                except (OSError, ValueError):
+                                    pass
+                if self.video_cap is not None:
+                    self.video_cap.release()
+
+    def _run_impl(self):
         """
         运行整个提取视频的步骤
         """
         # 记录开始运行的时间
         start_time = time.time()
-        self.lock.acquire()
         # 重置进度条
         self.update_progress(ocr=0, frame_extract=0, post=0)
         self.append_output('-----------------------------')
@@ -152,6 +207,8 @@ class SubtitleExtractor:
         self.subtitle_ocr_task_queue.put((self.frame_count, -1, None, None, None, None))
         # 等待子线程完成
         subtitle_ocr_process.join()
+        if subtitle_ocr_process.exitcode != 0:
+            raise RuntimeError(f"Subtitle OCR worker failed with exit code {subtitle_ocr_process.exitcode}")
         # 打印完成提示
         self.append_output(tr['Main']['FinishProcessFrame'])
         self.append_output(tr['Main']['FinishFindSub'])
@@ -193,7 +250,6 @@ class SubtitleExtractor:
         self.isFinished = True
         # 删除缓存文件
         self.empty_cache()
-        self.lock.release()
         if config.generateTxt.value:
             self.srt2txt(self.subtitle_output_path)
 
@@ -206,7 +262,7 @@ class SubtitleExtractor:
             os.makedirs(self.temp_output_dir)
             
         # 确保视频已打开
-        if not self.video_cap.isOpened():
+        if self.video_cap is None or not self.video_cap.isOpened():
             self.video_cap = cv2.VideoCapture(self.video_path)
             
         # 将视频指针设置到第一帧
@@ -264,6 +320,8 @@ class SubtitleExtractor:
         """
         通过检测字幕区域位置提取字幕帧
         """
+        if self.sub_detector is None:
+            self.sub_detector = SubtitleDetect()
 
         # 当前视频帧的帧号
         current_frame_no = 0
@@ -384,137 +442,49 @@ class SubtitleExtractor:
         self.video_cap.release()
 
     def extract_frame_by_vsf(self):
-        """
-       通过调用videoSubFinder获取字幕帧
-       """
-        self.use_vsf = True
+        """Extract timed subtitle frames with the portable CLI on every OS."""
+        binary = resolve_binary(BASE_DIR)
+        version = verify_binary(binary)
+        self.append_output(f"VideoSubFinderCli {version}: {binary}")
         if self.video_cap:
             self.video_cap.release()
             self.video_cap = None
-        def count_process():
-            duration_ms = (self.frame_count / self.fps) * 1000
-            last_total_ms = 0
-            processed_image = set()
-            rgb_images_path = os.path.join(self.temp_output_dir, 'RGBImages')
-            time_pattern = re.compile(r'^\d+_\d+_\d+_\d+__')
-            while self.vsf_running and not self.isFinished:
-                time.sleep(0.2)
-                # 如果还没有rgb_images_path说明vsf还没处理完
-                if not os.path.exists(rgb_images_path):
-                    # 继续等待
-                    continue
-                try:
-                    # 将列表按文件名排序
-                    rgb_images = sorted(os.listdir(rgb_images_path))
-                    for rgb_image in rgb_images:
-                        # 如果当前图片已被处理，则跳过
-                        if rgb_image in processed_image:
-                            continue
-                        if not time_pattern.match(rgb_image):
-                            continue
-                        # self.append_output('rgb_image: ', rgb_image)
-                        processed_image.add(rgb_image)
-                        # 根据vsf生成的文件名读取时间
-                        h, m, s, ms = rgb_image.split('__')[0].split('_')
-                        total_ms = int(ms) + int(s) * 1000 + int(m) * 60 * 1000 + int(h) * 60 * 60 * 1000
-                        if total_ms > last_total_ms:
-                            frame_no = int(total_ms / self.fps)
-                            task = (self.frame_count, frame_no, None, None, total_ms, config.subtitleArea.value)
-                            self.subtitle_ocr_task_queue.put(task)
-                        last_total_ms = total_ms
-                        if total_ms / duration_ms >= 1:
-                            self.update_progress(frame_extract=100)
-                            return
-                        else:
-                            self.update_progress(frame_extract=(total_ms / duration_ms) * 100)
-                # 文件被清理了
-                except FileNotFoundError:
-                    return
+        threads = config.videoSubFinderCpuCores.value or max(multiprocessing.cpu_count() - 2, 2)
+        command = build_command(
+            binary, self.video_path, self.temp_output_dir, self.vsf_subtitle,
+            crop=(1 - self.sub_area.ymin / self.frame_height,
+                  1 - self.sub_area.ymax / self.frame_height,
+                  self.sub_area.xmin / self.frame_width,
+                  self.sub_area.xmax / self.frame_width),
+            threads=threads, decoder=config.videoSubFinderDecoder.value.value.lower(),
+            use_cuda=os.environ.get("VSE_VSF_CUDA") == "1")
+        process_id = None
 
-        def vsf_output(out, ):
-            duration_ms = (self.frame_count / self.fps) * 1000
-            last_total_ms = 0
-            for line in iter(out.readline, b''):
-                line = line.decode("utf-8")
-                # self.append_output('line', line, type(line), line.startswith('Frame: '))
-                if line.startswith('Frame: '):
-                    line = line.replace("\n", "")
-                    line = line.replace("Frame: ", "")
-                    h, m, s, ms = line.split('__')[0].split('_')
-                    total_ms = int(ms) + int(s) * 1000 + int(m) * 60 * 1000 + int(h) * 60 * 60 * 1000
-                    if total_ms > last_total_ms:
-                        frame_no = int(total_ms / self.fps)
-                        task = (self.frame_count, frame_no, None, None, total_ms, config.subtitleArea.value)
-                        self.subtitle_ocr_task_queue.put(task)
-                    last_total_ms = total_ms
-                    if total_ms / duration_ms >= 1:
-                        self.update_progress(frame_extract=100)
-                        return
-                    else:
-                        self.update_progress(frame_extract=(total_ms / duration_ms) * 100)
-                else:
-                    self.append_output(line.strip())
-            out.close()
+        def register_process(process):
+            nonlocal process_id
+            process_id = ProcessManager.instance().add_process(process)
+            self.manage_process(process.pid)
 
-        # 定义videoSubFinder所在路径
-        if platform.system() == 'Windows':
-            path_vsf = os.path.join(BASE_DIR, 'subfinder', 'windows', 'VideoSubFinderWXW.exe')
-        elif platform.system() == 'Darwin':
-            path_vsf = os.path.join(BASE_DIR, 'subfinder', 'macos', 'VideoSubFinderCli')
-            os.chmod(path_vsf, 0o775)
-        else:
-            path_vsf = os.path.join(BASE_DIR, 'subfinder', 'linux', 'VideoSubFinderCli.run')
-            os.chmod(path_vsf, 0o775)
-        # ：图像上半部分所占百分比，取值【0-1】
-        top_end = 1 - self.sub_area.ymin / self.frame_height
-        # bottom_end：图像下半部分所占百分比，取值【0-1】
-        bottom_end = 1 - self.sub_area.ymax / self.frame_height
-        # left_end：图像左半部分所占百分比，取值【0-1】
-        left_end = self.sub_area.xmin / self.frame_width
-        # re：图像右半部分所占百分比，取值【0-1】
-        right_end = self.sub_area.xmax / self.frame_width
-        if (not self.hardware_accelerator.has_cuda()) and len(self.hardware_accelerator.onnx_providers) > 0:
-            cpu_count = multiprocessing.cpu_count()
-        else:
-            # 留2核心来给其他任务使用
-            cpu_count = max(multiprocessing.cpu_count() - 2, 1)
-        if config.videoSubFinderCpuCores.value > 0:
-            cpu_count = config.videoSubFinderCpuCores.value
-        if platform.system() == 'Windows':
-            # 定义执行命令
-            cmd = f"{path_vsf} --use_cuda -c -r -i \"{self.video_path}\" -o \"{self.temp_output_dir}\" -ces \"{self.vsf_subtitle}\" "
-            cmd += f"-te {top_end} -be {bottom_end} -le {left_end} -re {right_end} -nthr {cpu_count} -nocrthr {cpu_count} "
-            cmd += f"--open_video_{config.videoSubFinderDecoder.value.value.lower()} "
-            # 计算进度
-            try:
-                self.vsf_running = True
-                Thread(target=count_process, daemon=True).start()       
-                # 已知BUG: test_chinese_cht.flv在net drive上会导致无法停止, 但在本地不会, 可能是vsf的原因
-                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1,
-                                    close_fds='posix' in sys.builtin_module_names, shell=False, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
-                ProcessManager.instance().add_process(p)
-                self.manage_process(p.pid)
-                p.wait()
-            finally:
-                self.vsf_running = False
-        else:
-            # 定义执行命令
-            cmd = f"{path_vsf} -c -r -i \"{self.video_path}\" -o \"{self.temp_output_dir}\" -ces \"{self.vsf_subtitle}\" "
-            if self.hardware_accelerator.has_accelerator():
-                cmd += "--use_cuda "
-            cmd += f"-te {top_end} -be {bottom_end} -le {left_end} -re {right_end} -nthr {cpu_count} -dsi "
-            cmd += f"--open_video_{config.videoSubFinderDecoder.value.value.lower()} "
-            self.vsf_running = True
-            try:
-                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1,
-                                    close_fds='posix' in sys.builtin_module_names, shell=True,
-                                    start_new_session=True)
-                Thread(target=vsf_output, daemon=True, args=(p.stderr,)).start()
-                ProcessManager.instance().add_process(p)
-                self.manage_process(p.pid)
-                p.wait()
-            finally:
-                self.vsf_running = False
+        self.vsf_running = True
+        try:
+            result = run_command(command,
+                on_progress=lambda value: self.update_progress(frame_extract=value),
+                on_log=self.append_output, on_spawn=register_process)
+            if not os.path.isfile(self.vsf_subtitle):
+                raise VideoSubFinderError("VideoSubFinderCli did not write the requested SRT timing file")
+            # Frame events can arrive out of order from the CLI worker pool.
+            # Keep timestamp zero and sort/deduplicate before feeding the OCR
+            # worker, which expects chronological frames when merging text.
+            for total_ms in result.timestamps_ms:
+                frame_no = self._timestamp_to_frameno(total_ms)
+                self.subtitle_ocr_task_queue.put(
+                    (self.frame_count, frame_no, None, None, total_ms, config.subtitleArea.value))
+            self.use_vsf = True
+        finally:
+            self.vsf_running = False
+            if process_id is not None:
+                ProcessManager.instance().remove_process(process_id)
+
     def filter_watermark(self):
         """
         去除原始字幕文本中的水印区域的文本
@@ -750,7 +720,7 @@ class SubtitleExtractor:
         return "%02d:%02d:%02d,%03d" % (hours, minutes, seconds, milliseconds)
 
     def _timestamp_to_frameno(self, time_ms):
-        return int(time_ms / self.fps)
+        return timestamp_to_frame(time_ms, self.fps)
 
     def _frameno_to_milliseconds(self, frame_no):
         return float(int(frame_no / self.fps * 1000))
@@ -963,8 +933,8 @@ class SubtitleExtractor:
         """
         对图片进行统一化处理
         """
-        # 利用image对图像大小重新设置, Image.ANTIALIAS为高质量的
-        image = image.resize(size, Image.ANTIALIAS)
+        # 利用image对图像大小重新设置, Image.Resampling.LANCZOS为高质量的
+        image = image.resize(size, Image.Resampling.LANCZOS)
         if greyscale:
             # 将图片转换为L模式，其为灰度图，其每个像素用8个bit表示
             image = image.convert('L')
@@ -1008,8 +978,15 @@ class SubtitleExtractor:
             """
             notify = True
             total_tasks = None
-            while True:
-                value = self.subtitle_ocr_progress_queue.get(block=True)
+            while not self._ocr_progress_stop.is_set():
+                try:
+                    value = self.subtitle_ocr_progress_queue.get(timeout=0.2)
+                except queue.Empty:
+                    continue
+                except (EOFError, OSError, ValueError):
+                    return
+                if value is None:
+                    return
                 if notify:
                     self.append_output(tr['Main']['StartFindSub'])
                     notify = False
@@ -1034,18 +1011,22 @@ class SubtitleExtractor:
                     self.update_progress(ocr=ocr_pct)
         options = {
             'REC_CHAR_TYPE': config.language.value,
+            'MODE': config.mode.value,
+            'REC_BATCH_NUMBER': config.recBatchNumber.value,
             'DROP_SCORE': config.dropScore.value / 100.0,
             'SUB_AREA_DEVIATION_RATE': config.subtitleAreaDeviationRate.value / 100.0,
             'DEBUG_OCR_LOSS': config.debugOcrLoss.value,
             'HARDWARD_ACCELERATOR': self.hardware_accelerator,
         }
         process, task_queue, progress_queue = subtitle_ocr.async_start(self.video_path, self.raw_subtitle_path, self.sub_area, options)
-        ProcessManager.instance().add_process(process)
+        self._ocr_process = process
+        self._ocr_process_id = ProcessManager.instance().add_process(process)
         self.manage_process(process.pid)
         self.subtitle_ocr_task_queue = task_queue
         self.subtitle_ocr_progress_queue = progress_queue
         # 开启线程负责更新OCR进度
-        Thread(target=get_ocr_progress, daemon=True).start()
+        self._ocr_progress_thread = Thread(target=get_ocr_progress, daemon=True)
+        self._ocr_progress_thread.start()
         return process
 
     def srt2txt(self, srt_file):
@@ -1093,7 +1074,7 @@ class SubtitleExtractor:
             except Exception as e:
                 traceback.print_exc()
 
-    def manage_process(pid):
+    def manage_process(self, pid):
         pass
 
 if __name__ == '__main__':

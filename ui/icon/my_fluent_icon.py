@@ -1,4 +1,5 @@
 from enum import Enum
+from pathlib import Path
 
 from qfluentwidgets import getIconColor, Theme, FluentIconBase
 
@@ -8,4 +9,4 @@ class MyFluentIcon(FluentIconBase, Enum):
 
     def path(self, theme=Theme.AUTO):
         # getIconColor() return "white" or "black" according to current theme
-        return f'./ui/icon/{self.value}_{getIconColor(theme)}.svg'
+        return str(Path(__file__).with_name(f'{self.value}_{getIconColor(theme)}.svg'))
