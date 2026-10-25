@@ -1,5 +1,6 @@
 """Native closure integrity, attribution and traversal regression tests."""
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -64,6 +65,11 @@ class NativeClosureTests(unittest.TestCase):
             self.assertEqual(provenance['package'], package)
             self.assertEqual(provenance['package_metadata'][0], package)
             self.assertEqual(provenance['copyright_source'], str(copyright_file))
+            self.assertEqual(provenance['license_files'], [
+                f'licenses/{native.package_license_directory(package)}/{name}'
+                for name in ('GPL-2', 'copyright', 'package-id.txt')
+            ])
+            self.assertTrue(all('\\' not in name for name in provenance['license_files']))
             self.assertEqual(len(list((dest / 'licenses').iterdir())), 1)
             license_dir = dest / 'licenses' / native.package_license_directory(package)
             self.assertEqual((license_dir / 'copyright').read_bytes(), copyright_bytes)
@@ -89,13 +95,14 @@ class NativeClosureTests(unittest.TestCase):
     def test_package_directory_collision_fails_without_overwriting_attribution(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            docs, dest = root / 'doc', root / 'native-libs'
+            docs, common, dest = root / 'doc', root / 'common-licenses', root / 'native-libs'
+            common.mkdir()
             for package in ('libfoo+bar', 'libfoo-bar'):
                 copyright_file = docs / package / 'copyright'
                 copyright_file.parent.mkdir(parents=True)
                 copyright_file.write_text(package)
             source = root / 'library.so'
-            with patch.object(native, 'DOC_ROOT', docs), patch.object(native, 'package_license_directory', return_value='forced-collision'), patch.object(native, 'run', return_value=f'libfoo+bar: {source}\n'):
+            with patch.object(native, 'DOC_ROOT', docs), patch.object(native, 'COMMON_LICENSES_ROOT', common), patch.object(native, 'package_license_directory', return_value='forced-collision'), patch.object(native, 'run', return_value=f'libfoo+bar: {source}\n'):
                 native.package_provenance(source, dest)
                 with patch.object(native, 'run', return_value=f'libfoo-bar: {source}\n'):
                     with self.assertRaisesRegex(ValueError, 'directory collision'):
@@ -105,13 +112,14 @@ class NativeClosureTests(unittest.TestCase):
     def test_attribution_source_and_destination_symlink_escapes_are_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            docs, outside, dest = root / 'doc', root / 'outside', root / 'native-libs'
+            docs, common, outside, dest = root / 'doc', root / 'common-licenses', root / 'outside', root / 'native-libs'
             docs.mkdir()
+            common.mkdir()
             outside.mkdir()
             (outside / 'copyright').write_bytes(b'must not copy or overwrite')
             (docs / 'libfixture').symlink_to(outside, target_is_directory=True)
             source = root / 'library.so'
-            with patch.object(native, 'DOC_ROOT', docs), patch.object(native, 'run', return_value=f'libfixture:amd64: {source}\n'):
+            with patch.object(native, 'DOC_ROOT', docs), patch.object(native, 'COMMON_LICENSES_ROOT', common), patch.object(native, 'run', return_value=f'libfixture:amd64: {source}\n'):
                 with self.assertRaisesRegex(ValueError, 'Escaping attribution source'):
                     native.package_provenance(source, dest)
                 self.assertFalse(dest.exists())
@@ -149,7 +157,10 @@ class NativeClosureTests(unittest.TestCase):
             common.mkdir()
             license_bytes = b'Full copyright and license attribution\r\n\xff'
             (common / 'GPL-2').write_bytes(license_bytes)
-            (docs / 'libfixture/copyright').symlink_to('../../common-licenses/GPL-2')
+            copyright_file = docs / 'libfixture/copyright'
+            # Windows symlink targets must use native separators, unlike the
+            # portable forward-slash paths recorded in the bundle manifest.
+            copyright_file.symlink_to(os.path.relpath(common / 'GPL-2', copyright_file.parent))
             source, dest = root / 'library.so', root / 'native-libs'
             with patch.object(native, 'DOC_ROOT', docs), patch.object(native, 'COMMON_LICENSES_ROOT', common), patch.object(native, 'run', return_value=f'libfixture:amd64: {source}\n'):
                 record = native.package_provenance(source, dest)
@@ -279,13 +290,22 @@ class NativeClosureTests(unittest.TestCase):
             (source / 'libsecond.so').write_bytes(b'\x7fELFsecond')
             def inspect(path):
                 return {'needed': {'python': ['libfirst.so'], 'libfirst.so': ['libsecond.so'], 'libsecond.so': ['libc.so.6']}[path.name], 'paths': [], 'glibc': ['2.34']}
+            attribution_name = 'licenses/pkg-fixture/copyright'
+            def provenance(source, destination):
+                attribution = destination / attribution_name
+                attribution.parent.mkdir(parents=True, exist_ok=True)
+                attribution.write_bytes(b'complete fixture attribution')
+                return {'package': 'fixture:amd64', 'license_files': [attribution_name]}
             cache = f'libfirst.so (libc6) => {source}/libfirst.so\nlibsecond.so (libc6) => {source}/libsecond.so'
-            with patch.object(native, 'elf_info', side_effect=inspect), patch.object(native, 'run', return_value=cache), patch.object(native, 'package_provenance', return_value={'package': 'fixture'}), patch.object(native, 'linux_os_release', return_value='ID=ubuntu\nVERSION_ID=24.04\n'):
+            with patch.object(native, 'elf_info', side_effect=inspect), patch.object(native, 'run', return_value=cache), patch.object(native, 'package_provenance', side_effect=provenance), patch.object(native, 'linux_os_release', return_value='ID=ubuntu\nVERSION_ID=24.04\n'):
                 manifest = native.bundle_linux_libraries(root)
             self.assertEqual(set(manifest['libraries']), {'libfirst.so', 'libsecond.so'})
             self.assertEqual(manifest['minimum_glibc'], '2.34')
             self.assertEqual(manifest['build_os_release'], 'ID=ubuntu\nVERSION_ID=24.04\n')
             self.assertEqual(manifest['base_libraries'], ['libc.so.6'])
+            self.assertEqual(manifest['attribution_hashes'], {
+                attribution_name: native.sha256(root / 'native-libs' / attribution_name)
+            })
             self.assertFalse((root / 'native-libs' / 'libfirst.so').is_symlink())
             self.assertEqual(native.verify_linux_libraries(root), manifest)
             (root / 'native-libs' / 'injected.so').write_bytes(b'bad')

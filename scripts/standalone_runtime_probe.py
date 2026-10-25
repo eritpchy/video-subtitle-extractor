@@ -72,9 +72,21 @@ atlthunk cabinet urlmon iertutil winrnr pnrpnsp nlansp_c wshbth napinsp
 hid winusb normaliz rstrtmgr slc sppc windows.staterepositoryclient
 windows.staterepositorycore windows.staterepositoryps portcls wdmaud.drv
 msacm32.drv midimap explorerframe dataexchange twinapi.appcore twinapi avicap32
+mpr wsock32 mscms uiautomationcore icuuc icuin icu
 """.split())
 # avicap32 is the Windows Video for Windows capture API, not a vendor runtime:
 # https://learn.microsoft.com/en-us/windows/win32/api/vfw/nf-vfw-capcreatecapturewindowa
+# Actual Windows wheel imports: Qt6Core (PySide6 6.12.0) -> mpr/icuuc,
+# qwindows -> mscms/uiautomationcore; cv2 (4.10.0.84) -> wsock32.
+# https://learn.microsoft.com/en-us/windows/win32/api/winnetwk/nf-winnetwk-multinetgetconnectionperformancew
+# https://learn.microsoft.com/en-us/windows/win32/api/icm/nf-icm-getcolorprofileheader
+# https://learn.microsoft.com/en-us/windows/win32/api/uiautomationcoreapi/nf-uiautomationcoreapi-uiaraiseautomationevent
+# https://learn.microsoft.com/en-us/troubleshoot/windows-client/application-management/add-remove-programs-displays-programs-incorrectly
+# Windows 10 1703 supplies icuuc/icuin; 1903 adds combined icu, with the old
+# names retained as forwarders. Only these exact unversioned OS names qualify;
+# versioned/vendor ICU DLLs still must be inside the application bundle.
+# https://learn.microsoft.com/en-us/windows/win32/intl/international-components-for-unicode--icu-
+# https://github.com/microsoft/win32metadata/issues/1956
 
 
 LINUX_BASE = re.compile(r"^(?:ld-linux[^/]*\.so(?:\.\d+)*|lib(?:c|m|dl|pthread|rt|util|resolv|anl|BrokenLocale|nss_(?:files|dns|compat|hesiod))\.so(?:\.\d+)*)$")

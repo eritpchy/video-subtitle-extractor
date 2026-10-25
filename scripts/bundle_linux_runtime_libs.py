@@ -156,7 +156,7 @@ def package_provenance(source: Path, destination: Path) -> dict:
         copy_attribution(common, license_dir / common.name)
     metadata = run('dpkg-query', '-W', '-f=${binary:Package}\n${Version}\n${source:Package}\n${source:Version}\n${Homepage}\n', package).splitlines()
     return {'package': package, 'package_metadata': metadata, 'copyright_source': str(copyright_file),
-            'license_files': [str(p.relative_to(destination)) for p in sorted(license_dir.iterdir())]}
+            'license_files': sorted(p.relative_to(destination).as_posix() for p in license_dir.iterdir())}
 
 
 def linux_os_release() -> str:
@@ -245,7 +245,7 @@ def bundle_linux_libraries(stage_root: Path, runtime_python: Path | None = None)
                     'launch_environment': {'LD_LIBRARY_PATH': '$BUNDLE/native-libs'},
                     'limitations': ['Requires Linux with recorded glibc ABI or newer.', 'Native GUI requires an OS X11 display server. GPU/GL drivers are OS facilities.', 'DT_NEEDED closure does not prove arbitrary dlopen paths; clean-container GUI and OCR E2E are required.'],
                     'libraries': records, 'elf_files_scanned': len(scanned)}
-        manifest['attribution_hashes'] = {str(p.relative_to(dest)): sha256(p) for p in sorted(dest.rglob('*')) if p.is_file() and 'licenses' in p.relative_to(dest).parts}
+        manifest['attribution_hashes'] = {p.relative_to(dest).as_posix(): sha256(p) for p in sorted(dest.rglob('*'), key=lambda p: p.as_posix()) if p.is_file() and 'licenses' in p.relative_to(dest).parts}
         (dest / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
         verify_linux_libraries(root)
         return manifest

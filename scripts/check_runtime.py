@@ -11,6 +11,19 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 
+def import_paddle_runtime(backend):
+    if backend != 'paddle':
+        return None, None
+    if sys.platform == 'win32':
+        # The official PySide/Shiboken wheels include app-local VC libraries,
+        # including the VCOMP140 required by Paddle's mkldnn.dll. Initialize
+        # their DLL directories before Paddle, as the real GUI/CLI already do.
+        import PySide6  # noqa: F401
+    import paddle
+    import paddleocr
+    return paddle, paddleocr
+
+
 def main() -> int:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
@@ -30,9 +43,7 @@ def main() -> int:
     from ui.qt_runtime import prepare_qt_runtime
     prepare_qt_runtime()
     import cv2
-    if backend == 'paddle':
-        import paddle
-        import paddleocr
+    paddle, paddleocr = import_paddle_runtime(backend)
     from PIL import ImageFont
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QColor, QFont, QFontDatabase, QImage, QPainter

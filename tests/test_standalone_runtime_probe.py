@@ -26,13 +26,13 @@ def stage_probe(root):
 from scripts.standalone_runtime_probe import audit_environment, library_violation, loaded_images, summarize_reports
 
 
-@pytest.mark.parametrize('name', ['vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'concrt140.dll', 'msvcr120.dll', 'python312.dll', 'libiomp5md.dll', 'unknown_vendor.dll'])
+@pytest.mark.parametrize('name', ['vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'concrt140.dll', 'vcomp140.dll', 'msvcr120.dll', 'python312.dll', 'libiomp5md.dll', 'unknown_vendor.dll', 'icuuc72.dll', 'icuin72.dll', 'icudt72.dll', 'icuuc72.1.dll', 'icu_vendor.dll', 'mpr_vendor.dll', 'mscms_vendor.dll', 'UIAutomationCoreVendor.dll'])
 def test_windows_external_non_os_runtime_rejected(name):
     assert library_violation('C:\\Windows\\System32\\' + name, r'C:\VSE', 'Windows')
     assert library_violation('C:\\VSE\\runtime\\' + name, r'C:\VSE', 'Windows') is None
 
 
-@pytest.mark.parametrize('name', ['kernel32.dll', 'ucrtbase.dll', 'msvcp_win.dll', 'DWrite.dll', 'AVICAP32.dll', 'api-ms-win-core-file-l1-1-0.dll'])
+@pytest.mark.parametrize('name', ['kernel32.dll', 'ucrtbase.dll', 'msvcp_win.dll', 'DWrite.dll', 'AVICAP32.dll', 'MPR.dll', 'WSOCK32.dll', 'mscms.dll', 'UIAutomationCore.DLL', 'icuuc.dll', 'icuin.dll', 'icu.dll', 'api-ms-win-core-file-l1-1-0.dll'])
 def test_windows_os_runtime_allowed(name):
     assert library_violation('C:\\Windows\\System32\\' + name, r'C:\VSE', 'Windows') is None
     assert library_violation('C:\\other\\' + name, r'C:\VSE', 'Windows')
@@ -43,6 +43,13 @@ def test_windows_case_prefix_and_neighbor_paths():
     assert library_violation(r'C:\VSE-other\runtime\python312.dll', r'C:\VSE', 'Windows')
     assert library_violation(r'C:\Windows\System32-evil\kernel32.dll', r'C:\VSE', 'Windows')
     assert library_violation(r'C:\Windows\System32-evil\AVICAP32.dll', r'C:\VSE', 'Windows')
+
+
+@pytest.mark.parametrize('name', ['MPR.dll', 'WSOCK32.dll', 'mscms.dll', 'UIAutomationCore.DLL', 'icuuc.dll', 'icuin.dll', 'icu.dll'])
+def test_windows_wheel_os_dependencies_stay_within_selected_system_root(name):
+    assert library_violation('D:\\Windows\\System32\\' + name, r'C:\VSE', 'Windows', r'D:\Windows') is None
+    for directory in (r'C:\Windows\System32', r'D:\Windows\System32-evil', r'D:\Windows\Temp'):
+        assert library_violation(directory + '\\' + name, r'C:\VSE', 'Windows', r'D:\Windows')
 
 
 @pytest.mark.parametrize('path', ['/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation', '/usr/lib/libSystem.B.dylib'])
@@ -270,6 +277,19 @@ def test_pe_reader_mandatory_imports(tmp_path):
     binary.write_bytes(b'MZ')
     with pytest.raises(ValueError, match='Truncated PE'):
         probe.pe_imports(binary)
+
+
+def test_pe_windows_wheel_os_imports_and_icu_forwarders_are_exact(tmp_path):
+    executable = tmp_path / 'probe.exe'
+    runtime_python = tmp_path / 'runtime/python.exe'
+    runtime_python.parent.mkdir()
+    imports = ['MPR.dll', 'WSOCK32.dll', 'mscms.dll', 'UIAutomationCore.DLL', 'icuuc.dll', 'icuin.dll', 'icu.dll']
+    _write_pe(executable, imports)
+    result = probe.audit_windows_executables(tmp_path, runtime_python, tmp_path / 'reports', [executable])
+    assert result['executables']['probe.exe']['probe.exe'] == dict.fromkeys(imports, 'Windows base OS')
+    _write_pe(executable, imports + ['icuuc72.dll'])
+    with pytest.raises(RuntimeError, match='unbundled/unreachable DLL: icuuc72.dll'):
+        probe.audit_windows_executables(tmp_path, runtime_python, tmp_path / 'reports', [executable])
 
 
 def test_pe_recursive_runtime_dependencies_must_be_reachable(tmp_path):
