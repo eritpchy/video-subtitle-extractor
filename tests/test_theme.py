@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -18,6 +19,7 @@ from qfluentwidgets import ConfigItem, Theme, qconfig
 
 from backend.config import config
 from backend.tools.theme_listener import SystemThemeListener
+from helpers.theme_wait import animation_states, wait_for_widget_animations
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -59,8 +61,7 @@ class ThemeTestCase(unittest.TestCase):
 
     def set_mode(self, mode):
         qconfig.set(config.themeMode, mode)
-        self.app.processEvents()
-        QtTest.QTest.qWait(160)  # Fluent background animations last 120 ms.
+        wait_for_widget_animations(self.widgets)
 
     def listener(self, system=Theme.LIGHT):
         listener = SystemThemeListener(poll_interval=60000)
@@ -202,6 +203,20 @@ class WindowThemeTests(ThemeTestCase):
         self.app.processEvents()
         self.assertIs(self.window.stackedWidget.currentWidget(), interface)
         self.assertTrue(interface.isVisible())
+        wait_for_widget_animations([self.window])
+
+    def test_theme_wait_awaits_real_completion_beyond_nominal_duration(self):
+        card = self.window.timelineSyncInterface.findChild(QtWidgets.QWidget, 'timelineButtons')
+        self.switch_to_settled_page(self.window.timelineSyncInterface)
+        # Reproduce a transition that outlives the former 160 ms sleep. Native
+        # runner scheduling may likewise delay delivery/restart of animations.
+        self.window.backgroundColorAni.setDuration(450)
+        card.backgroundColorAni.setDuration(450)
+        for mode in (Theme.DARK, Theme.LIGHT):
+            self.set_mode(mode)
+            for widget in (self.window, card):
+                self.assertEqual(widget.backgroundColorAni.state(), QtCore.QAbstractAnimation.State.Stopped)
+                self.assertEqual(widget.backgroundColor, widget.backgroundColorAni.endValue())
 
     def test_open_window_selector_updates_all_pages_and_persists(self):
         combo = self.window.advancedSettingInterface.theme_mode.comboBox
@@ -223,6 +238,9 @@ class WindowThemeTests(ThemeTestCase):
         card = self.window.timelineSyncInterface.findChild(QtWidgets.QWidget, "timelineButtons")
         self.switch_to_settled_page(self.window.timelineSyncInterface)
         brightness = []
+        evidence = ROOT / 'test-results/theme-roundtrip'
+        evidence.mkdir(parents=True, exist_ok=True)
+        samples = []
         for mode in (Theme.LIGHT, Theme.DARK, Theme.LIGHT):
             self.set_mode(mode)
             # Capture the full window: CardWidget is translucent and an isolated
@@ -231,6 +249,18 @@ class WindowThemeTests(ThemeTestCase):
             point = card.mapTo(self.window, QtCore.QPoint(card.width() - 20, card.height() // 2))
             point *= image.devicePixelRatio()
             brightness.append(image.pixelColor(point).lightness())
+            image.save(str(evidence / f'{len(brightness)}-{mode.value.lower()}.png'))
+            samples.append({'mode': mode.value, 'brightness': brightness[-1],
+                            'monotonic_seconds': time.monotonic(),
+                            'effective_theme': qconfig.theme.value,
+                            'sample_point_pixels': [point.x(), point.y()],
+                            'card_geometry': [card.x(), card.y(), card.width(), card.height()],
+                            'image': f'{len(brightness)}-{mode.value.lower()}.png',
+                            'window_color': self.window.backgroundColor.name(),
+                            'card_rgba': card.backgroundColor.getRgb(),
+                            'card_hover': card.isHover,
+                            'animations': animation_states([self.window])})
+            (evidence / 'states.json').write_text(json.dumps(samples, indent=2))
         self.assertGreater(brightness[0], brightness[1] + 80)
         self.assertEqual(brightness[0], brightness[2])
 

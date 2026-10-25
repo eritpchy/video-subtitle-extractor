@@ -11,6 +11,7 @@ from qfluentwidgets import Theme, qconfig
 
 from backend.config import config
 from test_theme import ThemeTestCase
+from helpers.theme_wait import wait_for_widget_animations
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -66,6 +67,7 @@ window.close()
         window.resize(1280, 900)
         window.show()
         self.app.processEvents()
+        wait_for_widget_animations([window])
         return window
 
     def settled_page(self, window, page):
@@ -75,6 +77,7 @@ window.close()
         if moving:
             self.assertTrue(finished.count() or finished.wait(2000))
         self.app.processEvents()
+        wait_for_widget_animations([window])
 
     def test_fresh_gui_restarts_apply_saved_mode_and_current_system(self):
         for mode in (Theme.LIGHT, Theme.DARK, Theme.AUTO):
@@ -116,7 +119,7 @@ window.close()
             scheme = QtCore.Qt.ColorScheme.Dark if theme == Theme.DARK else QtCore.Qt.ColorScheme.Light
             # Emit through Qt's real signal/connection, not the listener method.
             hints.colorSchemeChanged.emit(scheme)
-            QtTest.QTest.qWait(180)
+            wait_for_widget_animations([window])
             self.assertEqual(qconfig.theme, theme)
             self.assertEqual(config.themeMode.value, Theme.AUTO)
             self.assertEqual(config.file.read_bytes(), before)

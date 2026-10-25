@@ -378,3 +378,6 @@ $RECYCLE.BIN/
 /backend/subfinder/macos/universal/
 /artifacts/
 /.cache/
+
+# Native GUI test evidence
+/test-results/
