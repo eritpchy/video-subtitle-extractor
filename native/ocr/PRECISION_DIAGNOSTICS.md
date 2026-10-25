@@ -79,8 +79,8 @@ Neither the diagnostic executable, Paddle environment nor tensor dumps enter
   broader held-out evidence and confidence-threshold stability analysis. Do not
   choose a tolerance just above these four observed errors.
 
-macOS diagnostic and full packaged GUI/video/SRT results remain pending until
-the real macOS CI run executes. Linux helper/compile checks cannot establish them.
+Diagnostics and full packaged GUI/video/SRT acceptance are separate results.
+Linux helper/compile checks cannot establish macOS acceptance.
 
 ## Round 2: input-level localization, not tolerance relaxation
 
@@ -126,3 +126,47 @@ not this diagnostic source job. After a Mac smoke failure, only the Mac runner
 waits for the same-run source job's result. Failure or unavailable reference
 evidence is recorded explicitly and never treated as a parity pass; the original
 smoke remains a hard failure.
+
+## Round 3: crop geometry contraction, not inference tolerance
+
+Commit `0a858b5` completed the real Mac geometry capture **and** all 84 independent
+same-Mac Paddle tensor replays using verified offline original sources. The four
+baseline native/Paddle confidence differences were approximately `1.43e-6`,
+`2.03e-6`, `9.54e-7`, and `1.79e-7`, with identical CTC tokens. The original global
+goldens still failed the same four cases: reference agreement is not a gate bypass.
+
+All 12 integer detector quads, crop dimensions and rotation decisions matched
+Linux. Floating-point corners from the crop's second `minAreaRect`/`points` path
+already differed before perspective warping. Failed cases 31/33/66/72 had only
+6/12/6/63 differing pre-resize BGR bytes, respectively (maximum value delta 6).
+
+A controlled Linux replay of the **captured Mac corners** through the existing
+OpenCV `getPerspectiveTransform` and `warpPerspective` reproduced the Mac uint8
+crops byte-for-byte for **12/12** cases. Captured Linux corners reproduced all
+Linux crops. Resizing and normalizing the captured Mac crops with the existing
+Linux implementation also reproduced **12/12 Mac recognition inputs exactly**.
+Thus corner differences suffice to explain the downstream differences; there is
+no evidence requiring a different warp, resize, or Carotene path.
+
+The pinned OpenCV [corner implementation](https://github.com/opencv/opencv/blob/4.10.0/modules/core/src/types.cpp)
+contains FP32 multiply/add expressions. Re-evaluating these expressions with
+nested FP32 FMA on the Linux rectangle parameters exactly reproduced 11/12 Mac
+corner sets. Recompiling the original
+[rotating-calipers implementation](https://github.com/opencv/opencv/blob/4.10.0/modules/imgproc/src/rotcalipers.cpp)
+with FMA enabled also changed case 72's rectangle parameters; those parameters
+plus the same FMA corner evaluation reproduced **12/12 Mac corner sets exactly**.
+Conversely, compiling those original source objects with FMA hardware available
+but `-fno-fast-math -ffp-contract=off` retained 12/12 original Linux corner sets.
+The Linux native worker relinked with those strict objects passed all 110 frozen
+parity cases and 19 edges (maximum confidence difference `1.79e-7`). This is a
+causal Linux reproduction, not execution of a corrected Mac build.
+
+[Clang documents](https://clang.llvm.org/docs/UsersManual.html#controlling-floating-point-behavior)
+that default contraction permits fused operations within an expression, while
+`-ffp-contract=off` prohibits them. The worker's flags do not control separately
+compiled OpenCV source. The narrowly scoped candidate therefore applies
+`-fno-fast-math -ffp-contract=off` to the **Darwin OpenCV build**, retaining SIMD,
+HAL, interpolation, model weights, texts/boxes and the `1e-5` gate. Compile
+commands and CMake cache are preserved even if the next Mac smoke succeeds.
+Actual corrected-Mac parity remains pending; only the unchanged full smoke can
+establish that the four-case gap is resolved.

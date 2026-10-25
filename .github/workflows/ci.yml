@@ -100,9 +100,12 @@ jobs:
       - name: Windows or macOS native GUI backend smoke
         id: windows-gui
         if: runner.os != 'Linux'
+        timeout-minutes: 5
         env:
           QT_QPA_PLATFORM: ${{ runner.os == 'macOS' && 'cocoa' || 'windows' }}
           VSE_SMOKE_SCREENSHOT_DIR: test-results/gui-native
+          VSE_CI_WINDOWS_SYSTEM_THEME: ${{ runner.os == 'Windows' && '1' || '0' }}
+          VSE_CI_WINDOWS_RUNNER: ${{ matrix.os }}
         run: python gui.py --smoke-test
       - name: Windows native-backend light, dark and system-theme flows
         id: windows-theme
@@ -180,13 +183,16 @@ jobs:
              "source-tests":"${{ steps.source-tests.outcome }}",
              "gui":"${{ steps.windows-gui.outcome }}",
              "theme":"${{ steps.windows-theme.outcome }}",
+             "system-theme":"${{ steps.windows-gui.outcome }}",
              "cli":"${{ steps.cli.outcome }}",
              "ordinary":"${{ steps.ordinary.outcome }}",
              "issues":"${{ steps.issues.outcome }}",
              "package-build":"${{ steps.package-build.outcome }}",
              "package-verify":"${{ steps.package-verify.outcome }}",
              "portable-environment":"${{ steps.portable-environment.outcome }}"}
-        run: python scripts/windows_verification.py summarize --runner ${{ matrix.os }} --profile paddle
+        run: >-
+          python scripts/windows_verification.py summarize --runner ${{ matrix.os }} --profile paddle
+          --system-theme-report test-results/gui-native/system-theme.json
       - name: Preserve inference distribution evidence
         if: always()
         uses: actions/upload-artifact@v4

@@ -26,8 +26,63 @@ python native/ocr/smoke.py --artifact build/native-ocr --output test-results/nat
 `--offline` on either build helper rejects cache misses without network fallback.
 Existing output artifacts are never overwritten. `--cmake`, `--jobs` and optional
 `--generator` select installed build tools; no helper invokes pip automatically.
-Windows defaults to CMake's Visual Studio generator, not a Ninja build without a
-configured MSVC developer environment. macOS always targets arm64/macOS 14.0.
+Windows requires explicit `--generator Ninja` and the verified x64 MSVC developer
+environment described below; it must not depend on CMake's changing default
+generator. macOS always targets arm64/macOS 14.0.
+
+### Windows Server CI toolchain (source-side gate)
+
+Both `windows-2022` and `windows-2025` remain independent parallel jobs. After
+installing the hash-pinned build requirements, the workflow runs:
+
+```powershell
+python native/ocr/windows_toolchain.py --report test-results/windows/native-toolchain.json --github-env "$env:GITHUB_ENV"
+# The following CI step receives the selected developer environment:
+python native/ocr/build.py --platform windows --arch x64 --generator Ninja --models build/native-models --output build/native-ocr --runner-test-only
+```
+
+`vswhere` discovers installed C++ toolchains rather than assuming a Visual Studio
+year or installation path. The helper selects an installed v143/14.44 x64 toolset
+whose own `include/crtversion.h` CRT version is no newer than the committed
+`vc-runtime-manifest.json` **14.44.35211.0** runtime. It initializes that exact
+toolset with `VsDevCmd.bat -arch=x64 -host_arch=x64 -vcvars_ver=<version>`, verifies
+compiler/linker and INCLUDE/LIB precedence, and keeps pinned CMake **4.1.2** and
+Ninja **1.13.0** ahead of Visual Studio's bundled tools. The compiler's 19.44
+servicing patch is recorded separately: it is **not** mechanically converted
+into a CRT minimum version. A newer toolset family, missing/ambiguous CRT macros,
+or newer CRT header version fails before compilation, retaining candidate paths,
+versions and the reason; there is no fallback to `latest`, automatic installation,
+runtime pin change, license acknowledgment or security-setting change.
+
+OpenCV's static libraries explicitly use `BUILD_WITH_STATIC_CRT=OFF` and
+`CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL`; the worker also explicitly uses
+`MultiThreadedDLL`. This matters because OpenCV's own static-CRT default can
+override the CMake runtime setting. See the pinned
+[OpenCV CRT selection code](https://github.com/opencv/opencv/blob/4.10.0/cmake/OpenCVCRTLinkage.cmake).
+
+Official rolling-image manifests checked on **2026-10-25** advertise:
+
+| Runner | Image version | VS Enterprise | Windows SDK | Installed release VC runtime |
+| --- | --- | --- | --- | --- |
+| [Server 2022](https://github.com/actions/runner-images/blob/main/images/windows/Windows2022-Readme.md) | 20261022.344.1 | 2022 / 17.14.37806.7 | Includes 10.0.26100.0 | 14.51.36247 |
+| [Server 2025](https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md) | 20261021.299.1 | 2022 / 17.14.37806.7 | 10.0.26100.0 | 14.51.36247 |
+
+Those pages advertise the C++ x86/x64 component, but do **not** establish the
+exact compiler directory or matching CRT header on the next allocated runner.
+The per-job JSON is authoritative for that source-side check; it records the
+actual image, VS/toolset, compiler/linker versions, SDK, CRT header/import-library
+SHA256s and build tools, including failure evidence. Successful assembly also
+records the active toolchain in `size-audit.json` provenance. The newer host CRT
+is not permission to compile against it while shipping the older pin.
+
+[Microsoft's compatibility restrictions](https://learn.microsoft.com/en-us/cpp/porting/binary-compat-2015-2017)
+require a sufficiently recent runtime for all inputs. Header/import-library
+evidence is a **source-side constraint**, not proof that the compiled worker,
+ORT, or the whole GUI will load with bundled DLLs. Exact imported symbols,
+actual loaded-module paths and application smoke/parity remain separate package
+gates; DLL names alone never establish compatibility. Actual Server 2022/2025
+execution of this change remains pending the next CI run, not a Linux unit-test
+claim or a Windows 10/11 client certification.
 
 The output contains `native-ocr[.exe]`, one physical copy of each required ORT
 runtime library, `models/`, `config/`, licenses and complete SHA256 inventories.

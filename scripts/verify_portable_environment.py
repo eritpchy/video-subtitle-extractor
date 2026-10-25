@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 try:
@@ -29,12 +30,46 @@ except ImportError:
 SCENARIOS = ('clean-host-path', 'contaminated-host-environment')
 LIMITS = [
     'Conda/venv are simulated environment/fixture directories, not genuinely installed distributions.',
+    'Windows registry inventory is read-only existing-host evidence; no registry injection fixture or registry mutation is performed.',
     'clean-host-path removes host tools from the incoming child PATH; it does not uninstall host Python/Qt. Linux stock-container acceptance is a separate gate.',
     'Only child environments and temporary fixtures change; no global OS settings or installations are modified.',
     'Native path fixtures contain inert text markers, never executable foreign DLLs/shared libraries.',
     'No claim against a malicious/broken OS loader or LD_PRELOAD that runs before /bin/sh itself can sanitize its child.',
     'macOS app route executes Contents/MacOS/VSE; Finder/LaunchServices/Gatekeeper and a signed distribution require separate validation.',
 ]
+
+
+def existing_windows_python_registry() -> dict:
+    """Read only the registry branch CPython 3.12 would otherwise consult."""
+    if sys.platform != 'win32':
+        return {'applicable': False, 'registry_modified': False}
+    import winreg
+    key_name = r'SOFTWARE\Python\PythonCore\3.12\PythonPath'
+    result = {'applicable': True, 'key': key_name, 'registry_modified': False,
+              'injected_fixture': False, 'entries': [], 'errors': []}
+    for label, hive in (('HKCU', winreg.HKEY_CURRENT_USER), ('HKLM', winreg.HKEY_LOCAL_MACHINE)):
+        try:
+            with winreg.OpenKeyEx(hive, key_name, 0, winreg.KEY_READ) as key:
+                try:
+                    value = winreg.QueryValue(key, None)
+                    result['entries'].append({'hive': label, 'subkey': None, 'value': value})
+                except FileNotFoundError:
+                    pass
+                index = 0
+                while True:
+                    try:
+                        child = winreg.EnumKey(key, index)
+                    except OSError as error:
+                        if getattr(error, 'winerror', None) == 259:  # ERROR_NO_MORE_ITEMS
+                            break
+                        raise
+                    result['entries'].append({'hive': label, 'subkey': child, 'value': winreg.QueryValue(key, child)})
+                    index += 1
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            result['errors'].append({'hive': label, 'error': str(error)})
+    return result
 
 
 def write_json(path: Path, value: dict) -> None:
@@ -105,6 +140,48 @@ def fixture_environment(directory: Path, contaminated: bool, inherited: dict[str
     return env, metadata
 
 
+def verify_vendor_qt_plugin_path(root: Path, value: str) -> None:
+    """Accept only an inventoried vendor's exact platform-plugin directory.
+
+    Linux cv2 imports regenerate this variable after bootstrap has cleared it.
+    This is not a general allowance for Qt environment overrides or arbitrary
+    paths inside the bundle. Verify the package anchors and complete plugin
+    subtree, rejecting aliases, mixed search paths and uninventoried content.
+    """
+    root = root.resolve(strict=True)
+    manifest = json.loads((root / 'bundle-manifest.json').read_text(encoding='utf-8'))
+    target = manifest['platform']
+    packages = 'runtime/Lib/site-packages' if target == 'windows' else 'runtime/lib/python3.12/site-packages'
+    platform_plugin = {'linux': 'libqxcb.so', 'macos': 'libqcocoa.dylib', 'windows': 'qwindows.dll'}[target]
+    pyside = f'{packages}/PySide6'
+    declarations = [(f'{pyside}/' + ('plugins' if target == 'windows' else 'Qt/plugins'),
+                     (f'{pyside}/__init__.py',))]
+    if target == 'linux':
+        declarations.append((f'{packages}/cv2/qt/plugins',
+                             (f'{packages}/cv2/__init__.py', f'{packages}/cv2/config-3.py')))
+    path = Path(value)
+    for relative, anchors in declarations:
+        directory = root / relative
+        if path not in (directory, directory / 'platforms'):
+            continue
+        if not directory.is_dir() or directory.is_symlink() or directory.resolve(strict=True) != directory:
+            break
+        entries = [directory, *directory.rglob('*'), *(root / name for name in anchors)]
+        # resolve(strict=True) plus exact spelling rejects both an outside link
+        # and an alias to another legitimate bundle directory.
+        if any(not entry.exists() or entry.is_symlink() or entry.resolve(strict=True) != entry for entry in entries):
+            break
+        inventory = manifest['files']
+        required = [*anchors, f'{relative}/platforms/{platform_plugin}']
+        actual = {entry.relative_to(root).as_posix() for entry in entries if entry.is_file()}
+        declared = {name for name in inventory if name.startswith(relative + '/')}
+        if not set(required).issubset(inventory) or actual != declared | set(anchors):
+            break
+        verify_payload(root, {'files': {name: inventory[name] for name in actual}})
+        return
+    raise RuntimeError(f'Unverified regenerated Qt platform plugin path: {value}')
+
+
 def check_environment_evidence(evidence: Path, fixture: dict, profile: str, root: Path) -> None:
     if Path(fixture['marker']).exists():
         raise RuntimeError('Foreign fixture code/command was executed')
@@ -116,8 +193,14 @@ def check_environment_evidence(evidence: Path, fixture: dict, profile: str, root
     process_reports = sorted((evidence / 'dependency-isolation').glob('process-*.json'))
     if not process_reports:
         raise RuntimeError('Trusted child audit produced no reports')
+    verified_qt_paths = set()
     for record in [report, *(json.loads(path.read_text()) for path in process_reports)]:
         environment = record['environment']
+        if report.get('platform') == 'windows':
+            if record.get('isolated') != 1 or record.get('ignore_environment') != 1:
+                raise RuntimeError('Windows descendant lost ._pth startup isolation')
+            if not record['sys_path'] or any(not path or not Path(path).resolve().is_relative_to(root.resolve()) for path in record['sys_path']):
+                raise RuntimeError('Windows descendant has a non-bundled Python search path')
         if record.get('utf8_mode') != 1 or environment.get('PYTHONUTF8') != '1' or 'PYTHONIOENCODING' in environment:
             raise RuntimeError('App-controlled UTF-8 mode was lost')
         if record['user_site_enabled'] is not False or not record['no_user_site']:
@@ -136,6 +219,12 @@ def check_environment_evidence(evidence: Path, fixture: dict, profile: str, root
                     'OPENCV_VIDEOIO_PLUGIN_PATH', 'OPENCV_CORE_PLUGIN_PATH', 'OPENCV_DNN_PLUGIN_PATH', 'OPENCV_UI_PLUGIN_PATH', 'OPENCV_OPENCL_RUNTIME',
                     'OPENCV_FFMPEG_DLL_DIR', 'OPENCV_DNN_IE_EXTRA_PLUGIN_PATH'):
             if key in environment:
+                if key == 'QT_QPA_PLATFORM_PLUGIN_PATH' and record is not report:
+                    value = environment[key]
+                    if value not in verified_qt_paths:
+                        verify_vendor_qt_plugin_path(root, value)
+                        verified_qt_paths.add(value)
+                    continue
                 raise RuntimeError(f'Inherited runtime search setting survived: {key}')
         if any(key.startswith(('OPENCV_VIDEOIO_PLUGIN_', 'OPENCV_DNN_PLUGIN_', 'OPENCV_UI_PLUGIN_', 'OPENCV_CORE_PARALLEL_PLUGIN_')) for key in environment):
             raise RuntimeError('Inherited OpenCV plugin filename selector survived')
@@ -187,7 +276,7 @@ def verify_archive(archive: Path, output: Path) -> dict:
                         subprocess.run(command, cwd=fixture['cwd'], env=env, stdout=stream, stderr=subprocess.STDOUT, check=True, timeout=4800)
                     required = ('PySide6.QtWidgets', 'cv2', 'qfluentwidgets') + (('paddle',) if report['profile'] == 'paddle' else ())
                     forbidden = ('paddle', 'paddleocr', 'paddlex', 'onnxruntime') if report['profile'] == 'native' else ()
-                    case['audit'] = summarize_reports(root, audit, required, forbidden)
+                    case['audit'] = summarize_reports(root, audit, required, forbidden, require_isolated=manifest['platform'] == 'windows')
                     check_environment_evidence(evidence, fixture, report['profile'], root)
                     if manifest['platform'] == 'macos':
                         app_audit = evidence / 'macos-app-dependency-isolation'
@@ -232,7 +321,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error('Output must be new or empty; stale acceptance cannot pass')
     output.mkdir(parents=True, exist_ok=True)
     report = {'result': 'running', 'archives': [], 'limits': LIMITS,
-              'host_interpreters_before_test': {name: shutil.which(name) for name in ('python', 'python3', 'conda')}}
+              'host_interpreters_before_test': {name: shutil.which(name) for name in ('python', 'python3', 'conda')},
+              'windows_existing_registry': existing_windows_python_registry()}
     try:
         for archive in archives:
             destination = output / archive.stem

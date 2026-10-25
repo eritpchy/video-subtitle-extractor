@@ -41,6 +41,38 @@ load foreign native code and do not modify system installations or global
 settings. Base-OS utilities, GPU/display drivers and documented platform/ABI
 requirements still apply.
 
+## Windows system-Python registry isolation
+
+After build-side pip installation, the packager writes `runtime/python312._pth`
+with only relative bundle paths (standard library, DLLs, application root and
+site-packages). This suppresses CPython's registry/PYTHONPATH expansion for
+**ordinary child interpreters too**, not merely the first `-I` process. The
+bundle-owned `sitecustomize.py` is created before the site-packages prune
+inventory; both files are hashed by the outer release manifest. Existing
+publisher/third-party path files or startup hooks are never overwritten. Normal
+Windows bootstrap verifies that both required configuration files remain intact.
+The relevant [CPython 3.12 path initialization](https://github.com/python/cpython/blob/v3.12.15/Modules/getpath.py)
+consults PythonPath registry subkeys only while environment-based path discovery
+is enabled; `._pth` disables that expansion.
+
+The hook never imports environment-specified external code. Once bootstrap has
+validated the explicit audit request, descendant hooks load the probe from the
+bundle. A hook failure terminates the process instead of being swallowed by
+Python's `site` module. Initial launch clears inherited audit activation values.
+UTF-8 and user-site preconfiguration are still controlled separately: `._pth`
+alone is not substituted for the launcher's `-I -X utf8` or sanitized child env.
+The hook carries the already-active UTF-8 option into multiprocessing spawn,
+whose automatically inherited `-I` would otherwise ignore `PYTHONUTF8`.
+
+Windows package gates require **every recorded Python process** to have isolated
+startup, environment-path discovery disabled, user-site disabled, and only
+bundle-contained `sys.path` entries, in addition to the unchanged loaded-module
+and native-library audit. The verifier may read existing HKCU/HKLM Python 3.12
+PythonPath entries for evidence; it never writes/injects registry entries. Empty
+or inaccessible inventory is recorded honestly, not treated as a tested registry
+injection. Windows execution coverage remains the authorized Server CI matrix;
+no client computer or registry-write fixture is required or implicitly authorized.
+
 ## Acceptance of the final ZIP
 
 Run on each package's **native target OS and architecture**:

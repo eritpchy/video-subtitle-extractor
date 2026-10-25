@@ -52,6 +52,22 @@ def test_windows_wheel_os_dependencies_stay_within_selected_system_root(name):
         assert library_violation(directory + '\\' + name, r'C:\VSE', 'Windows', r'D:\Windows')
 
 
+@pytest.mark.parametrize('name', ['RTWorkQ.dll', 'amsi.dll', 'devobj.dll', 'kernel.appcore.dll', 'msasn1.dll', 'pdh.dll', 'GdiPlus.dll', 'Windows.Graphics.dll'])
+def test_server_observed_baseline_dll_names_are_exact_and_os_confined(name):
+    assert library_violation('C:\\Windows\\System32\\' + name, r'C:\VSE', 'Windows') is None
+    assert library_violation('C:\\Windows\\WinSxS\\amd64_microsoft.windows.fixture_1\\' + name, r'C:\VSE', 'Windows') is None
+    for parent in (r'C:\Windows\System32-evil', r'C:\Windows\Temp', r'C:\ProgramData', r'C:\Windows\WinSxS-other'):
+        assert library_violation(parent + '\\' + name, r'C:\VSE', 'Windows')
+    assert library_violation('C:\\Windows\\System32\\vendor_' + name, r'C:\VSE', 'Windows')
+
+
+@pytest.mark.parametrize('path', [r'C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.1234.0\MpOav.dll',
+                                 r'C:\Windows\System32\MpOav.dll', r'C:\Windows\System32\directxdatabasehelper.dll',
+                                 r'C:\Windows\System32\coloradapterclient.dll'])
+def test_unproved_or_security_components_are_not_static_dependency_exemptions(path):
+    assert library_violation(path, r'C:\VSE', 'Windows')
+
+
 @pytest.mark.parametrize('path', ['/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation', '/usr/lib/libSystem.B.dylib'])
 def test_mac_base_os_allowed(path):
     assert library_violation(path, '/Applications/VSE.app', 'Darwin') is None
@@ -246,6 +262,54 @@ def test_audit_refuses_stale_reports(tmp_path):
     (evidence / 'process-123.json').write_text('{}')
     with pytest.raises(RuntimeError, match='fresh report directory'):
         audit_environment(tmp_path, evidence)
+
+
+@pytest.mark.parametrize('allowed', [True, False])
+def test_loaded_security_components_need_fresh_separate_proof_and_are_collected_once(tmp_path, monkeypatch, allowed):
+    from scripts import windows_os_evidence
+    bundle, evidence = tmp_path / 'bundle', tmp_path / 'reports'
+    stage_probe(bundle)
+    audit_environment(bundle, evidence)
+    path = r'C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.25090.11-0\MpOav.dll'
+    for pid in (1, 2):
+        report = {'pid': pid, 'system': 'Windows', 'executable': str(bundle / 'runtime/python.exe'),
+                  'prefix': str(bundle / 'runtime'), 'images': [path], 'snapshots': 1, 'probe_errors': [],
+                  'windows_root': r'C:\Windows', 'modules': {}, 'argv': ['gui.py']}
+        (evidence / f'process-{pid}.json').write_text(json.dumps(report))
+    calls = []
+    def collect(paths):
+        calls.append(paths)
+        return {'fresh-proof-fixture': True}
+    def classify(candidate, proof):
+        assert candidate == path and proof == {'fresh-proof-fixture': True}
+        return {'allowed': allowed, 'category': 'registered_microsoft_defender_amsi_provider',
+                'path': path, 'reason': 'signature evidence unavailable' if not allowed else None}
+    monkeypatch.setattr(windows_os_evidence, 'collect_windows_os_evidence', collect)
+    monkeypatch.setattr(windows_os_evidence, 'classify_loaded_windows_component', classify)
+    if allowed:
+        result = summarize_reports(bundle, evidence)
+        assert [entry['pid'] for entry in result['observed_os_security_components']] == [1, 2]
+    else:
+        with pytest.raises(RuntimeError, match='signature evidence unavailable'):
+            summarize_reports(bundle, evidence)
+    assert calls == [[path]]
+    assert json.loads((evidence / 'windows-os-security-evidence.json').read_text()) == {'fresh-proof-fixture': True}
+    assert library_violation(path, r'C:\VSE', 'Windows')  # Static import gate is never exempted.
+
+
+def test_external_crt_cannot_be_reclassified_as_os_security_component(tmp_path, monkeypatch):
+    from scripts import windows_os_evidence
+    bundle, evidence = tmp_path / 'bundle', tmp_path / 'reports'
+    stage_probe(bundle)
+    audit_environment(bundle, evidence)
+    path = r'C:\Windows\System32\vcomp140.dll'
+    report = {'pid': 1, 'system': 'Windows', 'executable': str(bundle / 'runtime/python.exe'),
+              'prefix': str(bundle / 'runtime'), 'images': [path], 'snapshots': 1, 'probe_errors': [],
+              'windows_root': r'C:\Windows', 'modules': {}}
+    (evidence / 'process-1.json').write_text(json.dumps(report))
+    monkeypatch.setattr(windows_os_evidence, 'collect_windows_os_evidence', lambda paths: pytest.fail('CRT must never reach OS/security evidence exemption'))
+    with pytest.raises(RuntimeError, match='Non-OS runtime loaded outside bundle'):
+        summarize_reports(bundle, evidence)
 
 
 def _write_pe(path, imports):

@@ -141,6 +141,85 @@ except ImportError:
     from bundle_bootstrap import NATIVE_SEARCH_VARIABLES
 
 
+WINDOWS_ISOLATED_PATHS = 'python312.zip\nLib\nDLLs\n.\n..\nLib/site-packages\nimport site\n'
+WINDOWS_SITE_CUSTOMIZE = b'''"""VSE-owned Windows portable startup hook; no external code is executed."""
+import os as _os
+import sys as _sys
+
+# multiprocessing forwards -I from ._pth, which would ignore PYTHONUTF8 in its
+# worker. Preserve the already-active UTF-8 mode as an explicit inherited -X.
+if _sys.flags.utf8_mode == 1:
+    _sys._xoptions['utf8'] = '1'
+
+if _sys.platform == 'win32':
+    try:
+        from pathlib import Path as _Path
+        from scripts.windows_app_local_runtime import preload_runtime
+        preload_runtime(_Path(__file__).resolve().parents[3])
+    except BaseException as _error:
+        print('App-local Windows runtime startup failed: ' + str(_error), file=_sys.stderr, flush=True)
+        _os._exit(92)
+
+if _os.environ.get('VSE_RUNTIME_AUDIT_ACTIVE') == 'portable-bootstrap-v1':
+    try:
+        from pathlib import Path as _Path
+        _root = _Path(__file__).resolve().parents[3]
+        if _Path(_os.environ['VSE_RUNTIME_AUDIT_ROOT']).resolve() != _root:
+            raise RuntimeError('Runtime audit root mismatch')
+        from scripts.bundle_bootstrap import enable_trusted_audit
+        enable_trusted_audit(_root, _Path(_os.environ['VSE_RUNTIME_AUDIT_REPORTS']))
+    except BaseException as _error:
+        # site.py normally swallows sitecustomize exceptions. Verification must
+        # fail closed rather than continue with a missing descendant probe.
+        import sys as _sys
+        print('Trusted portable startup audit failed: ' + str(_error), file=_sys.stderr, flush=True)
+        _os._exit(91)
+'''
+
+
+def write_windows_runtime_isolation(stage: Path, python: Path) -> dict:
+    """After pip, before prune inventory: isolate every Windows Python process.
+
+    CPython's DLL-adjacent ._pth suppresses registry/PYTHONPATH expansion even
+    when children start without -I. Keep import site for installed wheels and
+    the bundle-owned audit hook; launcher/bootstrap control UTF-8/user-site
+    preconfiguration separately. Never overwrite a publisher/third-party hook.
+    """
+    stage = stage.resolve(strict=True)
+    runtime = stage / 'runtime'
+    if python.resolve() != runtime / 'python.exe' or not python.is_file():
+        raise ValueError('Unexpected pinned Windows runtime executable')
+    for name in ('python312.dll', 'Lib/os.py'):
+        path = runtime / name
+        if not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(runtime):
+            raise ValueError(f'Pinned Windows runtime landmark missing/unsafe: {name}')
+    config = runtime / 'python312._pth'
+    hook = runtime / 'Lib/site-packages/sitecustomize.py'
+    for path in (config, runtime / 'python._pth', hook, runtime / 'windows-app-local-runtime.json'):
+        if path.exists() or path.is_symlink():
+            raise ValueError(f'Refusing to replace existing Windows path configuration/startup hook: {path}')
+    if not hook.parent.is_dir() or not hook.parent.resolve().is_relative_to(runtime):
+        raise ValueError('Unsafe Windows site-packages directory')
+    try:
+        from .windows_app_local_runtime import write_runtime_metadata
+    except ImportError:
+        from windows_app_local_runtime import write_runtime_metadata
+    app_local_runtime = write_runtime_metadata(stage)
+    # Own only these new regular files; the release manifest hashes all, and
+    # sitecustomize is added before the immutable site-packages prune inventory.
+    with config.open('x', encoding='utf-8', newline='\n') as stream:
+        stream.write(WINDOWS_ISOLATED_PATHS)
+    with hook.open('xb') as stream:
+        stream.write(WINDOWS_SITE_CUSTOMIZE)
+    return {'mode': 'dll-adjacent ._pth + bundle-owned sitecustomize',
+            'path_config': config.relative_to(stage).as_posix(),
+            'path_config_sha256': digest(config),
+            'startup_hook': hook.relative_to(stage).as_posix(),
+            'startup_hook_sha256': digest(hook),
+            'app_local_runtime': app_local_runtime,
+            'registry_writes': False, 'external_hook_execution': False}
+
+
 def _shell_launcher(relative_python: str, root_expression: str, linux: bool = False) -> str:
     libraries = 'export LD_LIBRARY_PATH="$ROOT/native-libs"\n' if linux else ''
     # /bin/sh has already been loaded by the OS. This cannot defend a broken or
@@ -149,6 +228,7 @@ def _shell_launcher(relative_python: str, root_expression: str, linux: bool = Fa
 set -eu
 ROOT={root_expression}
 unset PYTHONHOME PYTHONPATH PYTHONUSERBASE PYTHONEXECUTABLE __PYVENV_LAUNCHER__
+unset VSE_RUNTIME_AUDIT_ROOT VSE_RUNTIME_AUDIT_REPORTS VSE_RUNTIME_AUDIT_ACTIVE
 unset {' '.join(NATIVE_SEARCH_VARIABLES)}
 export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1
 export PATH="$ROOT/runtime/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -183,7 +263,7 @@ def write_launchers(root: Path, target_platform: str | None = None, target_arch:
         python = runtime_python.replace('/', '\\')
         lines = ['@echo off', 'setlocal DisableDelayedExpansion',
                  'set "PYTHONHOME="', 'set "PYTHONPATH="', 'set "PYTHONUSERBASE="', 'set "PYTHONEXECUTABLE="', 'set "__PYVENV_LAUNCHER__="']
-        lines += [f'set "{name}="' for name in NATIVE_SEARCH_VARIABLES]
+        lines += [f'set "{name}="' for name in (*NATIVE_SEARCH_VARIABLES, 'VSE_RUNTIME_AUDIT_ROOT', 'VSE_RUNTIME_AUDIT_REPORTS', 'VSE_RUNTIME_AUDIT_ACTIVE')]
         lines += ['set "PYTHONNOUSERSITE=1"', 'set "PYTHONDONTWRITEBYTECODE=1"',
                   'set "PATH=%~dp0runtime;%~dp0runtime\\DLLs;%SystemRoot%\\System32;%SystemRoot%"',
                   'cd /d "%~dp0" || exit /b 1',

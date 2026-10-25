@@ -66,7 +66,7 @@ def enable_trusted_audit(root: Path, directory: Path) -> None:
         if not path.is_file() or path.is_symlink() or path.read_bytes() != expected:
             raise RuntimeError(f'Missing or modified trusted runtime audit hook: {path}')
     os.environ.update(PYTHONPATH=str(directory / 'hook'), VSE_RUNTIME_AUDIT_ROOT=str(root),
-                      VSE_RUNTIME_AUDIT_REPORTS=str(directory))
+                      VSE_RUNTIME_AUDIT_REPORTS=str(directory), VSE_RUNTIME_AUDIT_ACTIVE='portable-bootstrap-v1')
     install_probe()
 
 
@@ -105,12 +105,21 @@ def configure_runtime_tools(root: Path, manifest: dict) -> None:
     os.environ.update(VSE_VSF_BINARY=str(binary), VSE_VSF_DIR=str(binary.parent), IMAGEIO_FFMPEG_EXE=str(encoder))
 
 
+def verify_windows_runtime_configuration(root: Path, manifest: dict) -> None:
+    """Refuse an incomplete path-isolation payload before launching children."""
+    required = ('runtime/python312._pth', 'runtime/Lib/site-packages/sitecustomize.py',
+                'runtime/windows-app-local-runtime.json', 'scripts/windows_app_local_runtime.py')
+    if any(name not in manifest['files'] for name in required):
+        raise RuntimeError('Windows bundle lacks its isolated runtime configuration; re-extract/rebuild the package')
+    verify_payload(root, {'files': {name: manifest['files'][name] for name in required}})
+
+
 def environment_report(root: Path, manifest: dict) -> dict:
     selected = ('PATH', *NATIVE_SEARCH_VARIABLES, 'PYTHONHOME', 'PYTHONPATH', 'PYTHONUSERBASE',
                 'PYTHONNOUSERSITE', 'PYTHONUTF8', 'PYTHONIOENCODING', 'CONDA_PREFIX', 'CONDA_DEFAULT_ENV', 'VIRTUAL_ENV',
                 'VSE_CONFIG_FILE', 'VSE_WORK_DIR', 'VSE_OCR_BACKEND', 'VSE_NATIVE_OCR_ROOT',
                 'VSE_VSF_BINARY', 'VSE_VSF_DIR', 'IMAGEIO_FFMPEG_EXE')
-    return {'schema': 1, 'bundle_root': str(root), 'executable': sys.executable,
+    return {'schema': 1, 'bundle_root': str(root), 'platform': manifest['platform'], 'executable': sys.executable,
             'prefix': sys.prefix, 'base_prefix': sys.base_prefix, 'sys_path': sys.path,
             'isolated': sys.flags.isolated, 'ignore_environment': sys.flags.ignore_environment, 'utf8_mode': sys.flags.utf8_mode,
             'no_user_site': sys.flags.no_user_site, 'user_site_enabled': site.ENABLE_USER_SITE,
@@ -233,6 +242,8 @@ def main(argv: list[str] | None = None) -> int:
         raise RuntimeError('Use the included Start VSE launcher; no system Python installation is needed')
     if sys.version_info[:2] != (3, 12):
         raise RuntimeError('Unexpected bundled Python version; re-extract the original release archive')
+    if manifest['platform'] == 'windows':
+        verify_windows_runtime_configuration(root, manifest)
     os.chdir(root)
     # -I omits the application directory. Add only the known bundle, not cwd.
     if str(root) not in sys.path:

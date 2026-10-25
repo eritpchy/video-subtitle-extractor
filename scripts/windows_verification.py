@@ -27,6 +27,7 @@ COMMON_STAGES = {
     'source-tests': 'Source unit/integration regression suite (see JUnit for individual skips)',
     'gui': 'Real Windows Qt GUI launch and screenshots',
     'theme': 'Light/dark/system preference, restart and Qt signal flows (controlled system input)',
+    'system-theme': 'Real Server HKCU appearance -> native Windows message -> Qt -> GUI round trip',
     'cli': 'CLI entrypoint',
     'ordinary': 'Ordinary video -> OCR -> SRT text and timing',
     'issues': 'Multiline, AV1 and timeline end-to-end regressions',
@@ -37,7 +38,7 @@ COMMON_STAGES = {
 LIMITS = [
     'Selected Windows scope is Server CI only; client/ARM/GPU machines are not requested or awaited.',
     'Server 2022/2025 results are not Windows 10/11 x64 client results.',
-    'System-theme tests control Qt input; changing real Windows Settings is outside verified CI coverage.',
+    'Controlled theme tests and the opt-in Server HKCU/native-message round trip are separate; neither is Settings UI automation or Windows 10/11 client coverage.',
     'Windows ARM64/x64-emulation is outside this CI-only scope; native Windows ARM64 packages are not supported.',
     'GPU hardware execution is outside this CI-only scope; CPU fallback and GPU-refusal tests are not GPU passes.',
     'PATH/loaded-DLL/PE isolation on a hosted image is not a clean Windows client VM test.',
@@ -132,10 +133,53 @@ def capture(path: Path, runner: str, profile: str) -> dict:
     return identity
 
 
-def coverage(identity: dict, outcomes: dict, profile: str) -> dict:
+def system_theme_status(evidence: dict, identity: dict) -> str:
+    """A successful GUI step alone is not real system-theme evidence."""
+    if not evidence:
+        return 'not-run'
+    if not isinstance(evidence, dict):
+        return 'incomplete'
+    if evidence.get('status') != 'passed':
+        return evidence.get('status') if evidence.get('status') in ('failed', 'blocked', 'unsupported') else 'incomplete'
+    measured = evidence.get('identity', {})
+    if (measured.get('runner') != identity.get('runner_label')
+            or measured.get('build') != identity.get('os', {}).get('build')
+            or measured.get('product_type') != 3
+            or any(measured.get(key) != identity.get(key) for key in ('commit', 'run_id', 'run_attempt'))):
+        return 'incomplete'
+    restoration = evidence.get('restoration', {})
+    if (restoration.get('status') != 'restored'
+            or evidence.get('original_registry') != restoration.get('registry')
+            or not evidence.get('original_registry')
+            or (evidence.get('original_registry_key_exists') is False
+                and restoration.get('created_key_cleanup') != 'removed-empty-key')):
+        return 'incomplete'
+    original = evidence.get('original_appearance', {})
+    if not original or any(original.get(key) != restoration.get(key) for key in ('qt_scheme', 'effective')):
+        return 'incomplete'
+    transitions = evidence.get('transitions', [])
+    if not isinstance(transitions, list) or len(transitions) != 3:
+        return 'incomplete'
+    for index, (step, expected) in enumerate(zip(transitions, ('Light', 'Dark', 'Light'))):
+        if (step.get('status') != 'passed' or step.get('requested') != expected
+                or step.get('qt_scheme') != expected or step.get('effective') != expected
+                or step.get('preference') != 'Auto'
+                or step.get('registry') != {'exists': True, 'type': 4, 'value': int(expected == 'Light')}
+                or (index and expected not in step.get('qt_signals', []))):
+            return 'incomplete'
+    for page in ('home', 'timeline', 'settings'):
+        values = [step.get('page_lightness', {}).get(page) for step in transitions]
+        if (not all(isinstance(value, (int, float)) for value in values)
+                or values[0] <= values[1] + 80 or abs(values[0] - values[2]) > 3):
+            return 'incomplete'
+    return 'passed'
+
+
+def coverage(identity: dict, outcomes: dict, profile: str, system_theme=None) -> dict:
     stages = dict(COMMON_STAGES)
     if profile == 'native':
-        stages = {'native-build': 'Compile native CPU worker and stage pinned libraries/models',
+        stages = {'native-toolchain': 'Verify installed x64 MSVC/CRT source compatibility and pinned Ninja',
+                  'native-build': 'Compile native CPU worker and stage pinned libraries/models',
                   'native-smoke': 'Worker protocol, model parity and explicit GPU refusal', **stages}
     records = []
     for key, scope in stages.items():
@@ -144,11 +188,14 @@ def coverage(identity: dict, outcomes: dict, profile: str) -> dict:
                   'skipped': 'not-run', '': 'not-run'}.get(outcome, 'unknown')
         if key == 'identity' and not identity.get('validated'):
             status = 'failed' if outcome in ('success', 'failure') else 'not-run'
+        if key == 'system-theme':
+            status = system_theme_status(system_theme, identity)
         records.append({'stage': key, 'scope': scope, 'outcome': outcome, 'status': status})
     passed = (all(record['status'] == 'passed' for record in records)
               and outcomes.get('license-gate') not in ('failure', 'cancelled'))
     return {'schema': 1, 'profile': profile, 'execution_status': 'passed' if passed else 'incomplete-or-failed',
             'identity': identity, 'stages': records, 'limitations': LIMITS,
+            'system_theme_evidence': system_theme or {'status': 'not-run'},
             'customer_package_license_gate': outcomes.get('license-gate', 'not-applicable'),
             'coverage_policy': 'server-ci-only-no-client-machine-access',
             'gpu_execution': 'outside-ci-only-scope', 'client_windows_execution': 'outside-ci-only-scope',
@@ -183,6 +230,9 @@ def markdown(report: dict) -> str:
     lines.extend(f"| {row['scope']} | {row['status']} |" for row in report['stages'])
     if identity.get('error'):
         lines += ['', 'Identity error: ' + identity['error']]
+    theme = report.get('system_theme_evidence', {})
+    if theme.get('error'):
+        lines += ['', 'Real system-theme evidence: ' + theme['error']]
     if report['profile'] == 'native':
         lines += ['', 'Customer-package VC license gate outcome: '
                   + report['customer_package_license_gate'] + ' (runner execution does not grant redistribution rights).']
@@ -196,6 +246,7 @@ def main(argv=None) -> int:
     parser.add_argument('--runner', required=True, choices=tuple(RUNNERS))
     parser.add_argument('--profile', required=True, choices=('paddle', 'native'))
     parser.add_argument('--output', type=Path, default=Path('test-results/windows'))
+    parser.add_argument('--system-theme-report', type=Path)
     args = parser.parse_args(argv)
     identity_path = args.output / 'identity.json'
     if args.command == 'capture':
@@ -204,7 +255,13 @@ def main(argv=None) -> int:
         identity = json.loads(identity_path.read_text(encoding='utf-8')) if identity_path.exists() else {
             'runner_label': args.runner, 'profile': args.profile, 'validated': False,
             'error': 'Identity capture did not run or produce evidence'}
-        report = coverage(identity, json.loads(os.environ.get('VSE_WINDOWS_STEP_OUTCOMES', '{}')), args.profile)
+        theme = None
+        if args.system_theme_report and args.system_theme_report.exists():
+            try:
+                theme = json.loads(args.system_theme_report.read_text(encoding='utf-8'))
+            except (OSError, ValueError) as exc:
+                theme = {'status': 'failed', 'error': f'Could not read real system-theme evidence: {exc}'}
+        report = coverage(identity, json.loads(os.environ.get('VSE_WINDOWS_STEP_OUTCOMES', '{}')), args.profile, theme)
         report['source_dependency_versions'] = dependency_versions()
         write_json(args.output / 'coverage.json', report)
         summary = markdown(report)

@@ -184,12 +184,27 @@ jobs:
         run: |
           python -m pip install --only-binary=:all: --require-hashes -r native/ocr/requirements-build.txt
           python -m pip install packaging pytest==8.3.5
+      - name: Select installed runtime-compatible x64 MSVC and pinned Ninja
+        id: windows-toolchain
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          python native/ocr/windows_toolchain.py
+          --report test-results/windows/native-toolchain.json --github-env "$env:GITHUB_ENV"
       - name: Compile target worker and stage verified CPU libraries/models
         id: native-build
         run: >-
           python native/ocr/build.py --platform ${{ matrix.platform }}
           --arch ${{ matrix.arch }} --models build/native-models --output build/native-ocr
+          ${{ matrix.platform == 'windows' && '--generator Ninja' || '' }}
           ${{ matrix.platform == 'windows' && ((inputs.acknowledge_vc_redistribution_license || vars.VSE_VC_REDISTRIBUTION_LICENSE_ACK == 'true') && '--acknowledge-vc-redistribution-license' || '--runner-test-only') || '' }}
+      - name: Preserve macOS OpenCV precision compilation evidence
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          mkdir -p test-results
+          cp build/native-build/opencv-build/CMakeCache.txt test-results/opencv-CMakeCache.txt
+          cp build/native-build/opencv-build/compile_commands.json test-results/opencv-compile_commands.json
       - name: Native worker protocol/model/GPU-refusal smoke
         id: native-smoke
         run: python native/ocr/smoke.py --artifact build/native-ocr --output test-results/native-worker.json
@@ -326,7 +341,10 @@ jobs:
           tests/test_native_package.py tests/test_release_packaging.py
           tests/test_runtime_dependencies.py tests/test_prune_inference_runtime.py
           tests/test_portable_environment.py tests/test_portable_python.py
-          tests/test_standalone_runtime_probe.py tests/test_windows_verification.py -vv --junitxml=test-results/native-profile.xml
+          tests/test_windows_runtime_isolation.py tests/test_check_runtime.py
+          tests/test_windows_app_local_runtime.py tests/test_windows_os_evidence.py
+          tests/test_standalone_runtime_probe.py tests/test_windows_verification.py
+          tests/test_windows_system_theme_smoke.py -vv --junitxml=test-results/native-profile.xml
       - name: Windows native-backend GUI, light, dark and system-theme flows
         id: windows-theme
         if: runner.os == 'Windows'
@@ -340,9 +358,12 @@ jobs:
       - name: Windows native GUI launch and screenshots
         id: windows-gui
         if: runner.os == 'Windows'
+        timeout-minutes: 5
         env:
           QT_QPA_PLATFORM: windows
           VSE_SMOKE_SCREENSHOT_DIR: test-results/gui-native
+          VSE_CI_WINDOWS_SYSTEM_THEME: '1'
+          VSE_CI_WINDOWS_RUNNER: ${{ matrix.os }}
         run: python gui.py --smoke-test
       - name: Windows native CLI entrypoint
         id: cli
@@ -416,11 +437,13 @@ jobs:
         env:
           VSE_WINDOWS_STEP_OUTCOMES: >-
             {"identity":"${{ steps.windows-identity.outcome }}",
+             "native-toolchain":"${{ steps.windows-toolchain.outcome }}",
              "native-build":"${{ steps.native-build.outcome }}",
              "native-smoke":"${{ steps.native-smoke.outcome }}",
              "source-tests":"${{ steps.source-tests.outcome }}",
              "gui":"${{ steps.windows-gui.outcome }}",
              "theme":"${{ steps.windows-theme.outcome }}",
+             "system-theme":"${{ steps.windows-gui.outcome }}",
              "cli":"${{ steps.cli.outcome }}",
              "ordinary":"${{ steps.ordinary.outcome }}",
              "issues":"${{ steps.issues.outcome }}",
@@ -428,7 +451,9 @@ jobs:
              "package-build":"${{ steps.package-build.outcome }}",
              "package-verify":"${{ steps.package-verify.outcome }}",
              "portable-environment":"${{ steps.portable-environment.outcome }}"}
-        run: python scripts/windows_verification.py summarize --runner ${{ matrix.os }} --profile native
+        run: >-
+          python scripts/windows_verification.py summarize --runner ${{ matrix.os }} --profile native
+          --system-theme-report test-results/gui-native/system-theme.json
       - name: Preserve exact-size, isolation and GUI screenshot evidence
         if: always()
         uses: actions/upload-artifact@v4

@@ -74,6 +74,7 @@ hid winusb normaliz rstrtmgr slc sppc windows.staterepositoryclient
 windows.staterepositorycore windows.staterepositoryps portcls wdmaud.drv
 msacm32.drv midimap explorerframe dataexchange twinapi.appcore twinapi avicap32
 mpr wsock32 mscms uiautomationcore icuuc icuin icu
+rtworkq amsi devobj kernel.appcore msasn1 pdh gdiplus windows.graphics
 """.split())
 # avicap32 is the Windows Video for Windows capture API, not a vendor runtime:
 # https://learn.microsoft.com/en-us/windows/win32/api/vfw/nf-vfw-capcreatecapturewindowa
@@ -88,6 +89,17 @@ mpr wsock32 mscms uiautomationcore icuuc icuin icu
 # versioned/vendor ICU DLLs still must be inside the application bundle.
 # https://learn.microsoft.com/en-us/windows/win32/intl/international-components-for-unicode--icu-
 # https://github.com/microsoft/win32metadata/issues/1956
+# Additional exact OS modules observed by Server 2022/2025 runtime audits:
+# https://learn.microsoft.com/en-us/windows/win32/api/rtworkq/nf-rtworkq-rtwqshutdown
+# https://learn.microsoft.com/en-us/windows/win32/api/amsi/nf-amsi-amsiinitialize
+# https://learn.microsoft.com/en-us/windows/win32/api/pdh/nf-pdh-pdhsetdefaultrealtimedatasource
+# https://learn.microsoft.com/en-us/windows/win32/api/gdiplusinit/nf-gdiplusinit-gdiplusstartup
+# https://learn.microsoft.com/en-us/security-updates/securitybulletins/2004/ms04-007
+# devobj, kernel.appcore and Windows.Graphics are named in Microsoft OS update
+# file inventories (not vendor/third-party DLL databases):
+# https://support.microsoft.com/en-us/topic/driver-installation-fails-even-when-a-compatible-driver-is-found-in-the-local-driver-store-in-windows-7-and-in-windows-server-2008-r2-8e317dec-645c-c68b-59bd-4c350eb72b19
+# https://support.microsoft.com/en-us/servicing/os/windows/safeos-du/2026/02/kb5076122-safe-os-dynamic-update-for-windows-server-2025-february-10-2026
+# https://support.microsoft.com/en-us/topic/windows-rt-8-1-windows-8-1-and-windows-server-2012-r2-update-rollup-january-2014-afd36561-dddb-8466-8fb4-a06bde36fb4e
 
 
 LINUX_BASE = re.compile(r"^(?:ld-linux[^/]*\.so(?:\.\d+)*|lib(?:c|m|dl|pthread|rt|util|resolv|anl|BrokenLocale|nss_(?:files|dns|compat|hesiod))\.so(?:\.\d+)*)$")
@@ -241,6 +253,7 @@ def install_probe() -> None:
                       'prefix': str(Path(sys.prefix).resolve()), 'bundle_root': root,
                       'windows_root': os.environ.get('SystemRoot', r'C:\Windows'),
                       'argv': sys.argv, 'images': sorted(images), 'modules': modules,
+                      'isolated': sys.flags.isolated, 'ignore_environment': sys.flags.ignore_environment,
                       'sys_path': sys.path, 'no_user_site': sys.flags.no_user_site, 'utf8_mode': sys.flags.utf8_mode,
                       'user_site_enabled': __import__('site').ENABLE_USER_SITE,
                       'environment': {key: os.environ[key] for key in (
@@ -252,6 +265,9 @@ def install_probe() -> None:
                           'OPENCV_VIDEOIO_PLUGIN_FFMPEG', 'OPENCV_CORE_PARALLEL_PLUGIN_TBB', 'VSE_VSF_BINARY', 'VSE_VSF_DIR', 'IMAGEIO_FFMPEG_EXE',
                           'VSE_CONFIG_FILE', 'VSE_WORK_DIR', 'VSE_OCR_BACKEND', 'VSE_NATIVE_OCR_ROOT') if key in os.environ},
                       'snapshots': snapshots, 'probe_errors': sorted(errors)}
+            runtime = sys.modules.get('scripts.windows_app_local_runtime')
+            if runtime is not None:
+                report['windows_app_local_runtime'] = dict(runtime.PRELOAD_EVIDENCE)
             destination = directory / f'process-{os.getpid()}.json'
             temporary = destination.with_suffix('.tmp')
             temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -270,12 +286,46 @@ def install_probe() -> None:
 
 
 def summarize_reports(bundle_root: Path, report_dir: Path, required_modules: tuple[str, ...] = (),
-                      forbidden_modules: tuple[str, ...] = ()) -> dict:
+                      forbidden_modules: tuple[str, ...] = (), *, require_isolated: bool = False) -> dict:
     """Write evidence and fail closed on missing reports or probe failures."""
     root = str(bundle_root.resolve())
     errors: list[str] = []
-    reports = []
+    reports = [json.loads(file.read_text(encoding='utf-8')) for file in sorted(report_dir.glob('process-*.json'))]
     seen_modules: set[str] = set()
+    component_proofs = {}
+    observed_components = []
+    # Defender injection is not an application dependency. Likewise, two
+    # undocumented exact OS names require actual signed-OS evidence, not a
+    # filename-only exemption. Collect once after workloads (never per poll),
+    # retain raw proof, and keep the static PE allowlist unchanged.
+    try:
+        from .windows_os_evidence import CANDIDATE_NAMES, collect_windows_os_evidence, classify_loaded_windows_component
+    except ImportError:
+        from windows_os_evidence import CANDIDATE_NAMES, collect_windows_os_evidence, classify_loaded_windows_component
+    candidates = {}
+    for report in reports:
+        if report['system'] != 'Windows':
+            continue
+        for path in report['images']:
+            key = _identity(path, 'Windows')
+            if (ntpath.basename(key) in CANDIDATE_NAMES
+                    and library_violation(path, root, 'Windows', report['windows_root'])):
+                candidates.setdefault(key, path)
+    if candidates:
+        try:
+            proof = collect_windows_os_evidence(list(candidates.values()))
+        except (OSError, ValueError, RuntimeError) as error:
+            proof = {'schema': 1, 'errors': [f'{type(error).__name__}: {error}'], 'files': []}
+        (report_dir / 'windows-os-security-evidence.json').write_text(json.dumps(proof, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+        component_proofs = {key: classify_loaded_windows_component(path, proof) for key, path in candidates.items()}
+    app_local_expected = None
+    if require_isolated and (bundle_root / 'runtime/windows-app-local-runtime.json').is_file():
+        try:
+            from .windows_app_local_runtime import checked_runtime_metadata
+        except ImportError:
+            from windows_app_local_runtime import checked_runtime_metadata
+        candidate, metadata = checked_runtime_metadata(bundle_root)
+        app_local_expected = (str(candidate), metadata['sha256'])
     trusted_hooks = _trusted_hooks(bundle_root.resolve(), report_dir.resolve())
     valid_hooks = {}
     for name, (path, expected) in trusted_hooks.items():
@@ -283,10 +333,25 @@ def summarize_reports(bundle_root: Path, report_dir: Path, required_modules: tup
             valid_hooks[name] = str(path.resolve())
         else:
             errors.append(f'Missing or modified verification hook: {path}')
-    for file in sorted(report_dir.glob('process-*.json')):
-        report = json.loads(file.read_text(encoding='utf-8'))
-        reports.append(report)
+    for report in reports:
         system = report['system']
+        if system == 'Windows' and app_local_expected is not None:
+            expected_path, expected_hash = app_local_expected
+            preload = report.get('windows_app_local_runtime', {})
+            paths = preload.get('loaded_paths', [])
+            if (preload.get('sha256') != expected_hash or preload.get('retained_handle') is not True
+                    or _identity(str(preload.get('path', '')), system) != _identity(expected_path, system)
+                    or not paths or any(_identity(path, system) != _identity(expected_path, system) for path in paths)
+                    or not any(_identity(path, system) == _identity(expected_path, system) for path in report['images'])):
+                errors.append(f"PID {report['pid']} missing authenticated app-local VCOMP startup evidence")
+        if require_isolated:
+            if report.get('isolated') != 1 or report.get('ignore_environment') != 1 or report.get('no_user_site') != 1:
+                errors.append(f"PID {report['pid']} did not start with isolated/user-site-safe path configuration")
+            for path in report.get('sys_path', []):
+                if not path or not _inside(path, root, system):
+                    errors.append(f"PID {report['pid']} external Python search path: {path}")
+            if not report.get('sys_path'):
+                errors.append(f"PID {report['pid']} missing isolated Python search-path evidence")
         for field in ('executable', 'prefix'):
             if not _inside(report[field], root, system):
                 errors.append(f"PID {report['pid']} external {field}: {report[field]}")
@@ -296,7 +361,13 @@ def summarize_reports(bundle_root: Path, report_dir: Path, required_modules: tup
         for path in report['images']:
             violation = library_violation(path, root, system, report['windows_root'])
             if violation:
-                errors.append(violation)
+                component = component_proofs.get(_identity(path, system), {}) if system == 'Windows' else {}
+                if component.get('allowed') is True:
+                    observed_components.append(dict(component, pid=report['pid'], argv=report.get('argv', [])))
+                else:
+                    errors.append(violation)
+                    if component:
+                        errors.append(f"Unverified OS/security component {path}: {component.get('reason', 'missing evidence')}")
         for name, path in report['modules'].items():
             seen_modules.add(name)
             trusted_hook = name in valid_hooks and _identity(path, system) == _identity(valid_hooks[name], system)
@@ -312,6 +383,9 @@ def summarize_reports(bundle_root: Path, report_dir: Path, required_modules: tup
             errors.append(f'Forbidden inference framework loaded: {module}')
     summary = {'process_count': len(reports), 'modules_observed': sorted(seen_modules),
                'errors': sorted(set(errors)), 'passed': not errors,
+               'observed_os_security_components': observed_components,
+               'unverified_os_security_components': [entry for entry in component_proofs.values() if not entry.get('allowed')],
+               'os_security_evidence_file': 'windows-os-security-evidence.json' if candidates else None,
                'scope': 'Loaded Python process libraries; non-Python executables require separate native audit'}
     (report_dir / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
     if errors:

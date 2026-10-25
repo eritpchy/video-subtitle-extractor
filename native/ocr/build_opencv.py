@@ -21,7 +21,16 @@ def build(source, build_dir, prefix, cmake='cmake', jobs=3, generator=None):
         WITH_OPENJPEG='OFF', WITH_JASPER='OFF', WITH_GDAL='OFF', WITH_GDCM='OFF',
         WITH_AVIF='OFF', CPU_DISPATCH='', OPENCV_GENERATE_PKGCONFIG='OFF')
     if platform.system() == 'Windows':
-        flags.update(CMAKE_MSVC_RUNTIME_LIBRARY='MultiThreadedDLL',
+        from windows_toolchain import validate_environment, pinned_build_tools
+        import json
+        if generator != 'Ninja':
+            raise ValueError('Windows OpenCV build requires --generator Ninja and the verified MSVC developer environment')
+        runtime = json.loads((Path(__file__).parent / 'vc-runtime-manifest.json').read_text(encoding='utf-8'))['version']
+        toolchain = validate_environment(os.environ, runtime)
+        tools = pinned_build_tools()
+        flags.update(CMAKE_MSVC_RUNTIME_LIBRARY='MultiThreadedDLL', BUILD_WITH_STATIC_CRT='OFF',
+            CMAKE_C_COMPILER=toolchain['compiler']['path'], CMAKE_CXX_COMPILER=toolchain['compiler']['path'],
+            CMAKE_MAKE_PROGRAM=tools['ninja']['path'],
             CMAKE_C_FLAGS_RELEASE='/O2 /DNDEBUG /Gy /Gw', CMAKE_CXX_FLAGS_RELEASE='/O2 /DNDEBUG /Gy /Gw')
     else:
         flags.update(CMAKE_C_FLAGS_RELEASE='-O3 -DNDEBUG -ffunction-sections -fdata-sections',
@@ -29,6 +38,13 @@ def build(source, build_dir, prefix, cmake='cmake', jobs=3, generator=None):
         if platform.system() == 'Linux':
             flags['CPU_BASELINE'] = 'SSE3'
         if platform.system() == 'Darwin':
+            # OpenCV's minAreaRect/RotatedRect::points run in this library, not
+            # in the worker's strict-FP translation unit. Contracted FP32
+            # arithmetic changed crop corners and crossed warp's pixel bins.
+            # Keep the same separate-operation semantics as the frozen goldens.
+            for language in ('C', 'CXX'):
+                flags[f'CMAKE_{language}_FLAGS_RELEASE'] += ' -fno-fast-math -ffp-contract=off'
+            flags['CMAKE_EXPORT_COMPILE_COMMANDS'] = 'ON'
             # Reviewed ORT 1.31 arm64 SDK itself requires macOS 14.0.
             flags['CMAKE_OSX_DEPLOYMENT_TARGET'] = '14.0'
             flags['CMAKE_OSX_ARCHITECTURES'] = 'arm64'

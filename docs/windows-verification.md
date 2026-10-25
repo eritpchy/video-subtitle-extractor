@@ -51,9 +51,21 @@ independent archives; no tag or release is created by these checks.
    native worker protocol/model parity, adapter integration, packaging and import
    isolation. Read JUnit for individual skips; a suite pass does not erase them.
 3. Real `QT_QPA_PLATFORM=windows` GUI launch/screenshots and light/dark/system
-   preference persistence, restart and Qt signal flows. The system-theme tests
-   supply **controlled system input** to real widgets; they do not toggle actual
-   Windows Settings. Physical display/driver/DPI interaction remains unverified.
+   preference persistence, restart and Qt signal flows. Ordinary theme tests
+   supply **controlled system input**. Separately, the native GUI CI step opts
+   into a real HKCU `AppsUseLightTheme` light/dark/light round trip, broadcasting
+   `WM_SETTINGCHANGE` / `ImmersiveColorSet` and observing unmodified Qt signals,
+   application state, three pages' rendered pixels and persisted Auto preference.
+   Original value/type/absence is restored in `finally`; a missing Personalize
+   key is created only under an existing Themes parent and removed only if still
+   empty. Other registry values, accessibility/security settings and Python
+   registrations are never changed. The guard requires opted-in GitHub-hosted
+   Server 2022/2025 smoke execution, not normal customer launch. No-response,
+   unsupported prerequisites or failed restoration cannot pass. Evidence is
+   `gui-native/system-theme.json` beside screenshots; hard-kill/crash can leave
+   its pre-mutation snapshot with pending restoration, which is incomplete.
+   This is **not Settings UI automation or Windows 10/11 client coverage**.
+   Physical display/driver/DPI interaction remains unverified.
 4. CLI help, ordinary video-to-SRT text/timestamp/non-overlap checks, and separate
    multiline, AV1 decode/fallback and timeline end-to-end regression fixtures.
 5. Build the self-contained CPU archive, extract it and rerun the bundled GUI and
@@ -66,7 +78,8 @@ independent archives; no tag or release is created by these checks.
    final bundled interpreter records its own measured Windows/architecture data
    separately from setup-python's source identity.
 7. Preserve evidence even after failures, and write a stage-by-stage report with
-   `passed`, `failed`, `cancelled`, `not-run` or `unknown`. Only **all** required
+   `passed`, `failed`, `blocked`, `unsupported`, `incomplete`, `cancelled`,
+   `not-run` or `unknown`. Only **all** required
    successful stages plus validated identity produce an execution pass.
 
 The two additional launcher runs have a 35-minute step limit. Total native-platform
@@ -84,9 +97,17 @@ upload stay blocked. Nothing in this matrix supplies or changes that approval.
 
 Hosted-image PATH/DLL isolation is **not** proof of a clean Windows 10/11 client
 installation with no developer runtime. Final client VM/physical-machine testing,
-SmartScreen/signature behavior, real desktop theme changes and physical GPU
+SmartScreen/signature behavior, client desktop/Settings UI theme changes and physical GPU
 inference are outside verified Server CI-only coverage, not outstanding requests
 for machine authorization. No network/security policy is changed here.
+
+The CI appearance protocol follows Microsoft's documented
+[app-mode registry value](https://learn.microsoft.com/en-us/windows/apps/develop/settings/settings-common)
+and [setting-change broadcast](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-settingchange).
+Qt's [Windows theme implementation](https://github.com/qt/qtbase/blob/6.11/src/plugins/platforms/windows/qwindowstheme.cpp)
+reads that value and handles `ImmersiveColorSet` through a native observer window.
+This establishes a feasible test path, not a passed Server result: the actual CI
+artifact must contain all transitions and restoration from the current run.
 
 ## Upstream requirements versus tested support
 

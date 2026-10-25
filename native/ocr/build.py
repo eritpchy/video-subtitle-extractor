@@ -154,6 +154,16 @@ def build(a):
         raise ValueError('Runner-only mode must not accept or copy VC redistribution inputs')
     if a.platform == 'windows' and not a.runner_test_only and not a.acknowledge_vc_redistribution_license:
         raise PermissionError('VC redistribution entitlement pending: use --runner-test-only for runner-local tests; no customer artifact')
+    windows_tools = None
+    if a.platform == 'windows':
+        from windows_toolchain import validate_environment, pinned_build_tools
+        if a.generator != 'Ninja':
+            raise ValueError('Windows native build requires --generator Ninja and the verified MSVC developer environment')
+        runtime = json.loads((ROOT / 'vc-runtime-manifest.json').read_text(encoding='utf-8'))['version']
+        windows_tools = validate_environment(os.environ, runtime)
+        windows_tools['build_tools'] = pinned_build_tools()
+        if Path(shutil.which(a.cmake) or a.cmake).resolve() != Path(windows_tools['build_tools']['cmake']['path']):
+            raise ValueError('--cmake must select the verified pinned CMake executable')
     models = a.models.resolve(strict=True)
     rows = verify_models(models)
     output = a.output.absolute()
@@ -179,6 +189,10 @@ def build(a):
                '-DORT_LIBRARY=' + str(sdk / sdk_record['link_library']), '-DOCR_DEPS_DIR=' + str(source)]
     if a.generator:
         command += ['-G', a.generator]
+    if windows_tools:
+        command += ['-DCMAKE_CXX_COMPILER=' + windows_tools['compiler']['path'],
+                    '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL',
+                    '-DCMAKE_MAKE_PROGRAM=' + windows_tools['build_tools']['ninja']['path']]
     if a.platform == 'macos':
         command += ['-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0', '-DCMAKE_OSX_ARCHITECTURES=arm64']
     subprocess.run(command, check=True)
@@ -229,6 +243,8 @@ def build(a):
         provenance = {'cmake': subprocess.check_output([a.cmake, '--version'], text=True).splitlines()[0],
                       'host': platform.platform(), 'ort_archive': sdk_record['archive'],
                       'minimum_macos': sdk_record.get('minimum_macos'), 'vc_runtime': vc}
+        if windows_tools:
+            provenance['windows_toolchain'] = windows_tools
         if a.runner_test_only:
             provenance['runner_test_only'] = True
             provenance['vc_redistribution_pending'] = True

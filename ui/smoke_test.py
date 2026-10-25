@@ -64,6 +64,12 @@ def run_gui_smoke(app, window):
                 if screenshot_dir and not screenshot.save(str(screenshot_dir / f"{theme.value.lower()}-{name}.png")):
                     raise AssertionError(f"Could not save {name} screenshot")
 
+        # The OS mutation probe is CI-only and runs before any simulated input.
+        # Its own guards reject clients, self-hosted machines and non-smoke use.
+        if os.environ.get("VSE_CI_WINDOWS_SYSTEM_THEME") == "1":
+            from ui.windows_system_theme_smoke import run_windows_system_theme_smoke
+            run_windows_system_theme_smoke(app, window, settle, screenshot_dir)
+
         # The real fallback timer must observe the same simulated OS appearance
         # as the explicit refresh. Injecting only _onThemeChanged lets a timer
         # tick overwrite fake Dark with the host's real Light during settle().

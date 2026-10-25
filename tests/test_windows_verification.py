@@ -19,6 +19,20 @@ def identity(runner='windows-2022'):
             'architecture': windows.architecture(0, 0x8664), 'python': {'pointer_bits': 64}}
 
 
+def system_theme_evidence():
+    return {'status': 'passed', 'identity': {'runner': 'windows-2022', 'build': 20348, 'product_type': 3},
+            'original_registry_key_exists': True, 'original_registry': {'exists': False},
+            'original_appearance': {'qt_scheme': 'Light', 'effective': 'Light'},
+            'restoration': {'status': 'restored', 'registry': {'exists': False},
+                            'qt_scheme': 'Light', 'effective': 'Light'},
+            'transitions': [{'status': 'passed', 'requested': theme, 'qt_scheme': theme,
+                             'effective': theme, 'preference': 'Auto', 'qt_signals': [theme],
+                             'registry': {'exists': True, 'type': 4, 'value': int(theme == 'Light')},
+                             'page_lightness': dict.fromkeys(('home', 'timeline', 'settings'),
+                                                            240 if theme == 'Light' else 30)}
+                            for theme in ('Light', 'Dark', 'Light')]}
+
+
 class IdentityTests(unittest.TestCase):
     def test_native_unknown_machine_means_native_not_x86(self):
         self.assertEqual(windows.architecture(0, 0x8664)['process'], 'x64')
@@ -76,7 +90,7 @@ class IdentityTests(unittest.TestCase):
 class CoverageTests(unittest.TestCase):
     def test_every_required_stage_must_pass(self):
         outcomes = dict.fromkeys(windows.COMMON_STAGES, 'success')
-        self.assertEqual(windows.coverage(identity(), outcomes, 'paddle')['execution_status'], 'passed')
+        self.assertEqual(windows.coverage(identity(), outcomes, 'paddle', system_theme_evidence())['execution_status'], 'passed')
         for outcome in ('failure', 'cancelled', 'skipped', '', 'invalid'):
             with self.subTest(outcome=outcome):
                 current = dict(outcomes, issues=outcome)
@@ -97,10 +111,22 @@ class CoverageTests(unittest.TestCase):
 
     def test_native_success_still_requires_worker_and_no_failed_license_gate(self):
         outcomes = dict.fromkeys(windows.COMMON_STAGES, 'success')
-        outcomes.update({'native-build': 'success', 'native-smoke': 'success', 'license-gate': 'skipped'})
-        self.assertEqual(windows.coverage(identity(), outcomes, 'native')['execution_status'], 'passed')
+        outcomes.update({'native-toolchain': 'success', 'native-build': 'success',
+                         'native-smoke': 'success', 'license-gate': 'skipped'})
+        self.assertEqual(windows.coverage(identity(), outcomes, 'native', system_theme_evidence())['execution_status'], 'passed')
         outcomes['license-gate'] = 'failure'
         self.assertNotEqual(windows.coverage(identity(), outcomes, 'native')['execution_status'], 'passed')
+
+    def test_native_toolchain_gate_cannot_be_missing_failed_or_skipped(self):
+        outcomes = dict.fromkeys(windows.COMMON_STAGES, 'success')
+        outcomes.update({'native-build': 'success', 'native-smoke': 'success', 'license-gate': 'skipped'})
+        for outcome in ('', 'failure', 'skipped', 'cancelled'):
+            with self.subTest(outcome=outcome):
+                report = windows.coverage(identity(), dict(outcomes, **{'native-toolchain': outcome}),
+                                          'native', system_theme_evidence())
+                self.assertNotEqual(report['execution_status'], 'passed')
+                self.assertNotEqual(next(row for row in report['stages']
+                                         if row['stage'] == 'native-toolchain')['status'], 'passed')
 
     def test_cpu_success_never_claims_client_windows_or_gpu_coverage(self):
         report = windows.coverage(identity(), dict.fromkeys(windows.COMMON_STAGES, 'success'), 'paddle')
@@ -111,8 +137,38 @@ class CoverageTests(unittest.TestCase):
         summary = windows.markdown(report)
         self.assertIn('not a client Windows certification', summary)
         self.assertIn('client/ARM/GPU machines are not requested or awaited', summary)
-        self.assertIn('changing real Windows Settings is outside verified CI coverage', summary)
+        self.assertIn('neither is Settings UI automation or Windows 10/11 client coverage', summary)
         self.assertIn('not a clean Windows client VM test', summary)
+
+    def test_successful_gui_without_measured_round_trip_is_not_a_pass(self):
+        outcomes = dict.fromkeys(windows.COMMON_STAGES, 'success')
+        for evidence in (None, {'status': 'unsupported', 'error': 'High contrast is enabled'},
+                         {'status': 'blocked'}, {'status': 'failed'}, {'status': 'passed'}):
+            with self.subTest(evidence=evidence):
+                report = windows.coverage(identity(), outcomes, 'paddle', evidence)
+                self.assertNotEqual(report['execution_status'], 'passed')
+                self.assertNotEqual(next(row for row in report['stages']
+                                         if row['stage'] == 'system-theme')['status'], 'passed')
+
+    def test_stale_incomplete_unrestored_or_nonrendering_evidence_cannot_pass(self):
+        for broken in ('runner', 'commit', 'restoration', 'transitions', 'signal', 'pixels', 'preference', 'key'):
+            with self.subTest(broken=broken):
+                evidence = system_theme_evidence()
+                if broken in ('runner', 'commit'):
+                    evidence['identity'][broken] = 'stale'
+                elif broken == 'restoration':
+                    evidence['restoration']['status'] = 'pending'
+                elif broken == 'transitions':
+                    evidence['transitions'].pop()
+                elif broken == 'signal':
+                    evidence['transitions'][1]['qt_signals'] = []
+                elif broken == 'pixels':
+                    evidence['transitions'][1]['page_lightness']['home'] = 240
+                elif broken == 'preference':
+                    evidence['transitions'][1]['preference'] = 'Dark'
+                elif broken == 'key':
+                    evidence['original_registry_key_exists'] = False
+                self.assertEqual(windows.system_theme_status(evidence, identity()), 'incomplete')
 
     def test_license_failure_leaves_customer_package_not_run(self):
         outcomes = dict.fromkeys(windows.COMMON_STAGES, 'success')
@@ -171,6 +227,13 @@ class WorkflowContractTests(unittest.TestCase):
                           '--output test-results/windows/portable-environment', text)
             self.assertIn('VSE_WINDOWS_RUNNER_LABEL: ${{ matrix.os }}', text)
             self.assertIn('"portable-environment":"${{ steps.portable-environment.outcome }}"', text)
+
+    def test_real_system_theme_has_separate_evidence_not_just_successful_gui(self):
+        self.assertIn('system-theme', windows.COMMON_STAGES)
+        for name in ('ci.yml', 'native-ocr.yml'):
+            text = (ROOT / '.github/workflows' / name).read_text()
+            self.assertIn('--system-theme-report test-results/gui-native/system-theme.json', text)
+            self.assertIn('"system-theme":"${{ steps.windows-gui.outcome }}"', text)
 
     def test_all_native_platforms_have_mandatory_final_zip_environment_gates(self):
         for name, distribution, timeout in (('ci.yml', 'dist-ci', 75), ('native-ocr.yml', 'dist-native', 90)):

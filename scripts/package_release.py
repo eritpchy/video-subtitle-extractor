@@ -136,17 +136,23 @@ def finalize_portable_runtime(stage: Path, python: Path, env: dict) -> dict:
 
 def build_runtime(stage: Path, wheels: list[Path], runtime_requirements: list[str], target_platform: str, target_arch: str, profile: str = "paddle") -> dict:
     try:
-        from .portable_python import prepare_runtime
+        from .portable_python import prepare_runtime, write_windows_runtime_isolation
     except ImportError:
-        from portable_python import prepare_runtime
+        from portable_python import prepare_runtime, write_windows_runtime_isolation
     info = prepare_runtime(stage / 'runtime', target_platform, target_arch)
     # Interpreter helper returns a path relative to the bundle root and pinned
     # provenance. The build host's pip drives the bundled interpreter; no pip
     # invocation or dependency installation occurs on customers' computers.
     python = Path(info["python"]).resolve()
-    env = dict(__import__('os').environ, PYTHONDONTWRITEBYTECODE='1', PYTHONNOUSERSITE='1')
+    env = dict(__import__('os').environ, PYTHONDONTWRITEBYTECODE='1', PYTHONNOUSERSITE='1', PYTHONUTF8='1')
+    env.pop('PYTHONIOENCODING', None)
+    for key in list(env):
+        if key.upper().startswith('VSE_RUNTIME_AUDIT_'):
+            env.pop(key)
     subprocess.run([sys.executable, '-m', 'pip', '--python', str(python), 'install', '--no-cache-dir', '--no-index', '--no-deps', '--no-compile', *map(str, wheels)], check=True, env=env)
     info['build_tools'] = finalize_portable_runtime(stage, python, env)
+    if target_platform == 'windows':
+        info['windows_isolation'] = write_windows_runtime_isolation(stage, python)
     profile_manifest = stage / 'runtime/runtime-profile.json'
     profile_manifest.write_text(json.dumps({'runtime_requirements': runtime_requirements, 'ocr_backend': profile}), encoding='utf-8')
     prune = [str(python), str(stage / 'scripts/prune_inference_runtime.py'), '--engine', profile, '--apply', '--manifest', str(stage / 'runtime/inference-prune.json')]
@@ -349,7 +355,7 @@ def verify_bundle(archive_path: Path, smoke: bool) -> None:
                 command = launcher_command(root, manifest['platform'], ['--verify', '--results-dir', str(evidence),
                                                                          '--runtime-audit-dir', str(isolation_reports)])
                 subprocess.run(command, check=True, cwd=root, env=env)
-                summarize_reports(root, isolation_reports, required_modules=('PySide6.QtWidgets', 'cv2', 'qfluentwidgets') + (('paddle',) if manifest.get('ocr_backend', 'paddle') == 'paddle' else ()), forbidden_modules=('paddle', 'paddleocr', 'paddlex', 'onnxruntime') if manifest.get('ocr_backend') == 'native' else ())
+                summarize_reports(root, isolation_reports, required_modules=('PySide6.QtWidgets', 'cv2', 'qfluentwidgets') + (('paddle',) if manifest.get('ocr_backend', 'paddle') == 'paddle' else ()), forbidden_modules=('paddle', 'paddleocr', 'paddlex', 'onnxruntime') if manifest.get('ocr_backend') == 'native' else (), require_isolated=manifest['platform'] == 'windows')
             finally:
                 # Preserve extraction evidence before TemporaryDirectory cleanup,
                 # especially when the child reports a path in a failed smoke.

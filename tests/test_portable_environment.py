@@ -276,6 +276,107 @@ def test_existing_smoke_workloads_may_use_their_own_config_after_bootstrap(tmp_p
     check_environment_evidence(tmp_path, fixture, 'native', root)
 
 
+def vendor_qt_fixture(root, vendor='cv2', platform='linux'):
+    packages = 'runtime/Lib/site-packages' if platform == 'windows' else 'runtime/lib/python3.12/site-packages'
+    package = f'{packages}/{vendor}'
+    plugins = f'{package}/' + ('qt/plugins' if vendor == 'cv2' else 'plugins' if platform == 'windows' else 'Qt/plugins')
+    library = {'linux': 'libqxcb.so', 'macos': 'libqcocoa.dylib', 'windows': 'qwindows.dll'}[platform]
+    contents = {f'{package}/__init__.py': b'# vendor package fixture\n',
+                f'{plugins}/platforms/{library}': b'inert plugin fixture, never loaded'}
+    if vendor == 'cv2':
+        contents[f'{package}/config-3.py'] = b'# vendor import-time Qt path configuration fixture\n'
+    inventory = {}
+    for name, content in contents.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        inventory[name] = bootstrap.sha256(path)
+    manifest = {'platform': platform, 'files': inventory}
+    (root / 'bundle-manifest.json').write_text(json.dumps(manifest))
+    return root / plugins, manifest
+
+
+@pytest.mark.parametrize('vendor,platform,subdirectory', [
+    ('cv2', 'linux', ''), ('PySide6', 'linux', ''), ('PySide6', 'macos', 'platforms'), ('PySide6', 'windows', 'platforms'),
+])
+def test_child_vendor_may_regenerate_only_manifest_owned_qt_plugin_root(tmp_path, vendor, platform, subdirectory):
+    root, fixture, report = valid_environment_report(tmp_path)
+    plugins, _ = vendor_qt_fixture(root, vendor, platform)
+    report['environment']['QT_QPA_PLATFORM_PLUGIN_PATH'] = str(plugins / subdirectory)
+    (tmp_path / 'dependency-isolation/process-1.json').write_text(json.dumps(report))
+    check_environment_evidence(tmp_path, fixture, 'native', root)
+
+
+def test_packaged_cv2_import_fixture_can_repopulate_a_cleared_qt_path(tmp_path):
+    root, fixture, report = valid_environment_report(tmp_path)
+    plugins, manifest = vendor_qt_fixture(root)
+    package = plugins.parents[1]
+    initializer = package / '__init__.py'
+    # A tiny owned package models the real wheel's config-3.py assignment; no
+    # fixture native library is executed, and no installed package is modified.
+    initializer.write_text('import os\nfrom pathlib import Path\nos.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(Path(__file__).parent / "qt/plugins")\n')
+    manifest['files'][initializer.relative_to(root).as_posix()] = bootstrap.sha256(initializer)
+    (root / 'bundle-manifest.json').write_text(json.dumps(manifest))
+    code = ('import os, sys; os.environ.pop("QT_QPA_PLATFORM_PLUGIN_PATH", None); '
+            f'sys.path.insert(0, {str(package.parent)!r}); import cv2; '
+            'print(os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"])')
+    value = subprocess.check_output([sys.executable, '-I', '-B', '-X', 'utf8', '-c', code], timeout=15).decode('utf-8').strip()
+    assert value == str(plugins)
+    report['environment']['QT_QPA_PLATFORM_PLUGIN_PATH'] = value
+    (tmp_path / 'dependency-isolation/process-1.json').write_text(json.dumps(report))
+    check_environment_evidence(tmp_path, fixture, 'native', root)
+
+
+@pytest.mark.parametrize('regression', [
+    'initial-bootstrap', 'other-qt-variable', 'foreign', 'arbitrary-bundle-directory', 'mixed-foreign', 'mixed-bundled',
+    'symlink-external', 'symlink-internal', 'symlink-alias', 'unlisted-plugin', 'missing-plugin',
+    'missing-package-anchor', 'changed-plugin', 'changed-package-anchor',
+])
+def test_regenerated_qt_path_exception_does_not_admit_unverified_search_roots(tmp_path, regression):
+    root, fixture, report = valid_environment_report(tmp_path)
+    plugins, manifest = vendor_qt_fixture(root)
+    value = str(plugins)
+    plugin = plugins / 'platforms/libqxcb.so'
+    anchor = plugins.parents[1] / '__init__.py'
+    if regression == 'foreign':
+        value = str(tmp_path / 'unrelated-host-qt')
+    elif regression == 'arbitrary-bundle-directory':
+        value = str(root / 'user-plugins')
+        Path(value).mkdir()
+    elif regression == 'mixed-foreign':
+        value += os.pathsep + str(tmp_path / 'unrelated-host-qt')
+    elif regression == 'mixed-bundled':
+        value += os.pathsep + str(plugins / 'platforms')
+    elif regression.startswith('symlink-'):
+        target = root / 'another-plugin-tree' if regression == 'symlink-internal' else tmp_path / 'outside-plugin-tree'
+        try:
+            if regression == 'symlink-alias':
+                target.symlink_to(plugins, target_is_directory=True)
+                value = str(target)
+            else:
+                plugins.rename(target)
+                plugins.symlink_to(target, target_is_directory=True)
+        except OSError:
+            pytest.skip('Native host does not permit creating the temporary symlink fixture')
+    elif regression == 'unlisted-plugin':
+        (plugins / 'platforms/extra-plugin.bin').write_bytes(b'uninventoried fixture')
+    elif regression == 'missing-plugin':
+        plugin.unlink()
+    elif regression == 'missing-package-anchor':
+        manifest['files'].pop(anchor.relative_to(root).as_posix())
+        (root / 'bundle-manifest.json').write_text(json.dumps(manifest))
+    elif regression == 'changed-plugin':
+        plugin.write_bytes(b'changed plugin bytes')
+    elif regression == 'changed-package-anchor':
+        anchor.write_bytes(b'changed vendor code')
+    key = 'QT_PLUGIN_PATH' if regression == 'other-qt-variable' else 'QT_QPA_PLATFORM_PLUGIN_PATH'
+    report['environment'][key] = value
+    destination = tmp_path / 'environment-report.json' if regression == 'initial-bootstrap' else tmp_path / 'dependency-isolation/process-1.json'
+    destination.write_text(json.dumps(report))
+    with pytest.raises(RuntimeError):
+        check_environment_evidence(tmp_path, fixture, 'native', root)
+
+
 def test_failed_clean_scenario_does_not_skip_contaminated_scenario(tmp_path, monkeypatch):
     from scripts import verify_portable_environment as verifier
     root = tmp_path / 'bundle'
