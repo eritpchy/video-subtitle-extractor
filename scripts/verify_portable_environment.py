@@ -297,7 +297,7 @@ def verify_archive(archive: Path, output: Path) -> dict:
                         subprocess.run(command, cwd=fixture['cwd'], env=env, stdout=stream, stderr=subprocess.STDOUT, check=True, timeout=4800)
                     required = ('PySide6.QtWidgets', 'cv2', 'qfluentwidgets') + (('paddle',) if report['profile'] == 'paddle' else ())
                     forbidden = ('paddle', 'paddleocr', 'paddlex', 'onnxruntime') if report['profile'] == 'native' else ()
-                    case['audit'] = summarize_reports(root, audit, required, forbidden, require_isolated=manifest['platform'] == 'windows')
+                    case['audit'] = summarize_reports(root, audit, required, forbidden, require_isolated=manifest['platform'] == 'windows', require_native_workers=manifest['platform'] == 'windows' and manifest.get('ocr_backend') == 'native')
                     check_environment_evidence(evidence, fixture, report['profile'], root)
                     if manifest['platform'] == 'macos':
                         app_audit = evidence / 'macos-app-dependency-isolation'

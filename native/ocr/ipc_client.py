@@ -16,6 +16,7 @@ import queue
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -107,6 +108,14 @@ def compare(actual, expected, tolerance):
 
 
 def native_evidence(pid, executable):
+    if sys.platform == 'win32':
+        # Direct smoke.py execution has only native/ocr on sys.path. This known
+        # source root supplies our standard-library, read-only Windows auditor.
+        source_root = str(Path(__file__).resolve().parents[2])
+        if source_root not in sys.path:
+            sys.path.insert(0, source_root)
+        from scripts.windows_native_worker_evidence import collect_native_worker_evidence
+        return collect_native_worker_evidence(pid, executable)
     proc = Path('/proc') / str(pid)
     if not proc.exists():
         return {'available': False, 'reason': '/proc process inspection unavailable on this platform'}

@@ -2,7 +2,8 @@
 
 No third-party packages. Isolated bootstrap imports the in-bundle probe, then
 byte-validates the external evidence-directory sitecustomize inherited by its
-Python children. Native non-Python executables need separate audits.
+Python children. The native OCR adapter also records live Windows worker
+snapshots; other non-Python executables retain their separate static audits.
 """
 from __future__ import annotations
 
@@ -194,6 +195,93 @@ def loaded_images() -> list[str]:
 
 
 HOOK_STARTUP = b'from standalone_runtime_probe import install_probe\ninstall_probe()\n'
+_NATIVE_WORKER_AUDIT = None
+
+
+def record_native_worker(pid: int, executable: Path, phase: str) -> None:
+    """Record actual Windows native children only during authenticated verification.
+
+    Capture after the first successful inference and again before orderly close,
+    not per frame. Every spawned worker leaves a pending record, so a missing
+    inference/snapshot cannot silently masquerade as a Python-only audit pass.
+    """
+    context = _NATIVE_WORKER_AUDIT
+    if context is None or context['system'] != 'Windows':
+        return
+    from scripts.windows_native_worker_evidence import collect_native_worker_evidence
+    expected = context['root'] / 'native-ocr/native-ocr.exe'
+    if (type(pid) is not int or pid <= 0 or phase not in ('start', 'inference', 'close')
+            or _identity(str(executable), 'Windows') != _identity(str(expected), 'Windows')):
+        raise RuntimeError('Invalid native worker audit PID, phase or bundled executable')
+    with context['lock']:
+        records = context['records']
+        if phase == 'start':
+            if pid in records:
+                raise RuntimeError('Duplicate native worker PID in audit')
+            records[pid] = {'schema': 1, 'parent_pid': os.getpid(), 'worker_pid': pid,
+                            'parent_argv': list(sys.argv), 'executable': str(expected.resolve()),
+                            'successful_requests': 0, 'snapshots': [], 'errors': []}
+        if pid not in records:
+            raise RuntimeError('Native worker inference was not preceded by an audited launch')
+        record = records[pid]
+        if phase == 'inference':
+            record['successful_requests'] += 1
+        if ((phase == 'inference' and record['successful_requests'] == 1)
+                or (phase == 'close' and record['successful_requests'] > 0)):
+            evidence = collect_native_worker_evidence(pid, expected)
+            record['snapshots'].append({'phase': phase, 'native_runtime': evidence})
+            if evidence.get('available') is not True or evidence.get('passed') is not True:
+                record['errors'].extend(evidence.get('errors') or ['Missing native worker module evidence'])
+        record['phase'] = phase
+        record['passed'] = bool(record['successful_requests'] and record['snapshots'] and not record['errors'])
+        destination = context['directory'] / f'native-worker-{os.getpid()}-{pid}.json'
+        temporary = destination.with_suffix('.tmp')
+        temporary.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding='utf-8')
+        temporary.replace(destination)
+        if record['errors']:
+            raise RuntimeError('Windows native worker audit failed: ' + '; '.join(record['errors']))
+
+
+def _summarize_native_workers(bundle_root, report_dir, processes, required):
+    errors, records = [], []
+    paths = sorted(report_dir.glob('native-worker-*.json'))
+    if required and not paths:
+        errors.append('No Windows native worker PID/module evidence produced after inference')
+    if not paths:
+        return records, errors
+    from scripts.windows_native_worker_evidence import validate_native_worker_evidence
+    parents = {row['pid'] for row in processes if row['system'] == 'Windows'}
+    expected = bundle_root.resolve() / 'native-ocr/native-ocr.exe'
+    seen = set()
+    for path in paths:
+        try:
+            record = json.loads(path.read_text(encoding='utf-8'))
+            parent, pid = record.get('parent_pid'), record.get('worker_pid')
+            if (record.get('schema') != 1 or type(parent) is not int or parent not in parents
+                    or type(pid) is not int or pid <= 0 or pid == parent or (parent, pid) in seen
+                    or path.name != f'native-worker-{parent}-{pid}.json'
+                    or _identity(str(record.get('executable', '')), 'Windows') != _identity(str(expected), 'Windows')
+                    or record.get('passed') is not True or record.get('errors') != []
+                    or type(record.get('successful_requests')) is not int or record['successful_requests'] <= 0):
+                raise ValueError('Missing/failed native inference, invalid worker/parent identity or executable')
+            snapshots = record.get('snapshots', [])
+            if (not isinstance(snapshots, list) or not 1 <= len(snapshots) <= 2
+                    or snapshots[0].get('phase') != 'inference'
+                    or (len(snapshots) == 2 and snapshots[1].get('phase') != 'close')):
+                raise ValueError('Missing or invalid native worker inference snapshots')
+            for snapshot in snapshots:
+                evidence = snapshot.get('native_runtime', {})
+                if evidence.get('pid') != pid:
+                    raise ValueError('Native worker snapshot PID mismatch')
+                validated = validate_native_worker_evidence(evidence, expected)
+                if validated.get('passed') is not True:
+                    raise ValueError('; '.join(validated.get('errors') or ['Invalid native worker evidence']))
+            seen.add((parent, pid))
+            records.append({'file': path.name, 'parent_pid': parent, 'worker_pid': pid,
+                            'successful_requests': record['successful_requests'], 'snapshots': len(snapshots)})
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+            errors.append(f'Invalid Windows native worker evidence {path.name}: {error}')
+    return records, errors
 
 
 def _trusted_hooks(bundle_root: Path, report_dir: Path) -> dict[str, tuple[Path, bytes]]:
@@ -209,7 +297,7 @@ def audit_environment(bundle_root: Path, report_dir: Path) -> dict[str, str]:
     bundle_root, report_dir = bundle_root.resolve(), report_dir.resolve()
     trusted = _trusted_hooks(bundle_root, report_dir)
     report_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if list(report_dir.glob('process-*.json')):
+    if list(report_dir.glob('process-*.json')) or list(report_dir.glob('native-worker-*.json')):
         raise RuntimeError('Runtime audit requires a fresh report directory (stale process reports found)')
     hooks = report_dir / 'hook'
     hooks.mkdir(mode=0o700)  # Never reuse potentially stale/symlinked hook files.
@@ -224,6 +312,9 @@ def install_probe() -> None:
     root = os.environ['VSE_RUNTIME_AUDIT_ROOT']
     directory = Path(os.environ['VSE_RUNTIME_AUDIT_REPORTS'])
     system = platform.system()
+    global _NATIVE_WORKER_AUDIT
+    _NATIVE_WORKER_AUDIT = {'root': Path(root).resolve(), 'directory': directory.resolve(),
+                            'system': system, 'lock': threading.Lock(), 'records': {}}
     lock = threading.Lock()
     images: set[str] = set()
     modules: dict[str, str] = {}
@@ -286,7 +377,8 @@ def install_probe() -> None:
 
 
 def summarize_reports(bundle_root: Path, report_dir: Path, required_modules: tuple[str, ...] = (),
-                      forbidden_modules: tuple[str, ...] = (), *, require_isolated: bool = False) -> dict:
+                      forbidden_modules: tuple[str, ...] = (), *, require_isolated: bool = False,
+                      require_native_workers: bool = False) -> dict:
     """Write evidence and fail closed on missing reports or probe failures."""
     root = str(bundle_root.resolve())
     errors: list[str] = []
@@ -381,12 +473,16 @@ def summarize_reports(bundle_root: Path, report_dir: Path, required_modules: tup
     for module in forbidden_modules:
         if any(name == module or name.startswith(module + '.') for name in seen_modules):
             errors.append(f'Forbidden inference framework loaded: {module}')
+    native_workers, native_errors = _summarize_native_workers(bundle_root, report_dir, reports, require_native_workers)
+    errors.extend(native_errors)
     summary = {'process_count': len(reports), 'modules_observed': sorted(seen_modules),
+               'native_worker_count': len(native_workers), 'native_workers': native_workers,
                'errors': sorted(set(errors)), 'passed': not errors,
                'observed_os_security_components': observed_components,
                'unverified_os_security_components': [entry for entry in component_proofs.values() if not entry.get('allowed')],
                'os_security_evidence_file': 'windows-os-security-evidence.json' if candidates else None,
-               'scope': 'Loaded Python process libraries; non-Python executables require separate native audit'}
+               'scope': ('Loaded Python process libraries plus Windows native OCR worker first-inference/pre-close snapshots and on-disk hashes; not process-memory or lifetime certification'
+                         if native_workers else 'Loaded Python process libraries; non-Python executables require separate native audit')}
     (report_dir / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
     if errors:
         raise RuntimeError('Standalone runtime audit failed:\n' + '\n'.join(summary['errors']))

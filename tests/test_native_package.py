@@ -32,6 +32,60 @@ def test_native_stage_complete_no_duplicate_ort(tmp_path):
     assert (dest / 'libonnxruntime.so.1').is_file()
     assert not (dest / 'libonnxruntime.so.1.31.0').exists()
     assert not report['upstream_artifact_release_ready']
+    assert not (dest / 'size-audit.json').exists()
+    assert 'size-audit.json' not in report['files']
+
+
+def fixture_windows_artifact(root):
+    fixture_artifact(root)
+    (root / 'native-ocr').rename(root / 'native-ocr.exe')
+    (root / 'libonnxruntime.so.1.31.0').rename(root / 'onnxruntime.dll')
+    for name in ('concrt140.dll', 'msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'):
+        (root / name).write_bytes(b'reviewed fixture ' + name.encode())
+    files = [{'path': p.relative_to(root).as_posix(), 'bytes': p.stat().st_size, 'sha256': sha256(p)}
+             for p in root.rglob('*') if p.is_file() and p.name != 'size-audit.json']
+    (root / 'size-audit.json').write_bytes((json.dumps({'files': files, 'release_ready': False}, indent=3) + '\r\n').encode())
+    return root
+
+
+def test_windows_native_stage_preserves_original_inventory_bytes_and_outer_hash(tmp_path):
+    source = fixture_windows_artifact(tmp_path / 'input')
+    original = (source / 'size-audit.json').read_bytes()
+    dest = tmp_path / 'output'
+    report = stage_native_artifact(source, dest, 'windows')
+    assert (dest / 'size-audit.json').read_bytes() == original
+    assert report['files']['size-audit.json'] == sha256(source / 'size-audit.json')
+    assert not any(row['path'] == 'size-audit.json' for row in json.loads(original)['files'])
+
+
+@pytest.mark.parametrize('change', ['symlink', 'case-duplicate', 'self', 'malformed'])
+def test_windows_native_stage_rejects_unsafe_inventory_before_publication(tmp_path, change):
+    source = fixture_windows_artifact(tmp_path / 'input')
+    path = source / 'size-audit.json'
+    inventory = json.loads(path.read_bytes())
+    if change == 'symlink':
+        original = tmp_path / 'outside-inventory.json'
+        original.write_bytes(path.read_bytes())
+        path.unlink(); path.symlink_to(original)
+    else:
+        if change == 'case-duplicate':
+            row = next(row for row in inventory['files'] if row['path'] == 'native-ocr.exe')
+            inventory['files'].append({**row, 'path': 'NATIVE-OCR.EXE'})
+        elif change == 'self':
+            inventory['files'].append({'path': 'size-audit.json'})
+        else:
+            inventory['files'] = [None]
+        path.write_text(json.dumps(inventory))
+    with pytest.raises(ValueError):
+        stage_native_artifact(source, tmp_path / 'output', 'windows')
+    assert not (tmp_path / 'output').exists()
+
+
+def test_macos_native_staging_does_not_add_windows_inventory(tmp_path):
+    source = fixture_artifact(tmp_path / 'input')
+    report = stage_native_artifact(source, tmp_path / 'output', 'macos')
+    assert 'size-audit.json' not in report['files']
+    assert not (tmp_path / 'output/size-audit.json').exists()
 
 
 def test_native_stage_rejects_modified_model(tmp_path):

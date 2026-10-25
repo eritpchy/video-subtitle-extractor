@@ -357,7 +357,7 @@ def verify_bundle(archive_path: Path, smoke: bool) -> None:
                 command = launcher_command(root, manifest['platform'], ['--verify', '--results-dir', str(evidence),
                                                                          '--runtime-audit-dir', str(isolation_reports)])
                 subprocess.run(command, check=True, cwd=root, env=env)
-                summarize_reports(root, isolation_reports, required_modules=('PySide6.QtWidgets', 'cv2', 'qfluentwidgets') + (('paddle',) if manifest.get('ocr_backend', 'paddle') == 'paddle' else ()), forbidden_modules=('paddle', 'paddleocr', 'paddlex', 'onnxruntime') if manifest.get('ocr_backend') == 'native' else (), require_isolated=manifest['platform'] == 'windows')
+                summarize_reports(root, isolation_reports, required_modules=('PySide6.QtWidgets', 'cv2', 'qfluentwidgets') + (('paddle',) if manifest.get('ocr_backend', 'paddle') == 'paddle' else ()), forbidden_modules=('paddle', 'paddleocr', 'paddlex', 'onnxruntime') if manifest.get('ocr_backend') == 'native' else (), require_isolated=manifest['platform'] == 'windows', require_native_workers=manifest['platform'] == 'windows' and manifest.get('ocr_backend') == 'native')
             finally:
                 # Preserve extraction evidence before TemporaryDirectory cleanup,
                 # especially when the child reports a path in a failed smoke.

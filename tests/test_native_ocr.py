@@ -405,3 +405,51 @@ def test_every_project_language_keeps_exact_native_model_selection():
             assert config.TIER == ('medium' if mode == 'accurate' else 'small')
             assert config.REC_MODEL_NAME in VALIDATED_LEGACY_MODELS | {f'PP-OCRv6_{config.TIER}_rec'}
             assert config.DET_MODEL_NAME == f'PP-OCRv6_{config.TIER}_det'
+
+
+def test_verification_hook_observes_real_child_after_success_and_before_reaping(native_root, monkeypatch):
+    from backend.tools import native_ocr as adapter
+    observed = []
+    def audit(process, executable, phase):
+        assert process.poll() is None
+        assert executable == native_root / ('native-ocr.exe' if os.name == 'nt' else 'native-ocr')
+        observed.append((process.pid, phase))
+    monkeypatch.setattr(adapter, '_record_worker_audit', audit)
+    with make_native() as native:
+        list(native.predict_iter(np.zeros((32, 64, 3), dtype=np.uint8)))
+        process = native._process
+        list(native.predict_iter(np.zeros((32, 64, 3), dtype=np.uint8)))
+    assert observed == [(process.pid, phase) for phase in ('start', 'inference', 'inference', 'close')]
+    assert process.poll() is not None
+
+
+@pytest.mark.parametrize('phase', ['start', 'inference', 'close'])
+def test_verification_failure_never_leaks_native_worker(native_root, monkeypatch, phase):
+    from backend.tools import native_ocr as adapter
+    processes = []
+    def audit(process, executable, event):
+        processes.append(process)
+        if event == phase:
+            raise RuntimeError('native-audit-fixture-failure')
+    monkeypatch.setattr(adapter, '_record_worker_audit', audit)
+    native = make_native()
+    try:
+        with pytest.raises(RuntimeError, match='native-audit-fixture-failure'):
+            list(native.predict_iter(np.zeros((32, 64, 3), dtype=np.uint8)))
+            native.close()
+        assert native._process is None
+        assert all(process.poll() is not None for process in processes)
+    finally:
+        native.close()
+
+
+@pytest.mark.parametrize('platform,active,expected', [('win32', True, True), ('win32', False, False), ('darwin', True, False), ('linux', True, False)])
+def test_native_audit_only_calls_already_installed_windows_verification_probe(monkeypatch, platform, active, expected):
+    from types import SimpleNamespace
+    from backend.tools import native_ocr as adapter
+    calls = []
+    hook = SimpleNamespace(_NATIVE_WORKER_AUDIT={} if active else None,
+                           record_native_worker=lambda *args: calls.append(args))
+    monkeypatch.setattr(adapter, 'sys', SimpleNamespace(platform=platform, modules={'standalone_runtime_probe': hook}))
+    adapter._record_worker_audit(SimpleNamespace(pid=123), Path('fixture.exe'), 'inference')
+    assert bool(calls) is expected

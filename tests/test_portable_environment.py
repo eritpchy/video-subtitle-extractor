@@ -501,3 +501,60 @@ def test_opencv_search_selectors_removed_without_erasing_cache_or_data(tmp_path)
     assert env['OPENCV_TEMP_PATH'] == '/user/cache'
     assert env['OPENCV_OPENCL_CACHE_DIR'] == '/user/opencl-cache'
     assert env['OPENCV_DATA_PATH'] == '/user/data'
+
+
+@pytest.mark.parametrize('target,profile,required', [
+    ('windows', 'native', True), ('windows', 'paddle', False),
+    ('linux', 'native', False), ('macos', 'native', False),
+])
+def test_final_archive_smoke_requires_worker_evidence_only_for_windows_native(tmp_path, monkeypatch, target, profile, required):
+    from scripts import package_release, portable_python, standalone_runtime_probe
+    root = tmp_path / 'app'
+    (root / 'scripts').mkdir(parents=True)
+    shutil.copy2(standalone_runtime_probe.__file__, root / 'scripts/standalone_runtime_probe.py')
+    (root / 'bundle-manifest.json').write_text(json.dumps({'format': 2, 'platform': target, 'arch': 'x64',
+        'runtime_python': 'runtime/python', 'files': {}, 'ocr_backend': profile}))
+    archive = tmp_path / 'candidate.zip'
+    archive.write_bytes(b'fixture archive')
+    archive.with_suffix('.zip.sha256').write_text(bootstrap.sha256(archive))
+    monkeypatch.setattr(package_release, 'extract_checked', lambda *args: root)
+    monkeypatch.setattr(package_release, 'verification_path', lambda *args: str(tmp_path / 'os-tools'))
+    monkeypatch.setattr(package_release.subprocess, 'run', lambda *args, **kwargs: None)
+    monkeypatch.setattr(portable_python, 'launcher_command', lambda *args: ['fixture-launcher'])
+    monkeypatch.setattr(standalone_runtime_probe, 'audit_windows_executables', lambda *args: None)
+    monkeypatch.setattr(standalone_runtime_probe, 'audit_macos_executables', lambda *args: None)
+    calls = []
+    monkeypatch.setattr(standalone_runtime_probe, 'summarize_reports', lambda *args, **kwargs: calls.append(kwargs))
+    package_release.verify_bundle(archive, True)
+    assert len(calls) == 1
+    assert calls[0]['require_native_workers'] is required
+    assert calls[0]['require_isolated'] is (target == 'windows')
+
+
+@pytest.mark.parametrize('profile,required', [('native', True), ('paddle', False)])
+def test_every_windows_launcher_scenario_requires_native_worker_records(tmp_path, monkeypatch, profile, required):
+    from scripts import verify_portable_environment as verifier, standalone_runtime_probe
+    root = tmp_path / 'app'
+    (root / 'scripts').mkdir(parents=True)
+    shutil.copy2(standalone_runtime_probe.__file__, root / 'scripts/standalone_runtime_probe.py')
+    (root / 'bundle-manifest.json').write_text(json.dumps({'format': 2, 'platform': 'windows', 'arch': 'x64',
+        'runtime_python': 'runtime/python.exe', 'files': {}, 'ocr_backend': profile}))
+    archive = tmp_path / 'candidate.zip'
+    archive.write_bytes(b'fixture archive')
+    archive.with_suffix('.zip.sha256').write_text(bootstrap.sha256(archive))
+    monkeypatch.setattr(verifier, 'extract_checked', lambda *args: root)
+    monkeypatch.setattr(verifier, 'host_platform', lambda: ('windows', 'x64'))
+    monkeypatch.setattr(verifier, 'fixture_environment', lambda *args: ({}, {'cwd': str(tmp_path)}))
+    monkeypatch.setattr(verifier, 'launcher_command', lambda *args: ['fixture-launcher'])
+    monkeypatch.setattr(verifier, 'audit_windows_executables', lambda *args: None)
+    monkeypatch.setattr(verifier, 'check_environment_evidence', lambda *args: None)
+    monkeypatch.setattr(verifier.subprocess, 'run', lambda *args, **kwargs: None)
+    calls = []
+    def summarize(*args, **kwargs):
+        calls.append(kwargs)
+        return {'passed': True}
+    monkeypatch.setattr(verifier, 'summarize_reports', summarize)
+    report = verifier.verify_archive(archive, tmp_path / 'results')
+    assert report['result'] == 'passed'
+    assert len(calls) == len(verifier.SCENARIOS)
+    assert all(call['require_native_workers'] is required and call['require_isolated'] for call in calls)

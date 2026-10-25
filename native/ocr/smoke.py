@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import struct
+import sys
 import tempfile
 
 from ipc_client import Worker, compare, native_evidence, raw_case
@@ -16,6 +17,13 @@ ROOT = Path(__file__).resolve().parent
 
 def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+def runtime_evidence_passes(evidence, system):
+    # Windows now has a real PID/module collector. Missing evidence must never
+    # become success merely because the old Linux-only /proc probe is absent.
+    if system == 'win32':
+        return evidence.get('available') is True and evidence.get('passed') is True
+    return not evidence.get('available') or evidence.get('passed') is True
 
 def run(artifact, timeout=120):
     artifact = Path(artifact).resolve(strict=True)
@@ -80,8 +88,7 @@ def run(artifact, timeout=120):
                         raw_case(command, 'truncated-body', struct.pack('<I', 20) + b'{}'),
                         raw_case(command, 'oversize-frame', struct.pack('<I', 65537))]
     verdicts = [c['passed'] for c in report['cases'] + report['edges']] + [report['eof']['passed']]
-    if report['native_runtime'].get('available'):
-        verdicts.append(report['native_runtime']['passed'])
+    verdicts.append(runtime_evidence_passes(report['native_runtime'], sys.platform))
     report['passed'] = all(verdicts)
     report['summary'] = {'parity_cases': len(report['cases']), 'edge_cases': len(report['edges']),
                          'failed': sum(not v for v in verdicts),

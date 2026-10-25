@@ -525,3 +525,127 @@ def test_windows_native_short_path_identity(tmp_path):
         pytest.skip('This Windows volume has 8.3 aliases disabled')
     assert probe._inside(buffer.value, str(root), 'Windows')
     assert probe._identity(buffer.value, 'Windows') == probe._identity(str(executable), 'Windows')
+
+
+def native_audit_context(tmp_path, monkeypatch):
+    import threading
+    bundle, evidence = tmp_path / 'bundle 空间 & spaces', tmp_path / 'evidence'
+    bundle.mkdir()
+    evidence.mkdir()
+    monkeypatch.setattr(probe, '_NATIVE_WORKER_AUDIT', {
+        'root': bundle, 'directory': evidence, 'system': 'Windows',
+        'lock': threading.Lock(), 'records': {}})
+    return bundle, evidence, bundle / 'native-ocr/native-ocr.exe'
+
+
+def test_native_record_captures_first_inference_and_preclose_not_every_frame(tmp_path, monkeypatch):
+    from scripts import windows_native_worker_evidence as worker
+    bundle, evidence, exe = native_audit_context(tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr(worker, 'collect_native_worker_evidence', lambda pid, path:
+                        calls.append((pid, path)) or {'available': True, 'passed': True, 'errors': [], 'pid': pid})
+    probe.record_native_worker(123, exe, 'start')
+    report_path = evidence / f'native-worker-{os.getpid()}-123.json'
+    assert json.loads(report_path.read_text())['passed'] is False
+    for _ in range(5):
+        probe.record_native_worker(123, exe, 'inference')
+    probe.record_native_worker(123, exe, 'close')
+    report = json.loads(report_path.read_text())
+    assert report['passed'] and report['successful_requests'] == 5
+    assert report['parent_pid'] == os.getpid() and report['worker_pid'] == 123
+    assert [row['phase'] for row in report['snapshots']] == ['inference', 'close']
+    assert calls == [(123, exe), (123, exe)]
+    assert not list(bundle.iterdir())  # Evidence is external; the package is not mutated.
+
+
+def test_native_record_preserves_collection_failure_before_raising(tmp_path, monkeypatch):
+    from scripts import windows_native_worker_evidence as worker
+    _, evidence, exe = native_audit_context(tmp_path, monkeypatch)
+    monkeypatch.setattr(worker, 'collect_native_worker_evidence', lambda *args:
+                        {'available': False, 'passed': False, 'errors': ['read-only snapshot denied']})
+    probe.record_native_worker(123, exe, 'start')
+    with pytest.raises(RuntimeError, match='snapshot denied'):
+        probe.record_native_worker(123, exe, 'inference')
+    report = json.loads((evidence / f'native-worker-{os.getpid()}-123.json').read_text())
+    assert not report['passed'] and report['errors'] == ['read-only snapshot denied']
+    assert report['snapshots'][0]['native_runtime']['available'] is False
+
+
+@pytest.mark.parametrize('problem', ['foreign-exe', 'no-start', 'duplicate-start', 'bad-phase', 'bad-pid'])
+def test_native_record_requires_known_bundle_launch(tmp_path, monkeypatch, problem):
+    _, _, exe = native_audit_context(tmp_path, monkeypatch)
+    if problem == 'duplicate-start':
+        probe.record_native_worker(123, exe, 'start')
+    with pytest.raises(RuntimeError):
+        probe.record_native_worker(True if problem == 'bad-pid' else 123,
+                                   tmp_path / 'foreign.exe' if problem == 'foreign-exe' else exe,
+                                   'other' if problem == 'bad-phase' else 'inference' if problem == 'no-start' else 'start')
+
+
+def native_saved_record(tmp_path):
+    bundle, evidence = tmp_path / 'app', tmp_path / 'evidence'
+    stage_probe(bundle)
+    audit_environment(bundle, evidence)
+    _external_report(bundle, evidence)
+    process_path = evidence / 'process-1.json'
+    process = json.loads(process_path.read_text())
+    process.update(system='Windows', images=[r'C:\Windows\System32\kernel32.dll'], windows_root=r'C:\Windows')
+    process_path.write_text(json.dumps(process))
+    record = {'schema': 1, 'parent_pid': 1, 'worker_pid': 123,
+              'executable': str(bundle / 'native-ocr/native-ocr.exe'), 'successful_requests': 1,
+              'passed': True, 'errors': [], 'snapshots': [{'phase': 'inference', 'native_runtime': {'pid': 123}}]}
+    path = evidence / 'native-worker-1-123.json'
+    path.write_text(json.dumps(record))
+    return bundle, evidence, path, record
+
+
+def test_windows_native_summary_requires_actual_worker_not_python_only(tmp_path):
+    bundle, evidence, path, _ = native_saved_record(tmp_path)
+    path.unlink()
+    with pytest.raises(RuntimeError, match='No Windows native worker PID/module evidence'):
+        summarize_reports(bundle, evidence, require_native_workers=True)
+    assert not json.loads((evidence / 'summary.json').read_text())['passed']
+    assert summarize_reports(bundle, evidence)['native_worker_count'] == 0
+
+
+@pytest.mark.parametrize('problem', ['pending', 'foreign-parent', 'same-pid', 'bad-pid', 'different-exe',
+                                     'no-snapshot', 'snapshot-pid', 'saved-pass-only', 'no-inference'])
+def test_windows_native_summary_rejects_missing_or_unbound_evidence(tmp_path, monkeypatch, problem):
+    from scripts import windows_native_worker_evidence as worker
+    bundle, evidence, path, record = native_saved_record(tmp_path)
+    if problem == 'pending': record['passed'] = False
+    elif problem == 'foreign-parent': record['parent_pid'] = 999
+    elif problem == 'same-pid': record['worker_pid'] = 1
+    elif problem == 'bad-pid': record['worker_pid'] = True
+    elif problem == 'different-exe': record['executable'] = str(tmp_path / 'native-ocr.exe')
+    elif problem == 'no-snapshot': record['snapshots'] = []
+    elif problem == 'snapshot-pid': record['snapshots'][0]['native_runtime']['pid'] = 124
+    elif problem == 'no-inference': record['successful_requests'] = 0
+    path.write_text(json.dumps(record))
+    monkeypatch.setattr(worker, 'validate_native_worker_evidence', lambda *args:
+                        {'passed': problem != 'saved-pass-only', 'errors': ['saved hashes incomplete']})
+    with pytest.raises(RuntimeError, match='Invalid Windows native worker evidence'):
+        summarize_reports(bundle, evidence, require_native_workers=True)
+
+
+def test_windows_native_summary_revalidates_each_saved_snapshot(tmp_path, monkeypatch):
+    from scripts import windows_native_worker_evidence as worker
+    bundle, evidence, path, record = native_saved_record(tmp_path)
+    record['snapshots'].append({'phase': 'close', 'native_runtime': {'pid': 123}})
+    path.write_text(json.dumps(record))
+    calls = []
+    monkeypatch.setattr(worker, 'validate_native_worker_evidence', lambda raw, exe:
+                        calls.append((raw, exe)) or {'passed': True})
+    report = summarize_reports(bundle, evidence, require_native_workers=True)
+    assert report['passed'] and report['native_worker_count'] == 1
+    assert report['native_workers'][0]['snapshots'] == 2
+    assert calls == [({'pid': 123}, bundle / 'native-ocr/native-ocr.exe')] * 2
+
+
+def test_stale_native_worker_report_directory_is_rejected(tmp_path):
+    bundle, evidence = tmp_path / 'app', tmp_path / 'evidence'
+    stage_probe(bundle)
+    evidence.mkdir()
+    (evidence / 'native-worker-1-2.json').write_text('{}')
+    with pytest.raises(RuntimeError, match='fresh report directory'):
+        audit_environment(bundle, evidence)

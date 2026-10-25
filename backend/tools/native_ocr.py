@@ -13,10 +13,26 @@ from pathlib import Path
 import queue
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 import weakref
+
+
+def _record_worker_audit(process, executable, phase):
+    """Use only an already-installed verification probe; ordinary runs do no audit.
+
+    The isolated bundle bootstrap authenticates this module before installation.
+    No environment flag can import an arbitrary hook or select a worker path.
+    """
+    if sys.platform != 'win32':
+        return
+    for name in ('scripts.standalone_runtime_probe', 'standalone_runtime_probe'):
+        probe = sys.modules.get(name)
+        if probe is not None and getattr(probe, '_NATIVE_WORKER_AUDIT', None) is not None:
+            probe.record_native_worker(process.pid, executable, phase)
+            return
 
 
 VALIDATED_LEGACY_MODELS = frozenset({
@@ -183,6 +199,17 @@ class NativeOcr:
             self._stderr_thread = threading.Thread(target=_drain_stderr,
                 args=(process.stderr, self._stderr), name='vse-native-stderr', daemon=True)
             self._stderr_thread.start()
+            try:
+                _record_worker_audit(process, self.executable, 'start')
+            except BaseException:
+                # _start runs before the request transport's cleanup handler.
+                _reap(process)
+                self._stderr_thread.join(timeout=1)
+                self._stderr_thread = None
+                self._finalizer.detach()
+                self._finalizer = None
+                self._process = None
+                raise
             return process
 
     def _discard(self):
@@ -203,7 +230,12 @@ class NativeOcr:
         # May be called from another thread during a blocked request.
         with self._state_lock:
             self._closed = True
-        self._discard()
+            process = self._process
+        try:
+            if process is not None:
+                _record_worker_audit(process, self.executable, 'close')
+        finally:
+            self._discard()
 
     def __enter__(self):
         return self
@@ -250,6 +282,7 @@ class NativeOcr:
                 for setting in ('rec_model', 'batch_size', 'cpu_threads'):
                     if type(response.get(setting)) is not type(request[setting]) or response.get(setting) != request[setting]:
                         raise ValueError(f'Native OCR did not honor requested {setting}')
+                _record_worker_audit(process, self.executable, 'inference')
                 return response
             except BaseException as error:
                 self._discard()  # Failed request is never silently retried; next call may restart.

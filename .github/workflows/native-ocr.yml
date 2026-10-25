@@ -345,7 +345,7 @@ jobs:
           tests/test_runtime_dependencies.py tests/test_prune_inference_runtime.py
           tests/test_portable_environment.py tests/test_portable_python.py
           tests/test_windows_runtime_isolation.py tests/test_check_runtime.py
-          tests/test_windows_app_local_runtime.py tests/test_windows_os_evidence.py
+          tests/test_windows_app_local_runtime.py tests/test_windows_os_evidence.py tests/test_windows_native_worker_evidence.py
           tests/test_standalone_runtime_probe.py tests/test_windows_verification.py
           tests/test_windows_system_theme_smoke.py -vv --junitxml=test-results/native-profile.xml
       - name: Windows native-backend GUI, light, dark and system-theme flows
