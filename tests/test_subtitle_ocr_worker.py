@@ -1,6 +1,7 @@
 import queue
 from threading import Thread
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -54,6 +55,19 @@ def test_invalid_video_is_a_worker_error_not_success(tmp_path):
     with pytest.raises(RuntimeError, match='Cannot open video'):
         subtitle_ocr.subtitle_extract_handler(queue.Queue(), queue.Queue(), str(tmp_path/'missing.mp4'),
                                              str(tmp_path/'raw.txt'), None, options())
+
+
+def test_missing_video_does_not_probe_capture_backend(monkeypatch, tmp_path):
+    capture = Mock()
+    monkeypatch.setattr(subtitle_ocr.cv2, 'VideoCapture', capture)
+    missing_video = str(tmp_path / 'missing.mp4')
+
+    with pytest.raises(RuntimeError) as error:
+        subtitle_ocr.ocr_task_producer(queue.Queue(), queue.Queue(), queue.Queue(),
+                                     missing_video, str(tmp_path / 'raw.txt'))
+
+    assert str(error.value) == f'Cannot open video for OCR: {missing_video}'
+    capture.assert_not_called()
 
 
 @pytest.mark.parametrize('selection,blank,kept', [

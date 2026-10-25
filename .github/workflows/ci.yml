@@ -45,10 +45,14 @@ jobs:
       - name: Install Linux Qt libraries
         if: runner.os == 'Linux'
         run: >-
-          sudo apt-get update && sudo apt-get install -y
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
           libgl1 libegl1 libglib2.0-0 libdbus-1-3 libxkbcommon0
-          xvfb libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-image0
-          libxcb-render-util0 libxcb-xkb1 libxkbcommon-x11-0
+          libfontconfig1 libfreetype6 libx11-6 libx11-xcb1 libxext6 libxrender1
+          libxi6 libxfixes3 libsm6 libice6
+          libxcb1 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-image0
+          libxcb-util1 libxcb-randr0 libxcb-render0 libxcb-render-util0
+          libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-xkb1
+          libxcb-glx0 libxkbcommon-x11-0 xvfb xauth
       - name: Install CPU runtime and test dependencies
         run: python -m pip install -r requirements.txt pytest==8.3.5
       - name: Check dependency consistency
@@ -60,16 +64,27 @@ jobs:
       - name: Download and verify small and medium PP-OCRv6 models
         run: python -m backend.tools.model_download --tiers small medium --output backend/models/V6
       - name: Unit, GUI, model and real CPU OCR tests
-        run: python -m pytest tests -q --junitxml=test-results/native.xml
+        timeout-minutes: 12
+        run: python -m pytest tests -vv --capture=tee-sys -o faulthandler_timeout=120 --durations=20 --junitxml=test-results/native.xml
       - name: Launch actual GUI offscreen
         env:
           VSE_SMOKE_SCREENSHOT_DIR: test-results/gui
         run: python gui.py --smoke-test
+      - name: Diagnose Linux Qt platform dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p test-results
+          python scripts/diagnose_qt_linux.py 2>&1 | tee test-results/qt-linux-dependencies.log
       - name: Linux X11 GUI backend smoke
         if: runner.os == 'Linux'
+        shell: bash
         env:
           VSE_SMOKE_SCREENSHOT_DIR: test-results/gui-native
-        run: xvfb-run -a env QT_QPA_PLATFORM=xcb python gui.py --smoke-test
+          QT_DEBUG_PLUGINS: '1'
+        run: |
+          xvfb-run -a -s "-screen 0 1280x1024x24" -e test-results/xvfb.log \
+            env QT_QPA_PLATFORM=xcb python gui.py --smoke-test 2>&1 | tee test-results/gui-native.log
       - name: Windows or macOS native GUI backend smoke
         if: runner.os != 'Linux'
         env:

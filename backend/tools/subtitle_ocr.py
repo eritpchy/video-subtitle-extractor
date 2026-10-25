@@ -180,6 +180,8 @@ def ocr_task_consumer(ocr_queue, raw_subtitle_path, sub_area, video_path, option
 def ocr_task_producer(ocr_queue, task_queue, progress_queue, video_path, raw_subtitle_path, stop_event=None):
     """Decode requested frames, cancelling bounded queue waits after failures."""
     stop_event = stop_event or Event()
+    if not os.path.isfile(video_path):
+        raise RuntimeError(f'Cannot open video for OCR: {video_path}')
     cap = cv2.VideoCapture(video_path)
     tbar = None
     frame_count = 0

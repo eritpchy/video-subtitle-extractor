@@ -13,6 +13,11 @@ CI runs on pushes and pull requests with read-only repository permissions. Test 
 
 ## Safe preview
 
+For the first manual run, GitHub requires this workflow file to exist on the
+repository's default branch. Integrate the reviewed workflow there before
+dispatching the exact tested release branch; do not add automatic publication
+triggers as a workaround.
+
 1. Commit the intended changes and push the review branch. Wait for **Cross-platform CI** to pass for that commit.
 2. Open **CPU release preview and publish**, choose that branch, leave `publication=artifacts`, and run it.
 3. Review all CI jobs and three `cpu-bundle-*` artifacts. Artifact-only preview creates no tag and no GitHub release.
@@ -32,10 +37,15 @@ Linux runtime libraries (Ubuntu/Debian):
 
 ```sh
 sudo apt-get update
-sudo apt-get install libgl1 libegl1 libglib2.0-0 libdbus-1-3 libxkbcommon0
+sudo apt-get install libgl1 libegl1 libglib2.0-0 libdbus-1-3 libxkbcommon0 \
+  libfontconfig1 libfreetype6 libx11-6 libx11-xcb1 libxext6 libxrender1 \
+  libxi6 libxfixes3 libsm6 libice6 libxcb1 libxcb-cursor0 libxcb-icccm4 \
+  libxcb-keysyms1 libxcb-image0 libxcb-util1 libxcb-randr0 libxcb-render0 \
+  libxcb-render-util0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 \
+  libxcb-xkb1 libxcb-glx0 libxkbcommon-x11-0
 ```
 
-A real X11 desktop may also need its normal Qt xcb runtime libraries. Offscreen CI uses `QT_QPA_PLATFORM=offscreen`; do not force that variable for a visible desktop app.
+These runtime packages cover the [Qt X11/xcb requirements](https://doc.qt.io/qt-6/linux-requirements.html), including the Xlib/XCB bridge and font libraries. CI additionally installs Xvfb and xauth, records `ldd` output and Qt plugin paths, and runs its X11 smoke with `QT_DEBUG_PLUGINS=1`. A loader diagnostic passing without a display is not proof that X11 rendering passed. Offscreen CI uses `QT_QPA_PLATFORM=offscreen`; do not force that variable for a visible desktop app.
 
 ## Publication and immutable tags
 
