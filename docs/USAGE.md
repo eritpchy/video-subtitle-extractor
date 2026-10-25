@@ -2,7 +2,7 @@
 
 This fork integrates upstream `YaoFANGUK/video-subtitle-extractor` through
 `85746f7`, genuine PP-OCRv6 small/medium inference models, and the pinned
-`eritpchy/videosubfinder-cli` v6.10 release. A version string in source is not
+`eritpchy/videosubfinder-cli` v6.10.5 release. A version string in source is not
 evidence that a GitHub release or all platform checks have completed.
 
 ## Run a one-click package
@@ -45,7 +45,8 @@ python gui.py
 
 Model archives and every inference file are checked against the committed
 SHA-256 manifest. The VideoSubFinder installer checks the matching official
-release's SHA256SUMS, preserves the native package's libraries, and migrates old
+release's SHA256SUMS against the committed release lock, checks the archive,
+preserves the native package's libraries, and migrates old
 VSE settings. See [VideoSubFinder integration](VIDEO_SUBFINDER.md).
 
 The default requirements install the CPU Paddle runtime. GPU/DirectML builds

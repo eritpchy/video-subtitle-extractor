@@ -1,0 +1,2 @@
+# Release checksum fixtures are verified byte-for-byte on every platform.
+tests/fixtures/videosubfinder/*.SHA256SUMS -text

@@ -1,6 +1,6 @@
 # Headless CPU Docker
 
-The Dockerfile targets **Linux amd64 / CPU**. It packages Python 3.12, pinned project dependencies, a checksum-verified VideoSubFinder 6.10 CLI, and genuine PP-OCRv6 small and medium models. The default entrypoint is the noninteractive subtitle CLI, not the desktop GUI. No image registry is modified by CI.
+The Dockerfile targets **Linux amd64 / CPU**. It packages Python 3.12, pinned project dependencies, a checksum-verified VideoSubFinder 6.10.5 CLI, and genuine PP-OCRv6 small and medium models. The default entrypoint is the noninteractive subtitle CLI, not the desktop GUI. No image registry is modified by CI.
 
 ## Build and inspect
 

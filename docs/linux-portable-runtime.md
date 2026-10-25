@@ -122,7 +122,7 @@ Retain the entire output directory on CI success **or failure**. A local unit-te
 pass only proves command construction/log validation, not this container gate.
 
 The clean container deliberately retains `PATH=/usr/bin:/bin` **after** its
-no-Python/no-Qt baseline assertion. The verified VSF 6.10 shell wrapper requires
+no-Python/no-Qt baseline assertion. The verified VSF 6.10.5 shell wrapper requires
 the base OS `dirname` utility; shell/coreutils are OS facilities, not inference
 dependencies. The bundled interpreter is always invoked by its explicit absolute
 path, and external Python/Qt/non-base libraries remain prohibited. Do not patch

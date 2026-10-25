@@ -134,7 +134,7 @@ jobs:
         run: >-
           python -c "import pathlib,subprocess,sys; subprocess.run([sys.executable,'-m','pip','install','--no-index','--no-deps','--no-compile',*map(str,sorted(pathlib.Path('build/wheelhouse').glob('*.whl')))],check=True)"
       - name: Install and verify fixed VideoSubFinder release
-        run: python scripts/install_videosubfinder.py --version 6.10
+        run: python scripts/install_videosubfinder.py --version 6.10.5
       - name: Native adapter and packaging regression tests
         env:
           VSE_RUN_NATIVE_INTEGRATION: '1'

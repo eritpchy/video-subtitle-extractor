@@ -4,7 +4,7 @@
 
 - Python 3.12, CPU: Linux x64 (`ubuntu-24.04`), Windows x64 (`windows-2022`), macOS Apple Silicon (`macos-15`).
 - Docker: headless Linux amd64 CPU image. It is built and exercised in CI, not automatically pushed to a registry.
-- Native jobs install dependencies, run `pip check`, verify VideoSubFinder 6.10, download checksum-pinned PP-OCRv6 small/medium models, run unit/real OCR/real VSF tests, launch the actual GUI in light/dark modes using Cocoa on macOS and offscreen on Linux/Windows, then exercise each native Qt platform backend (Linux X11 via Xvfb, Windows, Cocoa), and run video-to-SRT extraction.
+- Native jobs install dependencies, run `pip check`, verify VideoSubFinder 6.10.5, download checksum-pinned PP-OCRv6 small/medium models, run unit/real OCR/real VSF tests, launch the actual GUI in light/dark modes using Cocoa on macOS and offscreen on Linux/Windows, then exercise each native Qt platform backend (Linux X11 via Xvfb, Windows, Cocoa), and run video-to-SRT extraction.
 - Package jobs include both verified PP-OCRv6 small and medium tiers, the native VSF binary and its libraries, the application source, a checksum-pinned portable Python interpreter and the preinstalled inference runtime. Each archive is extracted, checksum-checked and tested using its own interpreter with host Python removed from PATH. No client installation occurs.
 
 **A workflow definition is not a test result.** Read the completed run for the exact commit before claiming a platform passed. Offscreen rendering and hosted-runner native GUI checks do not prove display-driver/window-manager behavior on every desktop. CUDA, DirectML, Intel macOS, Windows ARM, Linux ARM and GPU Docker are not certified by this CPU release. The old QPT/CUDA/DirectML workflows were removed: they ran on obsolete Windows runners and could publish or mutate the same prerelease on every branch push.
@@ -65,7 +65,7 @@ The final creation uses a non-force tag push and `gh release create --verify-tag
 ```sh
 python -m pip install -r requirements.txt pytest==8.3.5
 python -m pip check
-python scripts/install_videosubfinder.py --version 6.10
+python scripts/install_videosubfinder.py --version 6.10.5
 python -m backend.tools.model_download --tiers small medium
 QT_QPA_PLATFORM=offscreen VSE_RUN_OCR_INTEGRATION=1 VSE_RUN_VSF_INTEGRATION=1 python -m pytest tests -q
 QT_QPA_PLATFORM=offscreen python gui.py --smoke-test

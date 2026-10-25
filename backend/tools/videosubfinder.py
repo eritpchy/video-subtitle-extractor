@@ -14,7 +14,7 @@ import re
 import subprocess
 from typing import Callable, Optional
 
-VSF_VERSION = "6.10"
+VSF_VERSION = "6.10.5"
 VSF_RELEASE_BASE = "https://github.com/eritpchy/videosubfinder-cli/releases/download"
 _FRAME_RE = re.compile(r"^Frame:\s+(\d+)_(\d+)_(\d+)_(\d+)__")
 _PROGRESS_RE = re.compile(r"^Progress:\s*(\d+(?:\.\d+)?)%")
@@ -90,7 +90,7 @@ def resolve_binary(backend_dir, environ=None, system=None, arch=None):
         if binary:
             return binary.resolve()
     raise VideoSubFinderError(
-        f"VideoSubFinderCli {VSF_VERSION}+ is not installed for {target_system}/{target_arch}. "
+        f"VideoSubFinderCli is not installed for {target_system}/{target_arch}. "
         "Run: python scripts/install_videosubfinder.py (or set VSE_VSF_BINARY).")
 
 
@@ -107,7 +107,7 @@ def verify_binary(binary, expected_version=None):
     if result.returncode or not match or tuple(map(int, match.groups(default="0"))) < (6, 10, 0):
         raise VideoSubFinderError(
             f"Incompatible VideoSubFinderCli at {binary} (exit {result.returncode}): "
-            f"{result.stdout.strip()[:1000]}. Install {VSF_VERSION}+ with "
+            f"{result.stdout.strip()[:1000]}. Install pinned CLI {VSF_VERSION} with "
             "python scripts/install_videosubfinder.py")
     version = ".".join(part for part in match.groups() if part is not None)
     if expected_version and version != expected_version.lstrip("v"):

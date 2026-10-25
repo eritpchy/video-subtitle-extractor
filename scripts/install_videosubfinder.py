@@ -23,6 +23,8 @@ sys.path.insert(0, str(ROOT))
 from backend.tools.videosubfinder import (VSF_RELEASE_BASE, VSF_VERSION, VideoSubFinderError,
     default_install_dir, find_binary, platform_target, release_asset, verify_binary, run_command)
 
+RELEASE_LOCK_PATH = ROOT / "backend" / "tools" / "videosubfinder_release.json"
+
 
 def checksum_for(manifest, filename):
     matches = []
@@ -43,6 +45,29 @@ def file_sha256(path):
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def verify_release_manifest(manifest, version):
+    """Fail closed if the pinned release's official checksum manifest changes.
+
+    Explicit other versions still use their own official SHA256SUMS and exact
+    native --version checks, but are not certified by this committed lock.
+    """
+    if version != VSF_VERSION:
+        return
+    lock = json.loads(RELEASE_LOCK_PATH.read_text(encoding="utf-8"))
+    if not isinstance(lock, dict):
+        raise ValueError("Invalid committed VideoSubFinder release lock")
+    expected = lock.get("sha256sums_sha256", "")
+    if (lock.get("schema_version") != 1 or lock.get("version") != version
+            or lock.get("manifest_url") != f"{VSF_RELEASE_BASE}/v{version}/SHA256SUMS"
+            or not isinstance(expected, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", expected)):
+        raise ValueError("Invalid committed VideoSubFinder release lock")
+    actual = file_sha256(manifest)
+    if actual != expected:
+        raise ValueError(f"Pinned SHA256SUMS mismatch for VideoSubFinder {version}: "
+                         f"expected {expected}, got {actual}")
 
 
 def safe_member(root, name):
@@ -114,7 +139,7 @@ def install(*, version=VSF_VERSION, system=None, arch=None, destination=None,
             cuda=False, archive=None, checksums=None, verify_only=False):
     version = version.lstrip("v")
     if not re.fullmatch(r"\d+\.\d+(?:\.\d+)?", version):
-        raise ValueError("Version must be a release number, for example 6.10")
+        raise ValueError("Version must be a release number, for example 6.10.5")
     system, arch = platform_target(system, arch)
     destination = Path(destination or default_install_dir(ROOT / "backend", system, arch)).resolve()
     host_system, host_arch = platform_target()
@@ -144,8 +169,10 @@ def install(*, version=VSF_VERSION, system=None, arch=None, destination=None,
             base = f"{VSF_RELEASE_BASE}/v{version}"
             print(f"Downloading {base}/{asset}", flush=True)
             download(f"{base}/SHA256SUMS", manifest)
-            download(f"{base}/{asset}", package)
+        verify_release_manifest(manifest, version)
         expected = checksum_for(manifest.read_text(encoding="utf-8"), asset)
+        if not archive:
+            download(f"{base}/{asset}", package)
         actual = file_sha256(package)
         if actual != expected:
             raise ValueError(f"SHA-256 mismatch for {asset}: expected {expected}, got {actual}")
@@ -173,6 +200,7 @@ def install(*, version=VSF_VERSION, system=None, arch=None, destination=None,
             "version": version, "platform": system, "arch": arch, "cuda": cuda,
             "asset": asset, "sha256": actual,
             "source": f"{VSF_RELEASE_BASE}/v{version}/{asset}",
+            "sha256sums_sha256": file_sha256(manifest), "release_locked": version == VSF_VERSION,
         }, indent=2) + "\n", encoding="utf-8")
         # Keep the old installation intact until checksum, extraction and native
         # launch checks pass; roll back if the final directory replacement fails.

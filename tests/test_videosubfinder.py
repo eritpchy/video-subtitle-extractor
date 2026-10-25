@@ -1,16 +1,27 @@
 import hashlib
 import io
+import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tarfile
+import urllib.error
 import zipfile
 
 import pytest
 
 from backend.tools import videosubfinder as vsf
 from scripts import install_videosubfinder as installer
+
+
+def pin_fixture_manifest(tmp_path, monkeypatch, manifest):
+    """Give synthetic archive tests their own explicit lock, never bypass it."""
+    lock = json.loads(installer.RELEASE_LOCK_PATH.read_text(encoding="utf-8"))
+    lock["sha256sums_sha256"] = installer.file_sha256(manifest)
+    path = tmp_path / "fixture-release-lock.json"
+    path.write_text(json.dumps(lock), encoding="utf-8")
+    monkeypatch.setattr(installer, "RELEASE_LOCK_PATH", path)
 
 
 @pytest.mark.parametrize("system,machine,expected", [
@@ -145,6 +156,110 @@ def test_verify_version_legacy_crash_and_mismatch(monkeypatch):
         vsf.verify_binary("fake")
 
 
+@pytest.mark.parametrize("reported", ["6.10", "6.10.4", "6.10.5", "6.10.6"])
+def test_patch_release_version_must_match_exactly(monkeypatch, reported):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw:
+                        subprocess.CompletedProcess(a, 0, f"VideoSubFinderCli {reported}\n"))
+    if reported == "6.10.5":
+        assert vsf.verify_binary("fake", "v6.10.5") == reported
+    else:
+        with pytest.raises(vsf.VideoSubFinderError, match="Expected CLI 6.10.5"):
+            vsf.verify_binary("fake", "6.10.5")
+
+
+def test_default_release_pin_is_consistent_across_builds():
+    root = Path(__file__).resolve().parents[1]
+    lock = json.loads(installer.RELEASE_LOCK_PATH.read_text(encoding="utf-8"))
+    assert lock["version"] == vsf.VSF_VERSION
+    assert lock["tag"] == f"v{vsf.VSF_VERSION}"
+    assert lock["manifest_url"] == f"{vsf.VSF_RELEASE_BASE}/v{vsf.VSF_VERSION}/SHA256SUMS"
+    assert f"ARG VSF_VERSION={vsf.VSF_VERSION}\n" in (root / "Dockerfile").read_text()
+    for name in ("ci.yml", "release.yml", "native-ocr.yml"):
+        workflow = (root / ".github/workflows" / name).read_text()
+        assert f"python scripts/install_videosubfinder.py --version {vsf.VSF_VERSION}\n" in workflow
+
+
+def test_committed_release_manifest_matches_lock_and_supported_assets():
+    manifest = Path(__file__).parent / "fixtures/videosubfinder" / f"v{vsf.VSF_VERSION}.SHA256SUMS"
+    installer.verify_release_manifest(manifest, vsf.VSF_VERSION)
+    content = manifest.read_text(encoding="utf-8")
+    for system, arch in (("linux", "x64"), ("linux", "arm64"),
+                         ("windows", "x64"), ("windows", "arm64"),
+                         ("macos", "x64"), ("macos", "arm64"), ("macos", "universal")):
+        assert len(installer.checksum_for(content, vsf.release_asset(system, arch))) == 64
+    assert len(installer.checksum_for(content, vsf.release_asset("linux", "x64", cuda=True))) == 64
+
+
+@pytest.mark.parametrize("field,value", [("version", "6.10"), ("schema_version", 2),
+                                        ("sha256sums_sha256", "invalid"), ("sha256sums_sha256", None),
+                                        ("manifest_url", "https://example.invalid")])
+def test_invalid_committed_release_lock_fails_closed(tmp_path, monkeypatch, field, value):
+    lock = json.loads(installer.RELEASE_LOCK_PATH.read_text(encoding="utf-8"))
+    lock[field] = value
+    path = tmp_path / "invalid-lock.json"
+    path.write_text(json.dumps(lock), encoding="utf-8")
+    monkeypatch.setattr(installer, "RELEASE_LOCK_PATH", path)
+    with pytest.raises(ValueError, match="Invalid committed"):
+        installer.verify_release_manifest(tmp_path / "unused-manifest", vsf.VSF_VERSION)
+
+
+def test_missing_pinned_release_never_falls_back(tmp_path, monkeypatch):
+    destination = tmp_path / "installed"
+    destination.mkdir()
+    (destination / "keep").write_text("previous")
+    requests = []
+
+    def missing(url, target):
+        requests.append(url)
+        raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(installer, "download", missing)
+    with pytest.raises(urllib.error.HTTPError, match="404"):
+        installer.install(system="windows", arch="x64", destination=destination)
+    assert requests == [f"{vsf.VSF_RELEASE_BASE}/v{vsf.VSF_VERSION}/SHA256SUMS"]
+    assert (destination / "keep").read_text() == "previous"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["installed"]
+
+
+def test_changed_release_manifest_fails_before_archive_download(tmp_path, monkeypatch):
+    destination = tmp_path / "installed"
+    destination.mkdir()
+    (destination / "keep").write_text("previous")
+    requests = []
+
+    def changed(url, target):
+        requests.append(url)
+        Path(target).write_text("0" * 64 + "  videosubfinder-cli-windows-x64.zip\n")
+
+    monkeypatch.setattr(installer, "download", changed)
+    with pytest.raises(ValueError, match="Pinned SHA256SUMS mismatch"):
+        installer.install(system="windows", arch="x64", destination=destination)
+    assert requests == [f"{vsf.VSF_RELEASE_BASE}/v{vsf.VSF_VERSION}/SHA256SUMS"]
+    assert (destination / "keep").read_text() == "previous"
+
+
+def test_default_offline_manifest_is_locked(tmp_path):
+    archive, manifest = tmp_path / "package.zip", tmp_path / "SHA256SUMS"
+    archive.write_bytes(b"synthetic-archive")
+    manifest.write_text(installer.file_sha256(archive) + "  videosubfinder-cli-windows-x64.zip\n")
+    with pytest.raises(ValueError, match="Pinned SHA256SUMS mismatch"):
+        installer.install(system="windows", arch="x64", destination=tmp_path / "installed",
+                          archive=archive, checksums=manifest)
+    assert not (tmp_path / "installed").exists()
+
+
+def test_explicit_other_release_keeps_official_checksum_verification(tmp_path):
+    manifest = tmp_path / "SHA256SUMS"
+    manifest.write_text("0" * 64 + "  videosubfinder-cli-windows-x64.zip\n")
+    installer.verify_release_manifest(manifest, "6.10")
+    archive = tmp_path / "package.zip"
+    archive.write_bytes(b"bad-checksum")
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        installer.install(version="6.10", system="windows", arch="x64",
+                          destination=tmp_path / "installed", archive=archive, checksums=manifest)
+    assert not (tmp_path / "installed").exists()
+
+
 def test_checksums_require_exact_unique_asset():
     digest = hashlib.sha256(b"content").hexdigest()
     assert installer.checksum_for(f"{digest}  x.tar.gz\n", "x.tar.gz") == digest
@@ -181,13 +296,14 @@ def test_settings_preserve_and_migrate(tmp_path):
     assert "use_cuda_gpu = 0" in text
 
 
-def test_checksum_failure_leaves_installation_untouched(tmp_path):
+def test_checksum_failure_leaves_installation_untouched(tmp_path, monkeypatch):
     destination = tmp_path / "installed"
     destination.mkdir()
     (destination / "keep").write_text("previous")
     archive, manifest = tmp_path / "package.zip", tmp_path / "SHA256SUMS"
     archive.write_bytes(b"broken")
     manifest.write_text("0" * 64 + "  videosubfinder-cli-windows-x64.zip\n")
+    pin_fixture_manifest(tmp_path, monkeypatch, manifest)
     with pytest.raises(ValueError, match="SHA-256 mismatch"):
         installer.install(system="windows", arch="x64", destination=destination, archive=archive, checksums=manifest)
     assert (destination / "keep").read_text() == "previous"
@@ -199,7 +315,7 @@ def test_real_extraction_with_installed_cli(tmp_path):
     cv2 = pytest.importorskip("cv2")
     np = pytest.importorskip("numpy")
     binary = vsf.resolve_binary(Path(__file__).parents[1] / "backend")
-    assert vsf.verify_binary(binary) == "6.10"
+    assert vsf.verify_binary(binary, vsf.VSF_VERSION) == vsf.VSF_VERSION
     video = tmp_path / "input video 字幕.mp4"
     writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"mp4v"), 25, (640, 360))
     assert writer.isOpened()
@@ -233,11 +349,12 @@ def test_verified_offline_install_preserves_settings(tmp_path, monkeypatch):
         package.writestr("settings/general.cfg", "text_alignment = 0\nnew_option = 1\n")
     digest = installer.file_sha256(archive)
     manifest.write_text(digest + "  videosubfinder-cli-windows-x64.zip\n")
+    pin_fixture_manifest(tmp_path, monkeypatch, manifest)
     destination = tmp_path / "installed"
     (destination / "settings").mkdir(parents=True)
     (destination / "settings/general.cfg").write_text("text_alignment = Right\nmoderate_threshold = 0.4\n")
     (destination / "old-binary").write_text("stale")
-    monkeypatch.setattr(installer, "verify_binary", lambda *a: "6.10")
+    monkeypatch.setattr(installer, "verify_binary", lambda *a: vsf.VSF_VERSION)
     monkeypatch.setattr(installer, "run_command", lambda *a: None)
     binary = installer.install(system="windows", arch="x64", destination=destination, archive=archive, checksums=manifest)
     assert binary == destination / "VideoSubFinderCli.exe"
@@ -246,16 +363,41 @@ def test_verified_offline_install_preserves_settings(tmp_path, monkeypatch):
     settings = (destination / "settings/general.cfg").read_text()
     assert "text_alignment = 2" in settings and "moderate_threshold = 0.4" in settings
     assert "new_option = 1" in settings
-    import json
     metadata = json.loads((destination / "install.json").read_text())
-    assert metadata["version"] == "6.10" and metadata["sha256"] == digest
+    assert metadata["version"] == vsf.VSF_VERSION and metadata["sha256"] == digest
+    assert metadata["sha256sums_sha256"] == installer.file_sha256(manifest)
+    assert metadata["release_locked"] is True
 
 
-def test_invalid_archive_does_not_replace_previous_installation(tmp_path):
+def test_native_version_failure_leaves_installation_untouched(tmp_path, monkeypatch):
+    archive, manifest = tmp_path / "package.zip", tmp_path / "SHA256SUMS"
+    with zipfile.ZipFile(archive, "w") as package:
+        package.writestr("VideoSubFinderCli.exe", b"wrong-version-binary")
+        package.writestr("settings/general.cfg", "text_alignment = 0\n")
+    manifest.write_text(installer.file_sha256(archive) + "  videosubfinder-cli-windows-x64.zip\n")
+    pin_fixture_manifest(tmp_path, monkeypatch, manifest)
+    destination = tmp_path / "installed"
+    destination.mkdir()
+    (destination / "keep").write_text("previous")
+    monkeypatch.setattr(installer, "platform_target", lambda *args: ("windows", "x64"))
+
+    def wrong_version(binary, expected_version):
+        assert expected_version == vsf.VSF_VERSION
+        raise vsf.VideoSubFinderError("Expected CLI release, received wrong version")
+
+    monkeypatch.setattr(installer, "verify_binary", wrong_version)
+    with pytest.raises(vsf.VideoSubFinderError, match="Expected CLI"):
+        installer.install(destination=destination, archive=archive, checksums=manifest)
+    assert list(destination.iterdir()) == [destination / "keep"]
+    assert (destination / "keep").read_text() == "previous"
+
+
+def test_invalid_archive_does_not_replace_previous_installation(tmp_path, monkeypatch):
     archive, manifest = tmp_path / "package.zip", tmp_path / "SHA256SUMS"
     with zipfile.ZipFile(archive, "w") as package:
         package.writestr("../escaped.exe", b"bad")
     manifest.write_text(installer.file_sha256(archive) + "  videosubfinder-cli-windows-x64.zip\n")
+    pin_fixture_manifest(tmp_path, monkeypatch, manifest)
     destination = tmp_path / "installed"
     destination.mkdir()
     (destination / "keep").write_text("previous")

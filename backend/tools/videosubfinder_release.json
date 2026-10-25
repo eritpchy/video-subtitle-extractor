@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "version": "6.10.5",
+  "tag": "v6.10.5",
+  "tag_commit": "c34c24c074310661c8174b176cd194a64defce4b",
+  "release_url": "https://github.com/eritpchy/videosubfinder-cli/releases/tag/v6.10.5",
+  "published_at": "2026-10-25T07:47:32Z",
+  "manifest_url": "https://github.com/eritpchy/videosubfinder-cli/releases/download/v6.10.5/SHA256SUMS",
+  "sha256sums_sha256": "c0bc83ff920e594a15fb1f1eee5a4c7085a9a1908faed394727fcfb03edfc140"
+}
