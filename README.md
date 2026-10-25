@@ -59,32 +59,18 @@ Video-subtitle-extractor (VSE) 是一款将视频中的硬字幕提取为外挂�
 
 > 这样就可以把文本中出现的所有“威筋”替换为“威胁”，所有的“性感荷官在线发牌”文本删除
 
-- 视频以及程序路径请**不要带中文和空格**，否则可能出现未知错误！！！
+- 新的无 shell CLI 支持视频路径中的空格与中文，相关行为已有回归测试。
+- 当前 CPU 软件包包含源码、已校验的模型与 VSF 运行时、离线 Python 依赖，需要原生 Python 3.12，并非独立 EXE/app 安装程序。详见[发布说明](docs/release-and-ci.md)。
 
- > 如：以下存放视频和代码的路径都不行
- >
- > D:\下载\vse\运行程序.exe（路径含中文）
- >
- > E:\study\kaoyan\sanshang youya.mp4 （路径含空格） 
+**下载地址**：[本分支 Releases](https://github.com/eritpchy/video-subtitle-extractor/releases)。历史附件不代表已包含新的 PP-OCRv6 改动，请核对发布提交与对应 CI 结果。
 
-- 直接下载压缩包解压运行，如果不能运行再按照下面的教程，尝试源码安装conda环境运行
+**识别模式**：
+- 快速：支持语言使用 PP-OCRv6 small，VideoSubFinder 提取关键帧。
+- 自动：CPU 使用 small，可用 Paddle CUDA 设备使用 medium。
+- 精准：使用 medium 模型；CPU 保持 VideoSubFinder 检测，兼容的 GPU 配置可使用逐帧检测。
+- v6 未覆盖的语言明确回退到 v5/v3 专用识别模型，详见[模型覆盖说明](docs/PP-OCRv6.md)。
 
-**下载地址**：<a href="https://github.com/YaoFANGUK/video-subtitle-extractor/releases"> Release </a>
-
-> **有任何改进意见请在ISSUES和DISCUSSION中提出**
-
-> NVIDIA官方提供了各GPU型号的计算能力列表，您可以参考链接: [CUDA GPUs](https://developer.nvidia.com/cuda-gpus) 查看你的GPU适合哪个CUDA版本
-
-> NVIDIA 50系显卡需要使用cuda12.8.0及以上版本, 但Paddle3.3.1目前仍未支持，所以建议使用Directml通用版本
-
-**识别模式选择说明**：
-|    模式名称    | GPU | OCR模型尺寸 | 字幕检测引擎 | 备注 |
-|---------------|-----|---------|------|------|
-|    快速        | 有/无 | 迷你  | VideoSubFinder | |
-|    自动  | 有| 大  | VideoSubFinder |  推荐   |
-|    自动  | 无| 迷你  | VideoSubFinder |  推荐   |
-|    精准        | 有/无| 大  | VSE | 非常慢 |
-> Windows/Linux/MacOS环境下字幕检测引擎都是VideoSubFinder
+当前发布验证范围为 CPU，旧的 DirectML/ONNX/GPU 安装和下载建议不适用于本版本。
 
 ## 演示
 

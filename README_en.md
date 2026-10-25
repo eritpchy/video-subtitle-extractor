@@ -60,34 +60,18 @@ Key features:
 
 > This will replace all occurrences of "威筋" with "威胁" and delete all "性感荷官在线发牌" text
 
-- Please **do not use Chinese characters or spaces** in video and program paths, otherwise unexpected errors may occur!!!
+- Spaces and Unicode in video paths are supported by the shell-free CLI and covered by regression tests.
+- Current CPU packages contain source, verified models/runtime and an offline wheelhouse. They require native Python 3.12; they are not standalone EXE/app installers. See [release instructions](docs/release-and-ci.md).
 
-  > For example, the following paths are NOT acceptable:
-  >
-  > D:\下载\vse\运行程序.exe (path contains Chinese characters)
-  >
-  > E:\study\kaoyan\sanshang youya.mp4 (path contains spaces)
+**Downloads**: [this fork's releases](https://github.com/eritpchy/video-subtitle-extractor/releases). Historical assets do not certify the new PP-OCRv6 changes; check the exact release commit and completed CI.
 
-- Download the compressed package, extract it, and run directly. If it doesn't work, try the source code installation with conda environment as described below.
+**Recognition modes**:
+- Fast: PP-OCRv6 small for supported languages, VideoSubFinder frame detection.
+- Auto: small on CPU, medium on an available Paddle CUDA device.
+- Accurate: medium models; CPU retains VideoSubFinder detection, compatible GPU configurations can use frame-by-frame detection.
+- Unsupported v6 languages retain explicit v5/v3 language recognizers. See [model coverage](docs/PP-OCRv6.md).
 
-**Download**: <a href="https://github.com/YaoFANGUK/video-subtitle-extractor/releases"> Release </a>
-
-> **Please submit any improvement suggestions in ISSUES and DISCUSSIONS**
-
-> NVIDIA provides a list of compute capabilities for each GPU model. You can refer to [CUDA GPUs](https://developer.nvidia.com/cuda-gpus) to check which CUDA version is suitable for your GPU.
-
-> NVIDIA 50-series GPUs require CUDA 12.8.0 or above, but Paddle 3.3.1 does not yet support it, so the DirectML universal version is recommended.
-
-**Recognition Mode Selection**:
-
-| Mode | GPU | OCR Model Size | Subtitle Detection Engine | Notes |
-|------|-----|----------------|---------------------------|-------|
-| Fast | Yes/No | Mini | VideoSubFinder | |
-| Auto | Yes | Large | VideoSubFinder | Recommended |
-| Auto | No | Mini | VideoSubFinder | Recommended |
-| Precise | Yes/No | Large | VSE | Very slow |
-
-> VideoSubFinder is the subtitle detection engine on Windows/Linux/macOS.
+The supported release path is CPU. Old DirectML/ONNX/GPU download recommendations do not apply to this version.
 
 ## Demo
 
