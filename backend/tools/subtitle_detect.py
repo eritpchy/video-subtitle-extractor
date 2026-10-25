@@ -8,9 +8,13 @@ from backend.tools.hardware_accelerator import HardwareAccelerator
 
 class SubtitleDetect:
     def __init__(self, language=None, mode=None, hardware_accelerator=None):
-        from paddleocr import TextDetection
+        from backend.tools.native_ocr import NativeOcr, selected_backend
         self.hardware_accelerator = hardware_accelerator or HardwareAccelerator.instance()
         model_config = PaddleModelConfig(self.hardware_accelerator, language, mode)
+        if selected_backend() == 'native':
+            self.text_detector = NativeOcr(model_config, detection_only=True)
+            return
+        from paddleocr import TextDetection
         model_config.ensure_models(detection_only=True)
         kwargs = model_config.detection_kwargs()
         kwargs.update(self.hardware_accelerator.inference_kwargs())
@@ -25,3 +29,7 @@ class SubtitleDetect:
         if not polygons.size:
             polygons = np.empty((0, 4, 2), dtype=np.float32)
         return polygons, perf_counter() - started
+
+    def close(self):
+        if hasattr(self.text_detector, 'close'):
+            self.text_detector.close()

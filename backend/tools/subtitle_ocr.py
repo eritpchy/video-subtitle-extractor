@@ -151,31 +151,37 @@ def ocr_task_consumer(ocr_queue, raw_subtitle_path, sub_area, video_path, option
         rec_batch_number=options.REC_BATCH_NUMBER,
         hardware_accelerator=options.HARDWARD_ACCELERATOR,
     )
-    ocr_loss_debug_path = os.path.join(os.path.abspath(os.path.splitext(video_path)[0]), 'loss')
-    if os.path.exists(ocr_loss_debug_path):
-        shutil.rmtree(ocr_loss_debug_path, True)
-    raw_subtitles = []
-    processed_count = 0
-    while not stop_event.is_set():
-        item = _queue_get(ocr_queue, stop_event)
-        if item is None:
-            return
-        frame_no, frame, dt_box, rec_res = item
-        if frame_no == -1:
-            temporary_path = raw_subtitle_path + '.partial'
-            try:
-                with open(temporary_path, 'w', encoding='utf-8') as output:
-                    output.writelines(raw_subtitles)
-                os.replace(temporary_path, raw_subtitle_path)
-            finally:
-                if os.path.exists(temporary_path):
-                    os.remove(temporary_path)
-            progress_queue.put((-1, frame if frame is not None else processed_count))
-            return
-        extract_subtitles({'i': frame_no}, text_recogniser, frame, raw_subtitles,
-                          sub_area, options, dt_box, rec_res, ocr_loss_debug_path)
-        processed_count += 1
-        progress_queue.put((frame_no, processed_count))
+    if hasattr(text_recogniser, 'stop_event'):
+        text_recogniser.stop_event = stop_event
+    try:
+        ocr_loss_debug_path = os.path.join(os.path.abspath(os.path.splitext(video_path)[0]), 'loss')
+        if os.path.exists(ocr_loss_debug_path):
+            shutil.rmtree(ocr_loss_debug_path, True)
+        raw_subtitles = []
+        processed_count = 0
+        while not stop_event.is_set():
+            item = _queue_get(ocr_queue, stop_event)
+            if item is None:
+                return
+            frame_no, frame, dt_box, rec_res = item
+            if frame_no == -1:
+                temporary_path = raw_subtitle_path + '.partial'
+                try:
+                    with open(temporary_path, 'w', encoding='utf-8') as output:
+                        output.writelines(raw_subtitles)
+                    os.replace(temporary_path, raw_subtitle_path)
+                finally:
+                    if os.path.exists(temporary_path):
+                        os.remove(temporary_path)
+                progress_queue.put((-1, frame if frame is not None else processed_count))
+                return
+            extract_subtitles({'i': frame_no}, text_recogniser, frame, raw_subtitles,
+                              sub_area, options, dt_box, rec_res, ocr_loss_debug_path)
+            processed_count += 1
+            progress_queue.put((frame_no, processed_count))
+    finally:
+        if hasattr(text_recogniser, 'close'):
+            text_recogniser.close()
 
 
 def ocr_task_producer(ocr_queue, task_queue, progress_queue, video_path, raw_subtitle_path, stop_event=None):

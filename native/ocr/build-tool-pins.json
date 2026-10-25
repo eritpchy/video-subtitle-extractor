@@ -1,0 +1,230 @@
+{
+  "cmake": {
+    "version": "4.1.2",
+    "metadata_url": "https://pypi.org/pypi/cmake/4.1.2/json",
+    "wheels": [
+      {
+        "filename": "cmake-4.1.2-py3-none-macosx_10_10_universal2.whl",
+        "url": "https://files.pythonhosted.org/packages/ca/f7/f28a1df8d35cb6e37ff087e9f995cc0253ab1ffc55b12cf276436db4d392/cmake-4.1.2-py3-none-macosx_10_10_universal2.whl",
+        "sha256": "415396a7320856c64bd27ca00950b2bbb161604bff60ae5ebf256e2ca08b81ab",
+        "bytes": 49242707
+      },
+      {
+        "filename": "cmake-4.1.2-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+        "url": "https://files.pythonhosted.org/packages/84/b3/020fd0905286448154d75d4cd9ff1573af6a38d20f9e3279420af7444302/cmake-4.1.2-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+        "sha256": "b608042882f79ad2b92ce44bc1f1266882b7784f8feab313ae0b6c735379bd4c",
+        "bytes": 30379090
+      },
+      {
+        "filename": "cmake-4.1.2-py3-none-manylinux2014_i686.manylinux_2_17_i686.whl",
+        "url": "https://files.pythonhosted.org/packages/78/7b/64977cf05e0a0880c693cb10c06ca4ff9e6fcd6f791c38ebc9604a8aba9e/cmake-4.1.2-py3-none-manylinux2014_i686.manylinux_2_17_i686.whl",
+        "sha256": "96f5b0b2685137a3fd37f73cce04dcfc1cc05208be5890460fcd9f2033364df8",
+        "bytes": 30778335
+      },
+      {
+        "filename": "cmake-4.1.2-py3-none-manylinux2014_ppc64le.manylinux_2_17_ppc64le.whl",
+        "url": "https://files.pythonhosted.org/packages/57/d7/c218bba6ea3e7c4a35e0d4669e64dac63d7b581dba12cbb4984535ddd373/cmake-4.1.2-py3-none-manylinux2014_ppc64le.manylinux_2_17_ppc64le.whl",
+        "sha256": "4bdf265e908ae18a318e5e1b7f796ba4b80ec0e5d53b3bf82f503786cab3a8ce",
+        "bytes": 32611311
+      },
+      {
+        "filename": "cmake-4.1.2-py3-none-manylinux2014_s390x.manylinux_2_17_s390x.whl",
+        "url": "https://files.pythonhosted.org/packages/92/7d/26cd09d5332face45b51bed70f4e84eb3fae45f07a57e115d3eb38b260ee/cmake-4.1.2-py3-none-manylinux2014_s390x.manylinux_2_17_s390x.whl",
+        "sha256": "3e9dcc042d4b41bab6a5b5d3c3144a73009cffd6f390b4ea7b3971967caa2f7d",
+        "bytes": 28574063
+      },
+      {
+        "filename": "cmake-4.1.2-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "url": "https://files.pythonhosted.org/packages/f3/56/0fc4d83f212cef10b7bbf6c5043e4582af80ad2aef6905e0dc33fbf68b11/cmake-4.1.2-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "sha256": "7587a2b2ce48df1fd68a68657b6c5a711b467c346812e46dfb9cd996cd6e2352",
+        "bytes": 29689505
+      },
+      {
+        "filename": "cmake-4.1.2-py3-none-manylinux_2_31_armv7l.whl",
+        "url": "https://files.pythonhosted.org/packages/e5/94/36aeff32c154aff0efad4afd709a5ceea8f129c0ce077332bba825629e66/cmake-4.1.2-py3-none-manylinux_2_31_armv7l.whl",
+        "sha256": "fe6a4f95d90deeb4c63818d6a3a601d038b06d535ebd13515f41814ae9c7a9ae",
+        "bytes": 26520292
+      },
+      {
+        "filename": "cmake-4.1.2-py3-none-manylinux_2_35_riscv64.whl",
+        "url": "https://files.pythonhosted.org/packages/ed/3c/9aab5d28b7a77407d2f0d262c1a421f5fc3c9e965331bf5eed41f840c430/cmake-4.1.2-py3-none-manylinux_2_35_riscv64.whl",
+        "sha256": "6d5e09cf9b5aded14c1e271b09b0d0749b4db38002d5715ab626695b1baaf0cb",
+        "bytes": 28864737
+      },
+      {
+        "filename": "cmake-4.1.2-py3-none-musllinux_1_2_aarch64.whl",
+        "url": "https://files.pythonhosted.org/packages/15/ff/20fe2c175d118af784c895cd35070932f3081e264d997425afc14d14f3d5/cmake-4.1.2-py3-none-musllinux_1_2_aarch64.whl",
+        "sha256": "ec978480e11a2c2591d54ed4e92a911913a85d805bd3d6311eb51dbcd22b8697",
+        "bytes": 41750603
+      },
+      {
+        "filename": "cmake-4.1.2-py3-none-musllinux_1_2_armv7l.whl",
+        "url": "https://files.pythonhosted.org/packages/18/3a/54cbd634316796bdf71c757075bccf040e8ba9b5b848054e78ccb29d8c30/cmake-4.1.2-py3-none-musllinux_1_2_armv7l.whl",
+        "sha256": "1034d0670581149981138609fe993dd791b92992e8a57c1b92ab9b3d818b6069",
+        "bytes": 35038480
+      },
+      {
+        "filename": "cmake-4.1.2-py3-none-musllinux_1_2_i686.whl",
+        "url": "https://files.pythonhosted.org/packages/a6/cf/48861dc2258eb493015bf4e5a91631d36c690fd386e456c4b196fbbe9bbf/cmake-4.1.2-py3-none-musllinux_1_2_i686.whl",
+        "sha256": "d24040de733cfd8adc005dfdf5a532b01e991fde94eda6bed289538fd0b31fe1",
+        "bytes": 45807724
+      },
+      {
+        "filename": "cmake-4.1.2-py3-none-musllinux_1_2_ppc64le.whl",
+        "url": "https://files.pythonhosted.org/packages/23/6c/ae53376a018d41adafeb2bb18ad3f8df7afe466066219266a7497335e3ee/cmake-4.1.2-py3-none-musllinux_1_2_ppc64le.whl",
+        "sha256": "c19f2d56a1cf50bfb7d3b736707419cf1fab14b5d22d5452f8cf7b8c1208df01",
+        "bytes": 45857541
+      },
+      {
+        "filename": "cmake-4.1.2-py3-none-musllinux_1_2_riscv64.whl",
+        "url": "https://files.pythonhosted.org/packages/5a/fe/122d0b8b4ee096c1c5f26aed62a3613218c2581102119aa23206eaefc6b4/cmake-4.1.2-py3-none-musllinux_1_2_riscv64.whl",
+        "sha256": "f0676a6357957a1e3391815385d6494438b1ad2df97928727ce9e5080a1d38f1",
+        "bytes": 39944857
+      },
+      {
+        "filename": "cmake-4.1.2-py3-none-musllinux_1_2_s390x.whl",
+        "url": "https://files.pythonhosted.org/packages/f9/36/eb6ffeef092bc94a8eecea3bedd06d624929b2e932d04e07132fbeb4e46b/cmake-4.1.2-py3-none-musllinux_1_2_s390x.whl",
+        "sha256": "56d1afbb5f7d8e588b7f384c323eff93aff7846666d7db18b7851b870ac1f8ea",
+        "bytes": 44015414
+      },
+      {
+        "filename": "cmake-4.1.2-py3-none-musllinux_1_2_x86_64.whl",
+        "url": "https://files.pythonhosted.org/packages/3f/91/6ce95bd9d1919e1f6a1acd8f1a8275b86f5281aa160dcfa4262d10b4cc16/cmake-4.1.2-py3-none-musllinux_1_2_x86_64.whl",
+        "sha256": "679cc0e1cc7227ead59f7126b27a9df44f3273c2952ab720f94e5dc5a3e26bd0",
+        "bytes": 43355825
+      },
+      {
+        "filename": "cmake-4.1.2-py3-none-win32.whl",
+        "url": "https://files.pythonhosted.org/packages/14/d7/1ae5a70ff7557042486ce64f6f5876c6dfd8405b4ea322d0342829ff3696/cmake-4.1.2-py3-none-win32.whl",
+        "sha256": "d7ecea15c2cae907966adf64e16ede1dae3adf67ce176d70279a968b01b6cba4",
+        "bytes": 34263636
+      },
+      {
+        "filename": "cmake-4.1.2-py3-none-win_amd64.whl",
+        "url": "https://files.pythonhosted.org/packages/be/36/77db223c6619aa11817040d9b0a9c232c9e26c86780cd676ff83e110ae73/cmake-4.1.2-py3-none-win_amd64.whl",
+        "sha256": "0a5edb762341220649794580b3b9608ea782b5ba6a3f7fe4e21eb4a4f705ec39",
+        "bytes": 37541253
+      },
+      {
+        "filename": "cmake-4.1.2-py3-none-win_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/70/8b/04c7770f6397397b1635ff238f561a2b72ddc8884ad7d4820f6bb28110b5/cmake-4.1.2-py3-none-win_arm64.whl",
+        "sha256": "a1d4ab14b8274c85ba28de739bbf212efc267286d8908e8224e0dfff667a3a5e",
+        "bytes": 36331299
+      }
+    ]
+  },
+  "ninja": {
+    "version": "1.13.0",
+    "metadata_url": "https://pypi.org/pypi/ninja/1.13.0/json",
+    "wheels": [
+      {
+        "filename": "ninja-1.13.0-py3-none-macosx_10_9_universal2.whl",
+        "url": "https://files.pythonhosted.org/packages/3c/74/d02409ed2aa865e051b7edda22ad416a39d81a84980f544f8de717cab133/ninja-1.13.0-py3-none-macosx_10_9_universal2.whl",
+        "sha256": "fa2a8bfc62e31b08f83127d1613d10821775a0eb334197154c4d6067b7068ff1",
+        "bytes": 310125
+      },
+      {
+        "filename": "ninja-1.13.0-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+        "url": "https://files.pythonhosted.org/packages/8e/de/6e1cd6b84b412ac1ef327b76f0641aeb5dcc01e9d3f9eee0286d0c34fd93/ninja-1.13.0-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+        "sha256": "3d00c692fb717fd511abeb44b8c5d00340c36938c12d6538ba989fe764e79630",
+        "bytes": 177467
+      },
+      {
+        "filename": "ninja-1.13.0-py3-none-manylinux2014_i686.manylinux_2_17_i686.whl",
+        "url": "https://files.pythonhosted.org/packages/c8/83/49320fb6e58ae3c079381e333575fdbcf1cca3506ee160a2dcce775046fa/ninja-1.13.0-py3-none-manylinux2014_i686.manylinux_2_17_i686.whl",
+        "sha256": "be7f478ff9f96a128b599a964fc60a6a87b9fa332ee1bd44fa243ac88d50291c",
+        "bytes": 187834
+      },
+      {
+        "filename": "ninja-1.13.0-py3-none-manylinux2014_ppc64le.manylinux_2_17_ppc64le.whl",
+        "url": "https://files.pythonhosted.org/packages/56/c7/ba22748fb59f7f896b609cd3e568d28a0a367a6d953c24c461fe04fc4433/ninja-1.13.0-py3-none-manylinux2014_ppc64le.manylinux_2_17_ppc64le.whl",
+        "sha256": "60056592cf495e9a6a4bea3cd178903056ecb0943e4de45a2ea825edb6dc8d3e",
+        "bytes": 202736
+      },
+      {
+        "filename": "ninja-1.13.0-py3-none-manylinux2014_s390x.manylinux_2_17_s390x.whl",
+        "url": "https://files.pythonhosted.org/packages/79/22/d1de07632b78ac8e6b785f41fa9aad7a978ec8c0a1bf15772def36d77aac/ninja-1.13.0-py3-none-manylinux2014_s390x.manylinux_2_17_s390x.whl",
+        "sha256": "1c97223cdda0417f414bf864cfb73b72d8777e57ebb279c5f6de368de0062988",
+        "bytes": 179034
+      },
+      {
+        "filename": "ninja-1.13.0-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "url": "https://files.pythonhosted.org/packages/ed/de/0e6edf44d6a04dabd0318a519125ed0415ce437ad5a1ec9b9be03d9048cf/ninja-1.13.0-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "sha256": "fb46acf6b93b8dd0322adc3a4945452a4e774b75b91293bafcc7b7f8e6517dfa",
+        "bytes": 180716
+      },
+      {
+        "filename": "ninja-1.13.0-py3-none-manylinux_2_28_armv7l.manylinux_2_31_armv7l.whl",
+        "url": "https://files.pythonhosted.org/packages/54/28/938b562f9057aaa4d6bfbeaa05e81899a47aebb3ba6751e36c027a7f5ff7/ninja-1.13.0-py3-none-manylinux_2_28_armv7l.manylinux_2_31_armv7l.whl",
+        "sha256": "4be9c1b082d244b1ad7ef41eb8ab088aae8c109a9f3f0b3e56a252d3e00f42c1",
+        "bytes": 146843
+      },
+      {
+        "filename": "ninja-1.13.0-py3-none-manylinux_2_31_riscv64.whl",
+        "url": "https://files.pythonhosted.org/packages/2a/fb/d06a3838de4f8ab866e44ee52a797b5491df823901c54943b2adb0389fbb/ninja-1.13.0-py3-none-manylinux_2_31_riscv64.whl",
+        "sha256": "6739d3352073341ad284246f81339a384eec091d9851a886dfa5b00a6d48b3e2",
+        "bytes": 154402
+      },
+      {
+        "filename": "ninja-1.13.0-py3-none-musllinux_1_2_aarch64.whl",
+        "url": "https://files.pythonhosted.org/packages/31/bf/0d7808af695ceddc763cf251b84a9892cd7f51622dc8b4c89d5012779f06/ninja-1.13.0-py3-none-musllinux_1_2_aarch64.whl",
+        "sha256": "11be2d22027bde06f14c343f01d31446747dbb51e72d00decca2eb99be911e2f",
+        "bytes": 552388
+      },
+      {
+        "filename": "ninja-1.13.0-py3-none-musllinux_1_2_armv7l.whl",
+        "url": "https://files.pythonhosted.org/packages/9d/70/c99d0c2c809f992752453cce312848abb3b1607e56d4cd1b6cded317351a/ninja-1.13.0-py3-none-musllinux_1_2_armv7l.whl",
+        "sha256": "aa45b4037b313c2f698bc13306239b8b93b4680eb47e287773156ac9e9304714",
+        "bytes": 472501
+      },
+      {
+        "filename": "ninja-1.13.0-py3-none-musllinux_1_2_i686.whl",
+        "url": "https://files.pythonhosted.org/packages/9f/43/c217b1153f0e499652f5e0766da8523ce3480f0a951039c7af115e224d55/ninja-1.13.0-py3-none-musllinux_1_2_i686.whl",
+        "sha256": "5f8e1e8a1a30835eeb51db05cf5a67151ad37542f5a4af2a438e9490915e5b72",
+        "bytes": 638280
+      },
+      {
+        "filename": "ninja-1.13.0-py3-none-musllinux_1_2_ppc64le.whl",
+        "url": "https://files.pythonhosted.org/packages/8c/45/9151bba2c8d0ae2b6260f71696330590de5850e5574b7b5694dce6023e20/ninja-1.13.0-py3-none-musllinux_1_2_ppc64le.whl",
+        "sha256": "3d7d7779d12cb20c6d054c61b702139fd23a7a964ec8f2c823f1ab1b084150db",
+        "bytes": 642420
+      },
+      {
+        "filename": "ninja-1.13.0-py3-none-musllinux_1_2_riscv64.whl",
+        "url": "https://files.pythonhosted.org/packages/3c/fb/95752eb635bb8ad27d101d71bef15bc63049de23f299e312878fc21cb2da/ninja-1.13.0-py3-none-musllinux_1_2_riscv64.whl",
+        "sha256": "d741a5e6754e0bda767e3274a0f0deeef4807f1fec6c0d7921a0244018926ae5",
+        "bytes": 585106
+      },
+      {
+        "filename": "ninja-1.13.0-py3-none-musllinux_1_2_s390x.whl",
+        "url": "https://files.pythonhosted.org/packages/c1/31/aa56a1a286703800c0cbe39fb4e82811c277772dc8cd084f442dd8e2938a/ninja-1.13.0-py3-none-musllinux_1_2_s390x.whl",
+        "sha256": "e8bad11f8a00b64137e9b315b137d8bb6cbf3086fbdc43bf1f90fd33324d2e96",
+        "bytes": 707138
+      },
+      {
+        "filename": "ninja-1.13.0-py3-none-musllinux_1_2_x86_64.whl",
+        "url": "https://files.pythonhosted.org/packages/34/6f/5f5a54a1041af945130abdb2b8529cbef0cdcbbf9bcf3f4195378319d29a/ninja-1.13.0-py3-none-musllinux_1_2_x86_64.whl",
+        "sha256": "b4f2a072db3c0f944c32793e91532d8948d20d9ab83da9c0c7c15b5768072200",
+        "bytes": 581758
+      },
+      {
+        "filename": "ninja-1.13.0-py3-none-win32.whl",
+        "url": "https://files.pythonhosted.org/packages/95/97/51359c77527d45943fe7a94d00a3843b81162e6c4244b3579fe8fc54cb9c/ninja-1.13.0-py3-none-win32.whl",
+        "sha256": "8cfbb80b4a53456ae8a39f90ae3d7a2129f45ea164f43fadfa15dc38c4aef1c9",
+        "bytes": 267201
+      },
+      {
+        "filename": "ninja-1.13.0-py3-none-win_amd64.whl",
+        "url": "https://files.pythonhosted.org/packages/29/45/c0adfbfb0b5895aa18cec400c535b4f7ff3e52536e0403602fc1a23f7de9/ninja-1.13.0-py3-none-win_amd64.whl",
+        "sha256": "fb8ee8719f8af47fed145cced4a85f0755dd55d45b2bddaf7431fa89803c5f3e",
+        "bytes": 309975
+      },
+      {
+        "filename": "ninja-1.13.0-py3-none-win_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/df/93/a7b983643d1253bb223234b5b226e69de6cda02b76cdca7770f684b795f5/ninja-1.13.0-py3-none-win_arm64.whl",
+        "sha256": "3c0b40b1f0bba764644385319028650087b4c1b18cdfa6f45cb39a3669b81aa9",
+        "bytes": 290806
+      }
+    ]
+  }
+}

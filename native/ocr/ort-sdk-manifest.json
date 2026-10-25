@@ -1,0 +1,740 @@
+{
+  "version": "1.31.0",
+  "source": "https://github.com/microsoft/onnxruntime/releases/tag/v1.31.0",
+  "targets": {
+    "linux-x64": {
+      "archive": {
+        "filename": "onnxruntime-linux-x64-1.31.0.tgz",
+        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-linux-x64-1.31.0.tgz",
+        "sha256": "cc5c72baf5ae5c8238a6841f0897227be2d02826b9cf98eaf02fdefaeeb03a57",
+        "bytes": 11408003
+      },
+      "archive_root": "onnxruntime-linux-x64-1.31.0",
+      "git_commit": "402979ac1bef89dcd55add41eaa7277c407599eb",
+      "library": "lib/libonnxruntime.so.1.31.0",
+      "link_library": "lib/libonnxruntime.so.1.31.0",
+      "include": "include",
+      "files": [
+        {
+          "path": "lib/libonnxruntime.so.1.31.0",
+          "role": "runtime",
+          "bytes": 29345384,
+          "sha256": "469849977cb60744ea160927e1a3a0643fd4c55c0aff743251c6d293402e334e"
+        },
+        {
+          "path": "lib/libonnxruntime_providers_shared.so",
+          "role": "runtime",
+          "bytes": 14632,
+          "sha256": "086ec1d5388f64153d9c63470d126693db9a182c8ce236d3a1119068471b8a0d"
+        },
+        {
+          "path": "include/onnxruntime_ep_device_ep_metadata_keys.h",
+          "role": "header",
+          "bytes": 3669,
+          "sha256": "99c1624ddb0550cd57a4a2c1b6009329b23dc91b20094466f7886bbe4fe5c971"
+        },
+        {
+          "path": "include/onnxruntime_float16.h",
+          "role": "header",
+          "bytes": 17991,
+          "sha256": "88b242845d25981633a0bbd1c148e273cf8bfb016ea3f57c4af41a06530f72b0"
+        },
+        {
+          "path": "include/onnxruntime_c_api.h",
+          "role": "header",
+          "bytes": 422790,
+          "sha256": "43d584f596ef66820421317df32a79a95fc1d39ee46cb3971a870c08d8ba4baa"
+        },
+        {
+          "path": "include/onnxruntime_run_options_config_keys.h",
+          "role": "header",
+          "bytes": 2952,
+          "sha256": "973037c14b0f1af0854ae25cd676776f79dbcfd2a6791f6ee17a5374c2a62550"
+        },
+        {
+          "path": "include/onnxruntime_error_code.h",
+          "role": "header",
+          "bytes": 2775,
+          "sha256": "5ce3b054e798eced8d14f5b86e98692fd33470463f96194ce0700a2d53dd8721"
+        },
+        {
+          "path": "include/onnxruntime_session_options_config_keys.h",
+          "role": "header",
+          "bytes": 61275,
+          "sha256": "2a04de255d515fd401c0fab9fa7d967e2867575683be909b2f1c633aa85e262d"
+        },
+        {
+          "path": "include/onnxruntime_experimental_cxx_api.h",
+          "role": "header",
+          "bytes": 4730,
+          "sha256": "45188821908102000eff6f640cd02c2e90aa2dfa60cd197b50de0b6db6cdb2a1"
+        },
+        {
+          "path": "include/onnxruntime_type_conversion.h",
+          "role": "header",
+          "bytes": 1441,
+          "sha256": "fdfcd75ed98b55cc423159cf42aef14b587898545be0b10d8617f49f74a62124"
+        },
+        {
+          "path": "include/onnxruntime_env_config_keys.h",
+          "role": "header",
+          "bytes": 1315,
+          "sha256": "2d531fef7dd4ffd22f35d219e1a795dbaa1c94a4a7fd29397c0982232e4ca332"
+        },
+        {
+          "path": "include/onnxruntime_ep_c_api.h",
+          "role": "header",
+          "bytes": 165249,
+          "sha256": "b64036772115dbc6f06a900487ce22d34e862100db03e2ad62210758e27a19b2"
+        },
+        {
+          "path": "include/provider_options.h",
+          "role": "header",
+          "bytes": 480,
+          "sha256": "cb7206ffd06ba31b9f7e5f6089a6206f0c720c10c3adcc61db7f829c86691cfc"
+        },
+        {
+          "path": "include/onnxruntime_lite_custom_op.h",
+          "role": "header",
+          "bytes": 62296,
+          "sha256": "5ac84897a95ee5fa5b5bbbeb84dd51f0768e83b293716b147f114e63b28fdf85"
+        },
+        {
+          "path": "include/onnxruntime_experimental_c_api.h",
+          "role": "header",
+          "bytes": 3009,
+          "sha256": "d9ddf75a8c7ef4b2c68cf7d548baefd35815fe60f45c8edd2b2642629bc642b2"
+        },
+        {
+          "path": "include/cpu_provider_factory.h",
+          "role": "header",
+          "bytes": 397,
+          "sha256": "0de52d129c718c07ee71a16b4953d8d483df019746a11caad77a0650a2f4ed47"
+        },
+        {
+          "path": "include/onnxruntime_cxx_api.h",
+          "role": "header",
+          "bytes": 175424,
+          "sha256": "1e80d494c47091b07d84de60ad570326f82ed841c6de66e5b3eb7dce17bfc467"
+        },
+        {
+          "path": "include/onnxruntime_cxx_inline.h",
+          "role": "header",
+          "bytes": 164869,
+          "sha256": "908a50414c3f67f32fd556cd16f7779fa78380e12e9d08e44f5e6f66b965a7be"
+        },
+        {
+          "path": "include/onnxruntime_experimental_c_api.inc",
+          "role": "header",
+          "bytes": 2157,
+          "sha256": "7c011b6088f1eda2b993c2f52a03d48e9294a60b900bf195650ad5d12d4792d5"
+        },
+        {
+          "path": "include/core/providers/resource.h",
+          "role": "header",
+          "bytes": 365,
+          "sha256": "65480b7886a180f09f40999aaead120e41cb872b2efa187938d610bfe1977473"
+        },
+        {
+          "path": "include/core/providers/custom_op_context.h",
+          "role": "header",
+          "bytes": 296,
+          "sha256": "c1f2a96c0de1978b0f2fbf60bf1b2d50c6412d487c1f5d68ac5ffa8e01b46ee4"
+        },
+        {
+          "path": "LICENSE",
+          "role": "notice",
+          "bytes": 1073,
+          "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+        },
+        {
+          "path": "ThirdPartyNotices.txt",
+          "role": "notice",
+          "bytes": 338088,
+          "sha256": "143764b952fdb1a7c69ce653bfba74a7744d6a8a573bfb73e235fba356c83de3"
+        },
+        {
+          "path": "Privacy.md",
+          "role": "notice",
+          "bytes": 6571,
+          "sha256": "ea592b16d154ff2de759ba5210350c64593c378c1bbd0a2aa4ddef777edbf358"
+        },
+        {
+          "path": "GIT_COMMIT_ID",
+          "role": "notice",
+          "bytes": 41,
+          "sha256": "4819a41f2be9c834041a107a073a8f0be8953e356b75fcc36553ab47c247f367"
+        },
+        {
+          "path": "VERSION_NUMBER",
+          "role": "notice",
+          "bytes": 7,
+          "sha256": "b4808e6e33fef47c318b7a15f93484ea3656ce673ddde651b5cc4375087f3739"
+        }
+      ],
+      "symlinks": {
+        "lib/libonnxruntime.so": "libonnxruntime.so.1",
+        "lib/libonnxruntime.so.1": "libonnxruntime.so.1.31.0"
+      },
+      "platform_dependencies": {
+        "lib/libonnxruntime.so.1.31.0": {
+          "needed": [
+            "libdl.so.2",
+            "librt.so.1",
+            "libpthread.so.0",
+            "libstdc++.so.6",
+            "libm.so.6",
+            "libgcc_s.so.1",
+            "libc.so.6",
+            "ld-linux-x86-64.so.2"
+          ],
+          "symbol_versions": [
+            "CXXABI_1.3",
+            "CXXABI_1.3.11",
+            "CXXABI_1.3.2",
+            "CXXABI_1.3.3",
+            "CXXABI_1.3.5",
+            "CXXABI_1.3.7",
+            "CXXABI_1.3.8",
+            "CXXABI_1.3.9",
+            "GLIBCXX_3.4",
+            "GLIBCXX_3.4.11",
+            "GLIBCXX_3.4.14",
+            "GLIBCXX_3.4.15",
+            "GLIBCXX_3.4.17",
+            "GLIBCXX_3.4.18",
+            "GLIBCXX_3.4.19",
+            "GLIBCXX_3.4.20",
+            "GLIBCXX_3.4.21",
+            "GLIBCXX_3.4.22",
+            "GLIBCXX_3.4.9",
+            "GLIBC_2.14",
+            "GLIBC_2.16",
+            "GLIBC_2.17",
+            "GLIBC_2.2.5",
+            "GLIBC_2.25",
+            "GLIBC_2.26",
+            "GLIBC_2.27",
+            "GLIBC_2.28",
+            "GLIBC_2.3",
+            "GLIBC_2.3.2",
+            "GLIBC_2.3.3",
+            "GLIBC_2.3.4",
+            "GLIBC_2.4",
+            "GLIBC_2.6",
+            "GLIBC_2.7"
+          ]
+        },
+        "lib/libonnxruntime_providers_shared.so": {
+          "needed": [
+            "libstdc++.so.6",
+            "libm.so.6",
+            "libgcc_s.so.1",
+            "libc.so.6"
+          ],
+          "symbol_versions": [
+            "GLIBC_2.2.5"
+          ]
+        }
+      },
+      "runtime_bytes": 29360016,
+      "minimum_glibc": "2.28"
+    },
+    "macos-arm64": {
+      "archive": {
+        "filename": "onnxruntime-osx-arm64-1.31.0.tgz",
+        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-osx-arm64-1.31.0.tgz",
+        "sha256": "1031b36dd3bdaa8d976a6130d9cf2a05e9be320b93ae804f8427b91dc3432afc",
+        "bytes": 36549009
+      },
+      "archive_root": "onnxruntime-osx-arm64-1.31.0",
+      "git_commit": "402979ac1bef89dcd55add41eaa7277c407599eb",
+      "library": "lib/libonnxruntime.1.31.0.dylib",
+      "link_library": "lib/libonnxruntime.1.31.0.dylib",
+      "include": "include",
+      "files": [
+        {
+          "path": "lib/libonnxruntime.1.31.0.dylib",
+          "role": "runtime",
+          "bytes": 44830288,
+          "sha256": "2a50a63e7f41f8d4d551d3ee47248df3864f6540109fce8ad520ca3b51af4b70"
+        },
+        {
+          "path": "include/onnxruntime_ep_device_ep_metadata_keys.h",
+          "role": "header",
+          "bytes": 3669,
+          "sha256": "99c1624ddb0550cd57a4a2c1b6009329b23dc91b20094466f7886bbe4fe5c971"
+        },
+        {
+          "path": "include/onnxruntime_float16.h",
+          "role": "header",
+          "bytes": 17991,
+          "sha256": "88b242845d25981633a0bbd1c148e273cf8bfb016ea3f57c4af41a06530f72b0"
+        },
+        {
+          "path": "include/onnxruntime_c_api.h",
+          "role": "header",
+          "bytes": 422790,
+          "sha256": "43d584f596ef66820421317df32a79a95fc1d39ee46cb3971a870c08d8ba4baa"
+        },
+        {
+          "path": "include/onnxruntime_run_options_config_keys.h",
+          "role": "header",
+          "bytes": 2952,
+          "sha256": "973037c14b0f1af0854ae25cd676776f79dbcfd2a6791f6ee17a5374c2a62550"
+        },
+        {
+          "path": "include/onnxruntime_error_code.h",
+          "role": "header",
+          "bytes": 2775,
+          "sha256": "5ce3b054e798eced8d14f5b86e98692fd33470463f96194ce0700a2d53dd8721"
+        },
+        {
+          "path": "include/onnxruntime_session_options_config_keys.h",
+          "role": "header",
+          "bytes": 61275,
+          "sha256": "2a04de255d515fd401c0fab9fa7d967e2867575683be909b2f1c633aa85e262d"
+        },
+        {
+          "path": "include/onnxruntime_experimental_cxx_api.h",
+          "role": "header",
+          "bytes": 4730,
+          "sha256": "45188821908102000eff6f640cd02c2e90aa2dfa60cd197b50de0b6db6cdb2a1"
+        },
+        {
+          "path": "include/coreml_provider_factory.h",
+          "role": "header",
+          "bytes": 5833,
+          "sha256": "343910ccaf1d31ccf2d771b40d8e14ec8f8a5594d950651a61e28b645b2a15be"
+        },
+        {
+          "path": "include/onnxruntime_type_conversion.h",
+          "role": "header",
+          "bytes": 1441,
+          "sha256": "fdfcd75ed98b55cc423159cf42aef14b587898545be0b10d8617f49f74a62124"
+        },
+        {
+          "path": "include/onnxruntime_env_config_keys.h",
+          "role": "header",
+          "bytes": 1315,
+          "sha256": "2d531fef7dd4ffd22f35d219e1a795dbaa1c94a4a7fd29397c0982232e4ca332"
+        },
+        {
+          "path": "include/webgpu_provider_factory.h",
+          "role": "header",
+          "bytes": 627,
+          "sha256": "0f67cfbac0cdcc3221d6a0ef4c7c1df48bd0cdea6853e046e9389096e7cf0897"
+        },
+        {
+          "path": "include/onnxruntime_ep_c_api.h",
+          "role": "header",
+          "bytes": 165249,
+          "sha256": "b64036772115dbc6f06a900487ce22d34e862100db03e2ad62210758e27a19b2"
+        },
+        {
+          "path": "include/provider_options.h",
+          "role": "header",
+          "bytes": 480,
+          "sha256": "cb7206ffd06ba31b9f7e5f6089a6206f0c720c10c3adcc61db7f829c86691cfc"
+        },
+        {
+          "path": "include/onnxruntime_lite_custom_op.h",
+          "role": "header",
+          "bytes": 62296,
+          "sha256": "5ac84897a95ee5fa5b5bbbeb84dd51f0768e83b293716b147f114e63b28fdf85"
+        },
+        {
+          "path": "include/onnxruntime_experimental_c_api.h",
+          "role": "header",
+          "bytes": 3009,
+          "sha256": "d9ddf75a8c7ef4b2c68cf7d548baefd35815fe60f45c8edd2b2642629bc642b2"
+        },
+        {
+          "path": "include/cpu_provider_factory.h",
+          "role": "header",
+          "bytes": 397,
+          "sha256": "0de52d129c718c07ee71a16b4953d8d483df019746a11caad77a0650a2f4ed47"
+        },
+        {
+          "path": "include/onnxruntime_cxx_api.h",
+          "role": "header",
+          "bytes": 175424,
+          "sha256": "1e80d494c47091b07d84de60ad570326f82ed841c6de66e5b3eb7dce17bfc467"
+        },
+        {
+          "path": "include/onnxruntime_cxx_inline.h",
+          "role": "header",
+          "bytes": 164869,
+          "sha256": "908a50414c3f67f32fd556cd16f7779fa78380e12e9d08e44f5e6f66b965a7be"
+        },
+        {
+          "path": "include/onnxruntime_experimental_c_api.inc",
+          "role": "header",
+          "bytes": 2157,
+          "sha256": "7c011b6088f1eda2b993c2f52a03d48e9294a60b900bf195650ad5d12d4792d5"
+        },
+        {
+          "path": "include/core/providers/resource.h",
+          "role": "header",
+          "bytes": 365,
+          "sha256": "65480b7886a180f09f40999aaead120e41cb872b2efa187938d610bfe1977473"
+        },
+        {
+          "path": "include/core/providers/custom_op_context.h",
+          "role": "header",
+          "bytes": 296,
+          "sha256": "c1f2a96c0de1978b0f2fbf60bf1b2d50c6412d487c1f5d68ac5ffa8e01b46ee4"
+        },
+        {
+          "path": "LICENSE",
+          "role": "notice",
+          "bytes": 1073,
+          "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+        },
+        {
+          "path": "ThirdPartyNotices.txt",
+          "role": "notice",
+          "bytes": 338088,
+          "sha256": "143764b952fdb1a7c69ce653bfba74a7744d6a8a573bfb73e235fba356c83de3"
+        },
+        {
+          "path": "Privacy.md",
+          "role": "notice",
+          "bytes": 6571,
+          "sha256": "ea592b16d154ff2de759ba5210350c64593c378c1bbd0a2aa4ddef777edbf358"
+        },
+        {
+          "path": "GIT_COMMIT_ID",
+          "role": "notice",
+          "bytes": 41,
+          "sha256": "4819a41f2be9c834041a107a073a8f0be8953e356b75fcc36553ab47c247f367"
+        },
+        {
+          "path": "VERSION_NUMBER",
+          "role": "notice",
+          "bytes": 7,
+          "sha256": "b4808e6e33fef47c318b7a15f93484ea3656ce673ddde651b5cc4375087f3739"
+        }
+      ],
+      "symlinks": {
+        "lib/libonnxruntime.dylib": "libonnxruntime.1.dylib",
+        "lib/libonnxruntime.1.dylib": "libonnxruntime.1.31.0.dylib"
+      },
+      "platform_dependencies": {
+        "lib/libonnxruntime.1.31.0.dylib": {
+          "load_commands": [
+            {
+              "command": "0xd",
+              "name": "@rpath/libonnxruntime.1.dylib"
+            },
+            {
+              "command": "LC_BUILD_VERSION",
+              "platform": 1,
+              "minos": "14.0.0",
+              "sdk": "26.2.0"
+            },
+            {
+              "command": "0xc",
+              "name": "/System/Library/Frameworks/CoreML.framework/Versions/A/CoreML"
+            },
+            {
+              "command": "0xc",
+              "name": "/System/Library/Frameworks/Cocoa.framework/Versions/A/Cocoa"
+            },
+            {
+              "command": "0xc",
+              "name": "/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit"
+            },
+            {
+              "command": "0xc",
+              "name": "/System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore"
+            },
+            {
+              "command": "0xc",
+              "name": "/System/Library/Frameworks/Metal.framework/Versions/A/Metal"
+            },
+            {
+              "command": "0xc",
+              "name": "/System/Library/Frameworks/IOSurface.framework/Versions/A/IOSurface"
+            },
+            {
+              "command": "0xc",
+              "name": "/usr/lib/libsqlite3.dylib"
+            },
+            {
+              "command": "0xc",
+              "name": "/usr/lib/libz.1.dylib"
+            },
+            {
+              "command": "0xc",
+              "name": "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation"
+            },
+            {
+              "command": "0xc",
+              "name": "/System/Library/Frameworks/CFNetwork.framework/Versions/A/CFNetwork"
+            },
+            {
+              "command": "0xc",
+              "name": "/System/Library/Frameworks/Network.framework/Versions/A/Network"
+            },
+            {
+              "command": "0xc",
+              "name": "/System/Library/Frameworks/SystemConfiguration.framework/Versions/A/SystemConfiguration"
+            },
+            {
+              "command": "0xc",
+              "name": "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation"
+            },
+            {
+              "command": "0xc",
+              "name": "/usr/lib/libiconv.2.dylib"
+            },
+            {
+              "command": "0xc",
+              "name": "/usr/lib/libc++.1.dylib"
+            },
+            {
+              "command": "0xc",
+              "name": "/usr/lib/libSystem.B.dylib"
+            },
+            {
+              "command": "0xc",
+              "name": "/usr/lib/libobjc.A.dylib"
+            }
+          ]
+        }
+      },
+      "runtime_bytes": 44830288,
+      "minimum_macos": "14.0"
+    },
+    "windows-x64": {
+      "archive": {
+        "filename": "onnxruntime-win-x64-1.31.0.zip",
+        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-win-x64-1.31.0.zip",
+        "sha256": "3958d8a44984160692c1b4ffd0de3cb48f8c39f9d34bb31e433db06e30b82195",
+        "bytes": 82887349
+      },
+      "archive_root": "onnxruntime-win-x64-1.31.0",
+      "git_commit": "402979ac1bef89dcd55add41eaa7277c407599eb",
+      "library": "lib/onnxruntime.dll",
+      "link_library": "lib/onnxruntime.lib",
+      "include": "include",
+      "files": [
+        {
+          "path": "lib/onnxruntime.dll",
+          "role": "runtime",
+          "bytes": 17253176,
+          "sha256": "0c42dc4e278f0968fdf9ebf1b1e54a74c657a9942e70803e453c91993451cf4c"
+        },
+        {
+          "path": "lib/onnxruntime_providers_shared.dll",
+          "role": "runtime",
+          "bytes": 21816,
+          "sha256": "e45d471ea2a842b268c51291b96d53568b0dae10807f43d1fb7dc0eb84e83723"
+        },
+        {
+          "path": "lib/onnxruntime.lib",
+          "role": "link",
+          "bytes": 2124,
+          "sha256": "8022d994b1abb84d4b8b25e37937dfa921ef1e2a2ebba66f5a9af1f8433fa05c"
+        },
+        {
+          "path": "lib/onnxruntime_providers_shared.lib",
+          "role": "link",
+          "bytes": 2314,
+          "sha256": "04e1ee653cbefa7ed5dd342747484d20422463710577bdc597d2b323d332bcee"
+        },
+        {
+          "path": "include/onnxruntime_ep_device_ep_metadata_keys.h",
+          "role": "header",
+          "bytes": 3728,
+          "sha256": "b98460653e7da2818190f642cd927fb876969ddbbe31e98679315c0031ccc61b"
+        },
+        {
+          "path": "include/onnxruntime_float16.h",
+          "role": "header",
+          "bytes": 18528,
+          "sha256": "9b45e1bc0fe19d9d53f272b168f5cab616e26eb00136c3a1b78f394c9b1b6757"
+        },
+        {
+          "path": "include/onnxruntime_c_api.h",
+          "role": "header",
+          "bytes": 432017,
+          "sha256": "c20cbce153df2f6db2cb3ec693c51526886aa41291c641183c9cf2bd5a16316c"
+        },
+        {
+          "path": "include/onnxruntime_training_cxx_api.h",
+          "role": "header",
+          "bytes": 19993,
+          "sha256": "c4e31c020e3a087c751b31358bb97891ff1c11c5c6c47565e2fc2c1200ecf844"
+        },
+        {
+          "path": "include/onnxruntime_run_options_config_keys.h",
+          "role": "header",
+          "bytes": 3006,
+          "sha256": "38cfec5817e67990f242bbf7177db730a4d60f5ed256b4832f02ac38c3fd6d06"
+        },
+        {
+          "path": "include/onnxruntime_error_code.h",
+          "role": "header",
+          "bytes": 2873,
+          "sha256": "6690bf0df3f7a7a9c4f38597dc3232042e432b48ea166cb5672f72a49d32b742"
+        },
+        {
+          "path": "include/onnxruntime_session_options_config_keys.h",
+          "role": "header",
+          "bytes": 62204,
+          "sha256": "4a1fab6b75f0f5ccf5c597187a51185c7296e11856ae3e50e6bedd2eb8f79bb1"
+        },
+        {
+          "path": "include/onnxruntime_experimental_cxx_api.h",
+          "role": "header",
+          "bytes": 4836,
+          "sha256": "6d8ac0f3e5384e78284f36e14d891b4d17f1a9cd01b1281d7fbf00ba1d3598f1"
+        },
+        {
+          "path": "include/onnxruntime_type_conversion.h",
+          "role": "header",
+          "bytes": 1484,
+          "sha256": "d2df85a5eb207719f93dade58003c1ccb44b207a652cccebb4e288e38950f0d0"
+        },
+        {
+          "path": "include/onnxruntime_training_cxx_inline.h",
+          "role": "header",
+          "bytes": 13166,
+          "sha256": "0a1b67caad64a7fc5a7aa489c8e4dc57ba11ba2d3c18b398a81ee3d864a50383"
+        },
+        {
+          "path": "include/onnxruntime_env_config_keys.h",
+          "role": "header",
+          "bytes": 1339,
+          "sha256": "e56d37fd1e6497e9c8e8e5bd81732cd5414b4dc0867f3e8badb60101502d0435"
+        },
+        {
+          "path": "include/onnxruntime_ep_c_api.h",
+          "role": "header",
+          "bytes": 168564,
+          "sha256": "203cb2b6dc4a9a12697ff73059bd3e4347a807a553860c61ba91bc58c365dd7c"
+        },
+        {
+          "path": "include/provider_options.h",
+          "role": "header",
+          "bytes": 498,
+          "sha256": "74f8accd5b30fbfe8abb24ca279e634657b446bf5b9be520badaaebcea63cade"
+        },
+        {
+          "path": "include/onnxruntime_lite_custom_op.h",
+          "role": "header",
+          "bytes": 63413,
+          "sha256": "d65413bf8ca63fb71efcb0f9e14f996736367cf72ea3421d18b3370def1e483b"
+        },
+        {
+          "path": "include/onnxruntime_experimental_c_api.h",
+          "role": "header",
+          "bytes": 3077,
+          "sha256": "ad8b3eeda1f9a6a6b9035ca76023799a791959b6e9b62afa9e701113578af9e0"
+        },
+        {
+          "path": "include/cpu_provider_factory.h",
+          "role": "header",
+          "bytes": 416,
+          "sha256": "e2f658eeace78d79a8df82f233dcdeea135db498a77766156054bfc0d1d06c21"
+        },
+        {
+          "path": "include/onnxruntime_cxx_api.h",
+          "role": "header",
+          "bytes": 179349,
+          "sha256": "10209403d0b87f22dafdd3e6076b6f7eafc5fff751988b0299f093834f84dc25"
+        },
+        {
+          "path": "include/onnxruntime_cxx_inline.h",
+          "role": "header",
+          "bytes": 169298,
+          "sha256": "0a800f3ab2363c479b02a1542e18516379534933891664f540a9fe7597c8dd11"
+        },
+        {
+          "path": "include/onnxruntime_training_c_api.h",
+          "role": "header",
+          "bytes": 36508,
+          "sha256": "f920338841fce3ba9976882a8ec20155462298c12486a4e0bb6af29306d26330"
+        },
+        {
+          "path": "include/onnxruntime_experimental_c_api.inc",
+          "role": "header",
+          "bytes": 2194,
+          "sha256": "bcdab85017144e45dcb803ade5c93b43446e47a84ac252b0aa0c801f8df7b522"
+        },
+        {
+          "path": "LICENSE",
+          "role": "notice",
+          "bytes": 1094,
+          "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674"
+        },
+        {
+          "path": "ThirdPartyNotices.txt",
+          "role": "notice",
+          "bytes": 344457,
+          "sha256": "c53a76501ef60db6f865f20599f220761201ac4057683acefdab37d861b86622"
+        },
+        {
+          "path": "Privacy.md",
+          "role": "notice",
+          "bytes": 6635,
+          "sha256": "8c26e1fc8581d9553e475250fe014e3d1e5ea4ae9f1cb084a068ff8601703dc9"
+        },
+        {
+          "path": "GIT_COMMIT_ID",
+          "role": "notice",
+          "bytes": 43,
+          "sha256": "0aaa9ae38e21d9891e35754c16a133a2a82bdb9ea9e3a93f32e6aa5613f7fe2a"
+        },
+        {
+          "path": "VERSION_NUMBER",
+          "role": "notice",
+          "bytes": 8,
+          "sha256": "a49b2ad650135a6292e2d1e73d9d98105c90313d6310ac645e9f0a4fc749ecde"
+        }
+      ],
+      "symlinks": {},
+      "platform_dependencies": {
+        "lib/onnxruntime.dll": {
+          "imports": [
+            "KERNEL32.dll",
+            "ADVAPI32.dll",
+            "MSVCP140.dll",
+            "MSVCP140_1.dll",
+            "api-ms-win-core-path-l1-1-0.dll",
+            "dbghelp.dll",
+            "SETUPAPI.dll",
+            "dxgi.dll",
+            "VCRUNTIME140_1.dll",
+            "VCRUNTIME140.dll",
+            "api-ms-win-crt-heap-l1-1-0.dll",
+            "api-ms-win-crt-runtime-l1-1-0.dll",
+            "api-ms-win-crt-math-l1-1-0.dll",
+            "api-ms-win-crt-stdio-l1-1-0.dll",
+            "api-ms-win-crt-convert-l1-1-0.dll",
+            "api-ms-win-crt-string-l1-1-0.dll",
+            "api-ms-win-crt-locale-l1-1-0.dll",
+            "api-ms-win-crt-time-l1-1-0.dll",
+            "api-ms-win-crt-filesystem-l1-1-0.dll"
+          ]
+        },
+        "lib/onnxruntime_providers_shared.dll": {
+          "imports": [
+            "VCRUNTIME140.dll",
+            "api-ms-win-crt-runtime-l1-1-0.dll",
+            "KERNEL32.dll"
+          ]
+        }
+      },
+      "runtime_bytes": 17274992,
+      "required_vc_runtime_dlls": [
+        "MSVCP140.dll",
+        "MSVCP140_1.dll",
+        "VCRUNTIME140.dll",
+        "VCRUNTIME140_1.dll"
+      ]
+    }
+  }
+}

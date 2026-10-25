@@ -1,0 +1,40 @@
+[
+  {
+    "source": "PaddleX-3.7.2/inference/models/text_detection/processors.py",
+    "sha256": "b23f2349e9e3439d748548730443459d7ed43a4f5e5beb04903f3e5ad58be7c1",
+    "output": "detection.py",
+    "names": [
+      "DetResizeForTest",
+      "NormalizeImage",
+      "DBPostProcess"
+    ]
+  },
+  {
+    "source": "PaddleX-3.7.2/inference/models/text_recognition/processors.py",
+    "sha256": "772f501de953ecc2f4d6ea7ff3b12500a7766c90dccac740b36de2b6f7cb577e",
+    "output": "recognition.py",
+    "names": [
+      "validate_text_rec_image_array",
+      "OCRReisizeNormImg",
+      "BaseRecLabelDecode",
+      "CTCLabelDecode",
+      "ToBatch"
+    ]
+  },
+  {
+    "source": "PaddleX-3.7.2/inference/pipelines/components/common/sort_boxes.py",
+    "sha256": "a2a4d94f7bc253ef4a8db0bd4dd69343d661a1973fd4808653c8453409976094",
+    "output": "sort_boxes.py",
+    "names": [
+      "SortQuadBoxes"
+    ]
+  },
+  {
+    "source": "PaddleX-3.7.2/inference/pipelines/components/common/crop_image_regions.py",
+    "sha256": "46610b50f06b2d5e0969a9c0f3f71bbbddcc53e4e43eaa1d49811ef94cf0d0a5",
+    "output": "crop.py",
+    "names": [
+      "CropByPolys"
+    ]
+  }
+]

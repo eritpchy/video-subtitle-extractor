@@ -1,0 +1,242 @@
+[
+  {
+    "name": "ta_PP-OCRv5_mobile_rec",
+    "language": "Tamil",
+    "path": "/workspace/shared/vse-compact-prototype/missing_fallbacks/ta_PP-OCRv5_mobile_rec_infer",
+    "present": true,
+    "preexisting_offline": false,
+    "languages": [
+      "ta"
+    ],
+    "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/ta_PP-OCRv5_mobile_rec_infer.tar",
+    "archive_sha256": "1bde8932e894a4668abee94592c44ea89a2a71720d93d79225f1af6f8dacb890",
+    "archive_bytes": 8038400,
+    "character_count": 513,
+    "script_characters": 72,
+    "georgian_characters": [],
+    "sources": {
+      "inference.pdiparams": {
+        "bytes": 7809583,
+        "sha256": "7e7bb6c9cbcc401aeaceb0cdace485dbfcc15a410f299294e7c3123bbcbc68f0"
+      },
+      "inference.yml": {
+        "bytes": 4579,
+        "sha256": "88a28f5a1bb30cabe38a0985cb5e6619fa4f0c7c78e57a08274674228c5219a6"
+      },
+      "inference.json": {
+        "bytes": 217712,
+        "sha256": "9f845b15eef3272a47201fa0e411f8e466392b7dcfd705ade2890bf434b70370"
+      }
+    },
+    "returncode": 0,
+    "command": [
+      "/workspace/shared/vse-venv/bin/python",
+      "/workspace/shared/vse-compact-prototype/tools/bin/paddle2onnx",
+      "--model_dir",
+      "/workspace/shared/vse-compact-prototype/missing_fallbacks/ta_PP-OCRv5_mobile_rec_infer",
+      "--model_filename",
+      "inference.json",
+      "--params_filename",
+      "inference.pdiparams",
+      "--save_file",
+      "/workspace/shared/vse-compact-prototype/missing_fallbacks/ta_PP-OCRv5_mobile_rec.onnx",
+      "--opset_version",
+      "17",
+      "--enable_onnx_checker",
+      "True",
+      "--optimize_tool",
+      "None"
+    ],
+    "optimizer": "None",
+    "polygraphy_autoinstall_deps": "0",
+    "pip_no_index": "1",
+    "onnx_bytes": 7880779,
+    "onnx_sha256": "0ee6292265d4891155789c6c5fedffeff64ea54983944bc7fc8c2ae19736b62a",
+    "operators": [
+      "Add",
+      "AveragePool",
+      "BatchNormalization",
+      "Concat",
+      "Constant",
+      "Conv",
+      "GlobalAveragePool",
+      "HardSigmoid",
+      "HardSwish",
+      "Identity",
+      "LayerNormalization",
+      "MatMul",
+      "Mul",
+      "Relu",
+      "Reshape",
+      "Shape",
+      "Sigmoid",
+      "Slice",
+      "Softmax",
+      "Squeeze",
+      "Transpose",
+      "Unsqueeze"
+    ]
+  },
+  {
+    "name": "te_PP-OCRv5_mobile_rec",
+    "language": "Telugu",
+    "path": "/workspace/shared/vse-compact-prototype/missing_fallbacks/te_PP-OCRv5_mobile_rec_infer",
+    "present": true,
+    "preexisting_offline": false,
+    "languages": [
+      "te"
+    ],
+    "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/te_PP-OCRv5_mobile_rec_infer.tar",
+    "archive_sha256": "f3a02ebbe698456f798e2a2fb573b24ade8e679032969cdfa49fbfcb84eacae0",
+    "archive_bytes": 8058880,
+    "character_count": 540,
+    "script_characters": 100,
+    "georgian_characters": [],
+    "sources": {
+      "inference.pdiparams": {
+        "bytes": 7822651,
+        "sha256": "45967d00d6b4af590221733bf0d93791babc1feb17b98da401dba53d3cf110c9"
+      },
+      "inference.yml": {
+        "bytes": 4795,
+        "sha256": "acebbe53f1831bf28ddfed75aedf58225d7aa5d09100c1d5a9140a2a53b137ce"
+      },
+      "inference.json": {
+        "bytes": 217712,
+        "sha256": "ad866e22872fbc0ee498b2c47d9537bd8f49f125353e43d82a4d173b595e6bfb"
+      }
+    },
+    "returncode": 0,
+    "command": [
+      "/workspace/shared/vse-venv/bin/python",
+      "/workspace/shared/vse-compact-prototype/tools/bin/paddle2onnx",
+      "--model_dir",
+      "/workspace/shared/vse-compact-prototype/missing_fallbacks/te_PP-OCRv5_mobile_rec_infer",
+      "--model_filename",
+      "inference.json",
+      "--params_filename",
+      "inference.pdiparams",
+      "--save_file",
+      "/workspace/shared/vse-compact-prototype/missing_fallbacks/te_PP-OCRv5_mobile_rec.onnx",
+      "--opset_version",
+      "17",
+      "--enable_onnx_checker",
+      "True",
+      "--optimize_tool",
+      "None"
+    ],
+    "optimizer": "None",
+    "polygraphy_autoinstall_deps": "0",
+    "pip_no_index": "1",
+    "onnx_bytes": 7893847,
+    "onnx_sha256": "636f40684474dc5a9d5aa321018d9a591deff5f9d7eec6230b1576482637a48b",
+    "operators": [
+      "Add",
+      "AveragePool",
+      "BatchNormalization",
+      "Concat",
+      "Constant",
+      "Conv",
+      "GlobalAveragePool",
+      "HardSigmoid",
+      "HardSwish",
+      "Identity",
+      "LayerNormalization",
+      "MatMul",
+      "Mul",
+      "Relu",
+      "Reshape",
+      "Shape",
+      "Sigmoid",
+      "Slice",
+      "Softmax",
+      "Squeeze",
+      "Transpose",
+      "Unsqueeze"
+    ]
+  },
+  {
+    "name": "ka_PP-OCRv3_mobile_rec",
+    "language": "Kannada",
+    "path": "/workspace/shared/vse-compact-prototype/missing_fallbacks/ka_PP-OCRv3_mobile_rec_infer",
+    "present": true,
+    "preexisting_offline": false,
+    "languages": [
+      "kn",
+      "ka"
+    ],
+    "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/ka_PP-OCRv3_mobile_rec_infer.tar",
+    "archive_sha256": "45679e20a5a899710075bf4b70459750e4e91381a0d80d9de3ef99608c53187b",
+    "archive_bytes": 18227200,
+    "character_count": 153,
+    "script_characters": 72,
+    "georgian_characters": [],
+    "sources": {
+      "inference.pdiparams": {
+        "bytes": 8931898,
+        "sha256": "5abb4f1c00e5fab314b06d55f69b137ee79bef3f59b547166a48e93bd530ff12"
+      },
+      "inference.yml": {
+        "bytes": 1819,
+        "sha256": "948eb2cdc413b7754a3c41e1b4902fbab5478f0bb0f1b9d814f5b08c7bb51765"
+      },
+      "inference.json": {
+        "bytes": 168414,
+        "sha256": "3be0576413bd881ed088dbaf7174c7a32fda9d000fa94cbf687727347fb123cc"
+      },
+      ".tar": {
+        "bytes": 9113600,
+        "sha256": "030bf1208ea9136ede8f84b1135dc0a8db9ac1e709e427bdd80c5a3290f743b0"
+      }
+    },
+    "returncode": 0,
+    "command": [
+      "/workspace/shared/vse-venv/bin/python",
+      "/workspace/shared/vse-compact-prototype/tools/bin/paddle2onnx",
+      "--model_dir",
+      "/workspace/shared/vse-compact-prototype/missing_fallbacks/ka_PP-OCRv3_mobile_rec_infer",
+      "--model_filename",
+      "inference.json",
+      "--params_filename",
+      "inference.pdiparams",
+      "--save_file",
+      "/workspace/shared/vse-compact-prototype/missing_fallbacks/ka_PP-OCRv3_mobile_rec.onnx",
+      "--opset_version",
+      "17",
+      "--enable_onnx_checker",
+      "True",
+      "--optimize_tool",
+      "None"
+    ],
+    "optimizer": "None",
+    "polygraphy_autoinstall_deps": "0",
+    "pip_no_index": "1",
+    "onnx_bytes": 8977970,
+    "onnx_sha256": "2142292855879a13ae4a452ce50bd7c56494025e35121f3f6a49cb84861d6356",
+    "operators": [
+      "Add",
+      "AveragePool",
+      "BatchNormalization",
+      "Concat",
+      "Constant",
+      "Conv",
+      "GlobalAveragePool",
+      "HardSigmoid",
+      "HardSwish",
+      "Identity",
+      "LayerNormalization",
+      "MatMul",
+      "Mul",
+      "Relu",
+      "Reshape",
+      "Shape",
+      "Sigmoid",
+      "Slice",
+      "Softmax",
+      "Squeeze",
+      "Transpose",
+      "Unsqueeze"
+    ],
+    "language_alias_note": "Both KN and KA are labeled Kannada in current VSE UI; neither is verified Georgian."
+  }
+]

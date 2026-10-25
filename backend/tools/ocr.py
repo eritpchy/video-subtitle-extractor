@@ -59,6 +59,7 @@ class OcrRecogniser:
         self.language = language
         self.mode = mode
         self.rec_batch_number = rec_batch_number
+        self.stop_event = None
 
     @staticmethod
     def y_round(y):
@@ -76,13 +77,16 @@ class OcrRecogniser:
         return normalize_ocr_result(results[0])
 
     def init_model(self):
-        from paddleocr import PaddleOCR
+        from backend.tools.native_ocr import NativeOcr, selected_backend
         model_config = PaddleModelConfig(self.hardware_accelerator, self.language, self.mode)
-        model_config.ensure_models()
         batch_number = self.rec_batch_number
         if batch_number is None:
             from backend.config import config
             batch_number = config.recBatchNumber.value
+        if selected_backend() == 'native':
+            return NativeOcr(model_config, batch_number, stop_event=self.stop_event)
+        from paddleocr import PaddleOCR
+        model_config.ensure_models()
         kwargs = model_config.ocr_kwargs()
         kwargs.update(
             use_doc_orientation_classify=False,
@@ -93,6 +97,10 @@ class OcrRecogniser:
             **self.hardware_accelerator.inference_kwargs(),
         )
         return PaddleOCR(**kwargs)
+
+    def close(self):
+        if self.recogniser is not None and hasattr(self.recogniser, 'close'):
+            self.recogniser.close()
 
 
 def get_coordinates(dt_box):

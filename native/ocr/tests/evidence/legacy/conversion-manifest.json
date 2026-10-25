@@ -1,0 +1,523 @@
+[
+  {
+    "name": "arabic_PP-OCRv5_mobile_rec",
+    "path": "/workspace/shared/video-subtitle-extractor/backend/models/V5/arabic_PP-OCRv5_mobile_rec_infer",
+    "languages": [
+      "ar",
+      "bal",
+      "fa",
+      "ps",
+      "sd",
+      "ug",
+      "ur"
+    ],
+    "present": true,
+    "returncode": 0,
+    "sources": {
+      "inference.pdiparams": {
+        "bytes": 7922839,
+        "sha256": "4b4271fd1dd89a40b2056e1a42e58de7c0df2fdcf1a97ca9a8916d7ec45f9143"
+      },
+      "inference.yml": {
+        "bytes": 6165,
+        "sha256": "21368419e6c016c31db55d316d59e11c128e1913e6e6fe10287084710043d3a6"
+      },
+      "inference.json": {
+        "bytes": 217712,
+        "sha256": "d43832804d89c0e18d59f8446a3babd0ef60c44bc335efddac3176caf71d50af"
+      }
+    },
+    "onnx_bytes": 8015559,
+    "onnx_sha256": "5859788460c4b50b076d995329dcfdf0f3841dd44a6bc6d0d5bcb30c997dc71d",
+    "operators": [
+      "Add",
+      "AveragePool",
+      "BatchNormalization",
+      "Concat",
+      "Conv",
+      "GlobalAveragePool",
+      "HardSigmoid",
+      "HardSwish",
+      "Identity",
+      "LayerNormalization",
+      "MatMul",
+      "Mul",
+      "Relu",
+      "Reshape",
+      "Shape",
+      "Sigmoid",
+      "Slice",
+      "Softmax",
+      "Squeeze",
+      "Transpose",
+      "Unsqueeze"
+    ],
+    "opsets": [
+      {
+        "domain": "",
+        "version": 17
+      }
+    ]
+  },
+  {
+    "name": "cyrillic_PP-OCRv5_mobile_rec",
+    "path": "/workspace/shared/video-subtitle-extractor/backend/models/V5/cyrillic_PP-OCRv5_mobile_rec_infer",
+    "languages": [
+      "abq",
+      "ady",
+      "ava",
+      "ba",
+      "bg",
+      "bua",
+      "che",
+      "cv",
+      "cyrillic",
+      "dar",
+      "inh",
+      "kaa",
+      "kbd",
+      "kk",
+      "kv",
+      "ky",
+      "lbe",
+      "lez",
+      "mhr",
+      "mk",
+      "mn",
+      "mo",
+      "os",
+      "rs_cyrillic",
+      "sah",
+      "sr",
+      "tab",
+      "tg",
+      "tt",
+      "tyv",
+      "udm",
+      "xal"
+    ],
+    "present": true,
+    "returncode": 0,
+    "sources": {
+      "inference.pdiparams": {
+        "bytes": 7972691,
+        "sha256": "434dc9fa2a99fa3653e08f8cf793ae56be7dd41c35c4980e6255147cc02bbc80"
+      },
+      "inference.yml": {
+        "bytes": 6991,
+        "sha256": "5c76cc91fa98410178a09f498db10050d0ec1634a660053d3005ab7be581f501"
+      },
+      "inference.json": {
+        "bytes": 217712,
+        "sha256": "5d90f1bfca52d80c01de176c5238fae2459995a99ff1dbfe5319ab4ed1735df2"
+      }
+    },
+    "onnx_bytes": 8065411,
+    "onnx_sha256": "cca71499162e572c57a0ee85306da84239cc3defa17ae974f6da034fad237b81",
+    "operators": [
+      "Add",
+      "AveragePool",
+      "BatchNormalization",
+      "Concat",
+      "Conv",
+      "GlobalAveragePool",
+      "HardSigmoid",
+      "HardSwish",
+      "Identity",
+      "LayerNormalization",
+      "MatMul",
+      "Mul",
+      "Relu",
+      "Reshape",
+      "Shape",
+      "Sigmoid",
+      "Slice",
+      "Softmax",
+      "Squeeze",
+      "Transpose",
+      "Unsqueeze"
+    ],
+    "opsets": [
+      {
+        "domain": "",
+        "version": 17
+      }
+    ]
+  },
+  {
+    "name": "devanagari_PP-OCRv5_mobile_rec",
+    "path": "/workspace/shared/video-subtitle-extractor/backend/models/V5/devanagari_PP-OCRv5_mobile_rec_infer",
+    "languages": [
+      "ang",
+      "bgc",
+      "bh",
+      "bho",
+      "devanagari",
+      "gom",
+      "hi",
+      "mah",
+      "mai",
+      "mr",
+      "ne",
+      "new",
+      "sa",
+      "sck"
+    ],
+    "present": true,
+    "returncode": 0,
+    "sources": {
+      "inference.pdiparams": {
+        "bytes": 7836203,
+        "sha256": "719be7d20bfe9530e2deae324c999e9911087496bce5e70846767c448d023a01"
+      },
+      "export_result.json": {
+        "bytes": 114,
+        "sha256": "bfe8d9e1bc2c2a306bf46a12f9510b693df33a76380fdaf0f5afe17f7b087c8e"
+      },
+      "inference.yml": {
+        "bytes": 5027,
+        "sha256": "9bd172dd26440c8ce94d1cde5d5baea6aefdc7cf3c5c8492e0beedef656d4e54"
+      },
+      "inference.json": {
+        "bytes": 217712,
+        "sha256": "20d3b121184ec6b7de1705015022f4b22117990f6e5728a5d21c314bac9c1444"
+      }
+    },
+    "onnx_bytes": 7928923,
+    "onnx_sha256": "f9ec1eaebc42e7a48b49df7eeeec2000ac72bbb502f73bd742264f84df120922",
+    "operators": [
+      "Add",
+      "AveragePool",
+      "BatchNormalization",
+      "Concat",
+      "Conv",
+      "GlobalAveragePool",
+      "HardSigmoid",
+      "HardSwish",
+      "Identity",
+      "LayerNormalization",
+      "MatMul",
+      "Mul",
+      "Relu",
+      "Reshape",
+      "Shape",
+      "Sigmoid",
+      "Slice",
+      "Softmax",
+      "Squeeze",
+      "Transpose",
+      "Unsqueeze"
+    ],
+    "opsets": [
+      {
+        "domain": "",
+        "version": 17
+      }
+    ]
+  },
+  {
+    "name": "el_PP-OCRv5_mobile_rec",
+    "path": "/workspace/shared/video-subtitle-extractor/backend/models/V5/el_PP-OCRv5_mobile_rec_infer",
+    "languages": [
+      "el"
+    ],
+    "present": true,
+    "returncode": 0,
+    "sources": {
+      "inference.pdiparams": {
+        "bytes": 7732627,
+        "sha256": "4d69bbb8ed9f84373631d121ab459f8583cd978df813b5fb9b139b7783b05fbd"
+      },
+      "inference.yml": {
+        "bytes": 3317,
+        "sha256": "17d85b2fe2d2f24cd4ab07bcbc33e0c126859b956ced36e281dc65e2d0c1f0bf"
+      },
+      "inference.json": {
+        "bytes": 217712,
+        "sha256": "7fb97d32c52562deb0a0654e0839acbb54cacc0441a857cc1d66e12892337e41"
+      }
+    },
+    "onnx_bytes": 7825347,
+    "onnx_sha256": "f72c2b9b24e25fa501b495e36f1e349ae3419df6bbbdf6aa25c4516738d6bc07",
+    "operators": [
+      "Add",
+      "AveragePool",
+      "BatchNormalization",
+      "Concat",
+      "Conv",
+      "GlobalAveragePool",
+      "HardSigmoid",
+      "HardSwish",
+      "Identity",
+      "LayerNormalization",
+      "MatMul",
+      "Mul",
+      "Relu",
+      "Reshape",
+      "Shape",
+      "Sigmoid",
+      "Slice",
+      "Softmax",
+      "Squeeze",
+      "Transpose",
+      "Unsqueeze"
+    ],
+    "opsets": [
+      {
+        "domain": "",
+        "version": 17
+      }
+    ]
+  },
+  {
+    "name": "eslav_PP-OCRv5_mobile_rec",
+    "path": "/workspace/shared/video-subtitle-extractor/backend/models/V5/eslav_PP-OCRv5_mobile_rec_infer",
+    "languages": [
+      "be",
+      "ru",
+      "uk"
+    ],
+    "present": true,
+    "returncode": 0,
+    "sources": {
+      "inference.pdiparams": {
+        "bytes": 7811519,
+        "sha256": "f11057b05d8517868bca505271278973d706600d9dcc184cbcf5c4512091c32b"
+      },
+      ".gitattributes": {
+        "bytes": 1575,
+        "sha256": "a3a43406012ee8c7b9b38dfab1b11610f33e8245cd864a9a9302d042616a859e"
+      },
+      "inference.yml": {
+        "bytes": 4538,
+        "sha256": "025039bac23eb4a308efcefa4d58eab3af440767815c6ba6938468bf6353ee5a"
+      },
+      "inference.json": {
+        "bytes": 217712,
+        "sha256": "3fb6e2e658f5139ff16e35260de8f0577f106a9505c902e1dfc1f4f1d03cc9cb"
+      }
+    },
+    "onnx_bytes": 7904239,
+    "onnx_sha256": "110f0bd93b4c9feac3321f24129684d9c2ed97ff727e69101db930544ff6393f",
+    "operators": [
+      "Add",
+      "AveragePool",
+      "BatchNormalization",
+      "Concat",
+      "Conv",
+      "GlobalAveragePool",
+      "HardSigmoid",
+      "HardSwish",
+      "Identity",
+      "LayerNormalization",
+      "MatMul",
+      "Mul",
+      "Relu",
+      "Reshape",
+      "Shape",
+      "Sigmoid",
+      "Slice",
+      "Softmax",
+      "Squeeze",
+      "Transpose",
+      "Unsqueeze"
+    ],
+    "opsets": [
+      {
+        "domain": "",
+        "version": 17
+      }
+    ]
+  },
+  {
+    "name": "ka_PP-OCRv3_mobile_rec",
+    "path": "/workspace/shared/video-subtitle-extractor/backend/models/V3/ka_PP-OCRv3_mobile_rec_infer",
+    "languages": [
+      "ka",
+      "kn"
+    ],
+    "present": false
+  },
+  {
+    "name": "korean_PP-OCRv5_mobile_rec",
+    "path": "/workspace/shared/video-subtitle-extractor/backend/models/V5/korean_PP-OCRv5_mobile_rec_infer",
+    "languages": [
+      "korean"
+    ],
+    "present": true,
+    "returncode": 0,
+    "sources": {
+      "inference.pdiparams": {
+        "bytes": 13342671,
+        "sha256": "cac3e5f12cf04aaa77f6a5bc704e4e736ef2908476551891d84b41b4e9090462"
+      },
+      ".gitattributes": {
+        "bytes": 1575,
+        "sha256": "a3a43406012ee8c7b9b38dfab1b11610f33e8245cd864a9a9302d042616a859e"
+      },
+      "inference.yml": {
+        "bytes": 96039,
+        "sha256": "f757fa1c40e99edcf27e9cce879b93eb2a51fa46f5ef39095689b8c37dd75998"
+      },
+      "inference.json": {
+        "bytes": 217724,
+        "sha256": "562404e3c590c50c93778d5f0a94df21b47b5ab8f3ea6d47c7f8a7930c3bc844"
+      }
+    },
+    "onnx_bytes": 13435395,
+    "onnx_sha256": "589ac85094cef15f7549fc997d776ab03259e1173974957de26dab216d06f75d",
+    "operators": [
+      "Add",
+      "AveragePool",
+      "BatchNormalization",
+      "Concat",
+      "Conv",
+      "GlobalAveragePool",
+      "HardSigmoid",
+      "HardSwish",
+      "Identity",
+      "LayerNormalization",
+      "MatMul",
+      "Mul",
+      "Relu",
+      "Reshape",
+      "Shape",
+      "Sigmoid",
+      "Slice",
+      "Softmax",
+      "Squeeze",
+      "Transpose",
+      "Unsqueeze"
+    ],
+    "opsets": [
+      {
+        "domain": "",
+        "version": 17
+      }
+    ]
+  },
+  {
+    "name": "latin_PP-OCRv5_mobile_rec",
+    "path": "/workspace/shared/video-subtitle-extractor/backend/models/V5/latin_PP-OCRv5_mobile_rec_infer",
+    "languages": [
+      "pi"
+    ],
+    "present": true,
+    "returncode": 0,
+    "sources": {
+      "inference.pdiparams": {
+        "bytes": 7965915,
+        "sha256": "53cdc8b481a7394bb108f96d0fb3432b0a8f392e22c7d18f06dbb2d42b8b25f9"
+      },
+      "inference.yml": {
+        "bytes": 6817,
+        "sha256": "0bbe984570f597af3638e50bdf2e8276f3ab26a61966096538b3b0d1849f5c84"
+      },
+      "inference.json": {
+        "bytes": 217712,
+        "sha256": "820b2ee8e5072de5156c3d55124c2b03c82ef278d59f453f857c0789bacb4da1"
+      }
+    },
+    "onnx_bytes": 8058635,
+    "onnx_sha256": "f02a06e3b977228e884e789677b13532d948cea353610dbaf8174110c3b4f2fa",
+    "operators": [
+      "Add",
+      "AveragePool",
+      "BatchNormalization",
+      "Concat",
+      "Conv",
+      "GlobalAveragePool",
+      "HardSigmoid",
+      "HardSwish",
+      "Identity",
+      "LayerNormalization",
+      "MatMul",
+      "Mul",
+      "Relu",
+      "Reshape",
+      "Shape",
+      "Sigmoid",
+      "Slice",
+      "Softmax",
+      "Squeeze",
+      "Transpose",
+      "Unsqueeze"
+    ],
+    "opsets": [
+      {
+        "domain": "",
+        "version": 17
+      }
+    ]
+  },
+  {
+    "name": "ta_PP-OCRv5_mobile_rec",
+    "path": "/workspace/shared/video-subtitle-extractor/backend/models/V5/ta_PP-OCRv5_mobile_rec_infer",
+    "languages": [
+      "ta"
+    ],
+    "present": false
+  },
+  {
+    "name": "te_PP-OCRv5_mobile_rec",
+    "path": "/workspace/shared/video-subtitle-extractor/backend/models/V5/te_PP-OCRv5_mobile_rec_infer",
+    "languages": [
+      "te"
+    ],
+    "present": false
+  },
+  {
+    "name": "th_PP-OCRv5_mobile_rec",
+    "path": "/workspace/shared/video-subtitle-extractor/backend/models/V5/th_PP-OCRv5_mobile_rec_infer",
+    "languages": [
+      "th"
+    ],
+    "present": true,
+    "returncode": 0,
+    "sources": {
+      "inference.pdiparams": {
+        "bytes": 7814907,
+        "sha256": "45ec91f2322b58b8d30ba27d18fcfdbb8bf388b918dd978162d2af91e0c66d4b"
+      },
+      "inference.yml": {
+        "bytes": 4667,
+        "sha256": "f6ba7fefc38ca1ff398ddafa75d67d16e0b3757c4e6c833adffee98a981766c9"
+      },
+      "inference.json": {
+        "bytes": 217712,
+        "sha256": "b92a9442af5ac6da3c6ba30ce1672d00a2d7a0fbd8068ed543ac6dcb9d5c7764"
+      }
+    },
+    "onnx_bytes": 7907627,
+    "onnx_sha256": "a6e0fbed7c1e200c45d7167c897f4036e1f12aa9c9e9844f95220d0077d0f959",
+    "operators": [
+      "Add",
+      "AveragePool",
+      "BatchNormalization",
+      "Concat",
+      "Conv",
+      "GlobalAveragePool",
+      "HardSigmoid",
+      "HardSwish",
+      "Identity",
+      "LayerNormalization",
+      "MatMul",
+      "Mul",
+      "Relu",
+      "Reshape",
+      "Shape",
+      "Sigmoid",
+      "Slice",
+      "Softmax",
+      "Squeeze",
+      "Transpose",
+      "Unsqueeze"
+    ],
+    "opsets": [
+      {
+        "domain": "",
+        "version": 17
+      }
+    ]
+  }
+]

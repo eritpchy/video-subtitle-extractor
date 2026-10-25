@@ -1,0 +1,18 @@
+{
+  "tests": "tests/test_native_ocr_integration.py -k 'legacy_pipeline or standalone_detector or kannada_aliases'",
+  "selected_passed": 4,
+  "selected_skipped": 0,
+  "deselected": 4,
+  "legacy_cases": 48,
+  "newly_recovered_cases": 18,
+  "direct_detection_cases": 22,
+  "kannada_aliases": [
+    "kn",
+    "ka"
+  ],
+  "native_backend_import_guard_forbidden_events": 0,
+  "model_manifest_sha256": "3f0872017a55cc8571dcfe814bb798e7022b040fa543a85746144bf3bb8d2f09",
+  "worker_sha256": "41baecbb10368f6f9063583e1c7cdd3aea2580682b2eb822fd13a4bf556f9c4b",
+  "model_profile": "15 official FP32 graphs, Paddle2ONNX 2.1.0 opset17 optimizer None",
+  "note": "Repo evidence paths tested through actual production native adapter. Video cases were deselected in this focused fixture-contract check, not claimed newly rerun. Pytest cache write warning from read-only outside-repo invocation did not affect tests."
+}

@@ -1,0 +1,44 @@
+[
+  {
+    "file": "opencv-4.10.0.tar.gz",
+    "url": "https://codeload.github.com/opencv/opencv/tar.gz/refs/tags/4.10.0",
+    "sha256": "b2171af5be6b26f7a06b1229948bbb2bdaa74fcf5cd097e0af6378fce50a6eb9",
+    "bytes": 94993429
+  },
+  {
+    "file": "json.hpp",
+    "url": "https://raw.githubusercontent.com/nlohmann/json/v3.12.0/single_include/nlohmann/json.hpp",
+    "sha256": "aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63",
+    "bytes": 953436
+  },
+  {
+    "file": "json-LICENSE.MIT",
+    "url": "https://raw.githubusercontent.com/nlohmann/json/v3.12.0/LICENSE.MIT",
+    "sha256": "46a65cffd1ea955132d95a8dd921640714a8d6b537d2e4e482d31145ae95b603",
+    "bytes": 1076
+  },
+  {
+    "file": "clipper.hpp",
+    "url": "https://raw.githubusercontent.com/fonttools/pyclipper/1.4.0/src/clipper.hpp",
+    "sha256": "734eba9dc9d399089b2b467017074bd24728a1b9e64c7429e827806ed10e54cc",
+    "bytes": 15423
+  },
+  {
+    "file": "clipper.cpp",
+    "url": "https://raw.githubusercontent.com/fonttools/pyclipper/1.4.0/src/clipper.cpp",
+    "sha256": "5c642a3668311701f72572443aa42c1a981edb037298efc015166d9d90be0755",
+    "bytes": 142184
+  },
+  {
+    "file": "pyclipper-LICENSE",
+    "url": "https://raw.githubusercontent.com/fonttools/pyclipper/1.4.0/LICENSE",
+    "sha256": "32ee7398e3123736fd14e9f08287edc2d97ace102ab54d8dc4edc8d31c651fa8",
+    "bytes": 1110
+  },
+  {
+    "file": "clipper-LICENSE.BOOST",
+    "url": "https://raw.githubusercontent.com/boostorg/boost/boost-1.86.0/LICENSE_1_0.txt",
+    "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+    "bytes": 1338
+  }
+]

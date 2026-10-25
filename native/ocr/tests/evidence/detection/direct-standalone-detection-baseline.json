@@ -1,0 +1,640 @@
+[
+  {
+    "tier": "small",
+    "profile": {
+      "type": "<class 'paddlex.inference.models.text_detection.predictor.TextDetRunnerPredictor'>",
+      "pre_tfs": {
+        "Read": {
+          "format": "BGR",
+          "_img_reader": "<paddlex.inference.utils.io.readers.ImageReader object at 0x7f7892e19ac0>"
+        },
+        "Resize": {
+          "resize_type": 0,
+          "keep_ratio": false,
+          "limit_side_len": 960,
+          "limit_type": "max",
+          "max_side_limit": 4000
+        },
+        "Normalize": {
+          "order": "hwc",
+          "alpha": [
+            0.017124753831663668,
+            0.01750700280112045,
+            0.017429193899782133
+          ],
+          "beta": [
+            -2.1179039301310043,
+            -2.0357142857142856,
+            -1.8044444444444445
+          ]
+        },
+        "ToCHW": {},
+        "ToBatch": {}
+      },
+      "post_op": {
+        "thresh": 0.2,
+        "box_thresh": 0.45,
+        "max_candidates": 3000,
+        "unclip_ratio": 1.4,
+        "min_size": 3,
+        "score_mode": "fast",
+        "box_type": "quad",
+        "use_dilation": false
+      }
+    },
+    "cases": [
+      {
+        "fixture": "english",
+        "fixture_sha256": "0333dcb7645327ea312db38b649724591c173267402cc195a826ca1ac0687a5e",
+        "dt_polys": [
+          [
+            [
+              58.0,
+              68.0
+            ],
+            [
+              334.0,
+              65.0
+            ],
+            [
+              335.0,
+              120.0
+            ],
+            [
+              59.0,
+              122.0
+            ]
+          ]
+        ],
+        "seconds": 0.5873755209977389
+      },
+      {
+        "fixture": "chinese",
+        "fixture_sha256": "62fd04658349b9510a1a59870dc01b22ceb3535a1fc073363a89eb6b5f1b2471",
+        "dt_polys": [
+          [
+            [
+              57.0,
+              56.0
+            ],
+            [
+              353.0,
+              56.0
+            ],
+            [
+              353.0,
+              125.0
+            ],
+            [
+              57.0,
+              125.0
+            ]
+          ]
+        ],
+        "seconds": 0.4045728550008789
+      },
+      {
+        "fixture": "japanese",
+        "fixture_sha256": "4a2ed72b090b6799aac639695a45b87c3443212c4c1a28a2dba8082a4ca92b24",
+        "dt_polys": [
+          [
+            [
+              65.0,
+              57.0
+            ],
+            [
+              397.0,
+              57.0
+            ],
+            [
+              397.0,
+              126.0
+            ],
+            [
+              65.0,
+              126.0
+            ]
+          ]
+        ],
+        "seconds": 0.3902574170024309
+      },
+      {
+        "fixture": "mixed",
+        "fixture_sha256": "958c011084b6a94a2831a1cc2b42afe2aac4f67311d89aec7cca47197f24c58b",
+        "dt_polys": [
+          [
+            [
+              56.0,
+              61.0
+            ],
+            [
+              537.0,
+              59.0
+            ],
+            [
+              538.0,
+              122.0
+            ],
+            [
+              56.0,
+              124.0
+            ]
+          ]
+        ],
+        "seconds": 0.3359972719990765
+      },
+      {
+        "fixture": "blank",
+        "fixture_sha256": "437d66e87b7c1ce6fddfc1759a46d8cc194691a982d77f9bd95d3145439bd76f",
+        "dt_polys": [],
+        "seconds": 0.3266061260001152
+      },
+      {
+        "fixture": "av1_0.5",
+        "fixture_sha256": "854c3ff6d37c310560cb46f8211a4e7a7d9809c43e5181cac903c6c6c17e3e76",
+        "dt_polys": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              640.0,
+              0.0
+            ],
+            [
+              640.0,
+              360.0
+            ],
+            [
+              0.0,
+              360.0
+            ]
+          ]
+        ],
+        "seconds": 0.7815210799999477
+      },
+      {
+        "fixture": "av1_1.5",
+        "fixture_sha256": "ab90021da6bc465cc30237604a91d758a3cbd8b208e50d80d8058f177313be19",
+        "dt_polys": [
+          [
+            [
+              201.0,
+              286.0
+            ],
+            [
+              436.0,
+              289.0
+            ],
+            [
+              436.0,
+              324.0
+            ],
+            [
+              201.0,
+              322.0
+            ]
+          ]
+        ],
+        "seconds": 1.5520161189997452
+      },
+      {
+        "fixture": "av1_2.5",
+        "fixture_sha256": "d3e93f7b2e151293bb971a2819ea66b0bdf3aebf3f851c25832dac7210bde704",
+        "dt_polys": [
+          [
+            [
+              202.0,
+              287.0
+            ],
+            [
+              436.0,
+              287.0
+            ],
+            [
+              436.0,
+              323.0
+            ],
+            [
+              202.0,
+              323.0
+            ]
+          ]
+        ],
+        "seconds": 0.8585501020024822
+      },
+      {
+        "fixture": "multiline_0.5",
+        "fixture_sha256": "51304a6c5f7c121fb149b62c27ca315c6364f91df873fe2916c9ee4719427c81",
+        "dt_polys": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              640.0,
+              0.0
+            ],
+            [
+              640.0,
+              360.0
+            ],
+            [
+              0.0,
+              360.0
+            ]
+          ]
+        ],
+        "seconds": 1.2784820130000298
+      },
+      {
+        "fixture": "multiline_1.5",
+        "fixture_sha256": "6cde53f0216f852bad77d6ee5e347d52ea1fc516a1250d1d8dde9a7e658ac577",
+        "dt_polys": [
+          [
+            [
+              211.0,
+              289.0
+            ],
+            [
+              428.0,
+              289.0
+            ],
+            [
+              428.0,
+              322.0
+            ],
+            [
+              211.0,
+              322.0
+            ]
+          ],
+          [
+            [
+              230.0,
+              237.0
+            ],
+            [
+              409.0,
+              237.0
+            ],
+            [
+              409.0,
+              273.0
+            ],
+            [
+              230.0,
+              273.0
+            ]
+          ]
+        ],
+        "seconds": 1.5081094909983221
+      },
+      {
+        "fixture": "multiline_2.5",
+        "fixture_sha256": "6cde53f0216f852bad77d6ee5e347d52ea1fc516a1250d1d8dde9a7e658ac577",
+        "dt_polys": [
+          [
+            [
+              211.0,
+              289.0
+            ],
+            [
+              428.0,
+              289.0
+            ],
+            [
+              428.0,
+              322.0
+            ],
+            [
+              211.0,
+              322.0
+            ]
+          ],
+          [
+            [
+              230.0,
+              237.0
+            ],
+            [
+              409.0,
+              237.0
+            ],
+            [
+              409.0,
+              273.0
+            ],
+            [
+              230.0,
+              273.0
+            ]
+          ]
+        ],
+        "seconds": 1.531422467000084
+      }
+    ]
+  },
+  {
+    "tier": "medium",
+    "profile": {
+      "type": "<class 'paddlex.inference.models.text_detection.predictor.TextDetRunnerPredictor'>",
+      "pre_tfs": {
+        "Read": {
+          "format": "BGR",
+          "_img_reader": "<paddlex.inference.utils.io.readers.ImageReader object at 0x7f7892d0fb30>"
+        },
+        "Resize": {
+          "resize_type": 0,
+          "keep_ratio": false,
+          "limit_side_len": 960,
+          "limit_type": "max",
+          "max_side_limit": 4000
+        },
+        "Normalize": {
+          "order": "hwc",
+          "alpha": [
+            0.017124753831663668,
+            0.01750700280112045,
+            0.017429193899782133
+          ],
+          "beta": [
+            -2.1179039301310043,
+            -2.0357142857142856,
+            -1.8044444444444445
+          ]
+        },
+        "ToCHW": {},
+        "ToBatch": {}
+      },
+      "post_op": {
+        "thresh": 0.2,
+        "box_thresh": 0.45,
+        "max_candidates": 3000,
+        "unclip_ratio": 1.4,
+        "min_size": 3,
+        "score_mode": "fast",
+        "box_type": "quad",
+        "use_dilation": false
+      }
+    },
+    "cases": [
+      {
+        "fixture": "english",
+        "fixture_sha256": "0333dcb7645327ea312db38b649724591c173267402cc195a826ca1ac0687a5e",
+        "dt_polys": [
+          [
+            [
+              60.0,
+              72.0
+            ],
+            [
+              332.0,
+              72.0
+            ],
+            [
+              332.0,
+              118.0
+            ],
+            [
+              60.0,
+              118.0
+            ]
+          ]
+        ],
+        "seconds": 5.435211223997612
+      },
+      {
+        "fixture": "chinese",
+        "fixture_sha256": "62fd04658349b9510a1a59870dc01b22ceb3535a1fc073363a89eb6b5f1b2471",
+        "dt_polys": [
+          [
+            [
+              59.0,
+              69.0
+            ],
+            [
+              351.0,
+              69.0
+            ],
+            [
+              351.0,
+              122.0
+            ],
+            [
+              59.0,
+              122.0
+            ]
+          ]
+        ],
+        "seconds": 4.756819381000241
+      },
+      {
+        "fixture": "japanese",
+        "fixture_sha256": "4a2ed72b090b6799aac639695a45b87c3443212c4c1a28a2dba8082a4ca92b24",
+        "dt_polys": [
+          [
+            [
+              64.0,
+              69.0
+            ],
+            [
+              394.0,
+              69.0
+            ],
+            [
+              394.0,
+              121.0
+            ],
+            [
+              64.0,
+              121.0
+            ]
+          ]
+        ],
+        "seconds": 1.7352357960007794
+      },
+      {
+        "fixture": "mixed",
+        "fixture_sha256": "958c011084b6a94a2831a1cc2b42afe2aac4f67311d89aec7cca47197f24c58b",
+        "dt_polys": [
+          [
+            [
+              60.0,
+              71.0
+            ],
+            [
+              536.0,
+              71.0
+            ],
+            [
+              536.0,
+              120.0
+            ],
+            [
+              60.0,
+              120.0
+            ]
+          ]
+        ],
+        "seconds": 5.4746933309979795
+      },
+      {
+        "fixture": "blank",
+        "fixture_sha256": "437d66e87b7c1ce6fddfc1759a46d8cc194691a982d77f9bd95d3145439bd76f",
+        "dt_polys": [],
+        "seconds": 5.4306580550000945
+      },
+      {
+        "fixture": "av1_0.5",
+        "fixture_sha256": "854c3ff6d37c310560cb46f8211a4e7a7d9809c43e5181cac903c6c6c17e3e76",
+        "dt_polys": [],
+        "seconds": 6.5632106569973985
+      },
+      {
+        "fixture": "av1_1.5",
+        "fixture_sha256": "ab90021da6bc465cc30237604a91d758a3cbd8b208e50d80d8058f177313be19",
+        "dt_polys": [
+          [
+            [
+              203.0,
+              290.0
+            ],
+            [
+              435.0,
+              287.0
+            ],
+            [
+              435.0,
+              320.0
+            ],
+            [
+              203.0,
+              322.0
+            ]
+          ]
+        ],
+        "seconds": 8.127092263999657
+      },
+      {
+        "fixture": "av1_2.5",
+        "fixture_sha256": "d3e93f7b2e151293bb971a2819ea66b0bdf3aebf3f851c25832dac7210bde704",
+        "dt_polys": [
+          [
+            [
+              204.0,
+              289.0
+            ],
+            [
+              435.0,
+              289.0
+            ],
+            [
+              435.0,
+              321.0
+            ],
+            [
+              204.0,
+              321.0
+            ]
+          ]
+        ],
+        "seconds": 7.089996504000737
+      },
+      {
+        "fixture": "multiline_0.5",
+        "fixture_sha256": "51304a6c5f7c121fb149b62c27ca315c6364f91df873fe2916c9ee4719427c81",
+        "dt_polys": [],
+        "seconds": 12.638746374002949
+      },
+      {
+        "fixture": "multiline_1.5",
+        "fixture_sha256": "6cde53f0216f852bad77d6ee5e347d52ea1fc516a1250d1d8dde9a7e658ac577",
+        "dt_polys": [
+          [
+            [
+              211.0,
+              291.0
+            ],
+            [
+              427.0,
+              288.0
+            ],
+            [
+              427.0,
+              321.0
+            ],
+            [
+              211.0,
+              323.0
+            ]
+          ],
+          [
+            [
+              233.0,
+              239.0
+            ],
+            [
+              406.0,
+              239.0
+            ],
+            [
+              406.0,
+              272.0
+            ],
+            [
+              233.0,
+              272.0
+            ]
+          ]
+        ],
+        "seconds": 15.387687921000179
+      },
+      {
+        "fixture": "multiline_2.5",
+        "fixture_sha256": "6cde53f0216f852bad77d6ee5e347d52ea1fc516a1250d1d8dde9a7e658ac577",
+        "dt_polys": [
+          [
+            [
+              211.0,
+              291.0
+            ],
+            [
+              427.0,
+              288.0
+            ],
+            [
+              427.0,
+              321.0
+            ],
+            [
+              211.0,
+              323.0
+            ]
+          ],
+          [
+            [
+              233.0,
+              239.0
+            ],
+            [
+              406.0,
+              239.0
+            ],
+            [
+              406.0,
+              272.0
+            ],
+            [
+              233.0,
+              272.0
+            ]
+          ]
+        ],
+        "seconds": 13.491055391001282
+      }
+    ]
+  }
+]

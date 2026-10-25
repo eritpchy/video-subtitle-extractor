@@ -1,0 +1,300 @@
+{
+  "files": [
+    {
+      "path": "legacy/conversion-manifest.json",
+      "bytes": 12188,
+      "sha256": "d5d7ea4e7ac3587d4c72b7663c036517220605ff0126f7aefcef6865ecbcf70f",
+      "source": "legacy_coverage/conversion-manifest.json"
+    },
+    {
+      "path": "legacy/pipeline-comparison.json",
+      "bytes": 35960,
+      "sha256": "6ff7f223145555fe99301ab6b7a9bfc263019a8a25e1d00c366972fecaf52734",
+      "source": "legacy_coverage/pipeline-comparison.json"
+    },
+    {
+      "path": "legacy/fixtures/arabic_PP-OCRv5_mobile_rec-blank.png",
+      "bytes": 272,
+      "sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "source": "legacy_coverage/fixtures/arabic_PP-OCRv5_mobile_rec-blank.png"
+    },
+    {
+      "path": "legacy/fixtures/arabic_PP-OCRv5_mobile_rec-script.png",
+      "bytes": 6170,
+      "sha256": "dce89f5b40d45e3adfef5b8748bb7b269745e461697eeb79f6eb43881ca4dcbe",
+      "source": "legacy_coverage/fixtures/arabic_PP-OCRv5_mobile_rec-script.png"
+    },
+    {
+      "path": "legacy/fixtures/arabic_PP-OCRv5_mobile_rec-wide.png",
+      "bytes": 7397,
+      "sha256": "75ffbba3fe160d0b61e20691f6b4842e9cf610fdf45881f27aec2222018605b2",
+      "source": "legacy_coverage/fixtures/arabic_PP-OCRv5_mobile_rec-wide.png"
+    },
+    {
+      "path": "legacy/fixtures/cyrillic_PP-OCRv5_mobile_rec-blank.png",
+      "bytes": 272,
+      "sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "source": "legacy_coverage/fixtures/cyrillic_PP-OCRv5_mobile_rec-blank.png"
+    },
+    {
+      "path": "legacy/fixtures/cyrillic_PP-OCRv5_mobile_rec-script.png",
+      "bytes": 7707,
+      "sha256": "ab15120414f5fdc0999f2c3af1a7bfc8276486e27e58367d186ee29992c3190b",
+      "source": "legacy_coverage/fixtures/cyrillic_PP-OCRv5_mobile_rec-script.png"
+    },
+    {
+      "path": "legacy/fixtures/cyrillic_PP-OCRv5_mobile_rec-wide.png",
+      "bytes": 9267,
+      "sha256": "86ced1c33af069c3f38eab8015f792e81bd9709246a97a299238c3e0a6e7ba4c",
+      "source": "legacy_coverage/fixtures/cyrillic_PP-OCRv5_mobile_rec-wide.png"
+    },
+    {
+      "path": "legacy/fixtures/devanagari_PP-OCRv5_mobile_rec-blank.png",
+      "bytes": 272,
+      "sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "source": "legacy_coverage/fixtures/devanagari_PP-OCRv5_mobile_rec-blank.png"
+    },
+    {
+      "path": "legacy/fixtures/devanagari_PP-OCRv5_mobile_rec-script.png",
+      "bytes": 5621,
+      "sha256": "dfa44676bc4bb0f095f8105e4c22adbdf7417863c04483c21b5b4c2a7c2e2c3d",
+      "source": "legacy_coverage/fixtures/devanagari_PP-OCRv5_mobile_rec-script.png"
+    },
+    {
+      "path": "legacy/fixtures/devanagari_PP-OCRv5_mobile_rec-wide.png",
+      "bytes": 6672,
+      "sha256": "4dcf501a1089678f7483858d6e846a28c894fb325d0e7969c32b0bbbaf22b29f",
+      "source": "legacy_coverage/fixtures/devanagari_PP-OCRv5_mobile_rec-wide.png"
+    },
+    {
+      "path": "legacy/fixtures/el_PP-OCRv5_mobile_rec-blank.png",
+      "bytes": 272,
+      "sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "source": "legacy_coverage/fixtures/el_PP-OCRv5_mobile_rec-blank.png"
+    },
+    {
+      "path": "legacy/fixtures/el_PP-OCRv5_mobile_rec-script.png",
+      "bytes": 7611,
+      "sha256": "f41fcc781c00f3cee2cd32685650ddae8244f84c313592f5f57087256f45d7fb",
+      "source": "legacy_coverage/fixtures/el_PP-OCRv5_mobile_rec-script.png"
+    },
+    {
+      "path": "legacy/fixtures/el_PP-OCRv5_mobile_rec-wide.png",
+      "bytes": 9131,
+      "sha256": "39a9cfec91dd557229ac7a66a4f0c7e53b4d845f54e57d420c642f4088489f54",
+      "source": "legacy_coverage/fixtures/el_PP-OCRv5_mobile_rec-wide.png"
+    },
+    {
+      "path": "legacy/fixtures/eslav_PP-OCRv5_mobile_rec-blank.png",
+      "bytes": 272,
+      "sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "source": "legacy_coverage/fixtures/eslav_PP-OCRv5_mobile_rec-blank.png"
+    },
+    {
+      "path": "legacy/fixtures/eslav_PP-OCRv5_mobile_rec-script.png",
+      "bytes": 6386,
+      "sha256": "a542078b0ecaf4d342218fc110f1d38bf7cb69825491a1a4b84d31cc9f6ad48a",
+      "source": "legacy_coverage/fixtures/eslav_PP-OCRv5_mobile_rec-script.png"
+    },
+    {
+      "path": "legacy/fixtures/eslav_PP-OCRv5_mobile_rec-wide.png",
+      "bytes": 7706,
+      "sha256": "dc8aa691453f5ec3878b715f0c493bf98bcf9f766f1ce1d929598fd27a4e1aa7",
+      "source": "legacy_coverage/fixtures/eslav_PP-OCRv5_mobile_rec-wide.png"
+    },
+    {
+      "path": "legacy/fixtures/korean_PP-OCRv5_mobile_rec-blank.png",
+      "bytes": 272,
+      "sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "source": "legacy_coverage/fixtures/korean_PP-OCRv5_mobile_rec-blank.png"
+    },
+    {
+      "path": "legacy/fixtures/korean_PP-OCRv5_mobile_rec-script.png",
+      "bytes": 8546,
+      "sha256": "2b5daf69c3c2408e75d11e82e6a2b9dd22f3db6aefc40b251966ce13f094f3b5",
+      "source": "legacy_coverage/fixtures/korean_PP-OCRv5_mobile_rec-script.png"
+    },
+    {
+      "path": "legacy/fixtures/korean_PP-OCRv5_mobile_rec-wide.png",
+      "bytes": 10033,
+      "sha256": "05bab57495dda8620ede477042d921b240b9c665282175eab8adf0b6c9555ed1",
+      "source": "legacy_coverage/fixtures/korean_PP-OCRv5_mobile_rec-wide.png"
+    },
+    {
+      "path": "legacy/fixtures/latin_PP-OCRv5_mobile_rec-blank.png",
+      "bytes": 272,
+      "sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "source": "legacy_coverage/fixtures/latin_PP-OCRv5_mobile_rec-blank.png"
+    },
+    {
+      "path": "legacy/fixtures/latin_PP-OCRv5_mobile_rec-script.png",
+      "bytes": 6423,
+      "sha256": "16fb88a5ce713ab1fe13b4def646a8f57e248033be0285a110d9ce411191ff89",
+      "source": "legacy_coverage/fixtures/latin_PP-OCRv5_mobile_rec-script.png"
+    },
+    {
+      "path": "legacy/fixtures/latin_PP-OCRv5_mobile_rec-wide.png",
+      "bytes": 7573,
+      "sha256": "598476b50c3e1b93cb9b6020cf12ad2804e925542ac17ce097a7e9745c1669d9",
+      "source": "legacy_coverage/fixtures/latin_PP-OCRv5_mobile_rec-wide.png"
+    },
+    {
+      "path": "legacy/fixtures/th_PP-OCRv5_mobile_rec-blank.png",
+      "bytes": 272,
+      "sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "source": "legacy_coverage/fixtures/th_PP-OCRv5_mobile_rec-blank.png"
+    },
+    {
+      "path": "legacy/fixtures/th_PP-OCRv5_mobile_rec-script.png",
+      "bytes": 4382,
+      "sha256": "65b81428258aa731bb1cc1f85fe9b3c030b750c379c2dbd122af5e2f585688fa",
+      "source": "legacy_coverage/fixtures/th_PP-OCRv5_mobile_rec-script.png"
+    },
+    {
+      "path": "legacy/fixtures/th_PP-OCRv5_mobile_rec-wide.png",
+      "bytes": 5169,
+      "sha256": "2dd6723b6b6096b53f7ce900527adb63a08e6d38b1732816b074ee0939207cd2",
+      "source": "legacy_coverage/fixtures/th_PP-OCRv5_mobile_rec-wide.png"
+    },
+    {
+      "path": "missing/conversion-manifest.json",
+      "bytes": 7235,
+      "sha256": "7cd068881e1f2fada7f8d5036dd83911c5d74264137ea5c34e7f050c39d29631",
+      "source": "missing_fallbacks/conversion-manifest.json"
+    },
+    {
+      "path": "missing/pipeline-comparison.json",
+      "bytes": 13951,
+      "sha256": "71a2b7c840dcbabad34c0f0afbc8c0506ccd8933641dde4210c348065cb43169",
+      "source": "missing_fallbacks/pipeline-comparison.json"
+    },
+    {
+      "path": "missing/fixtures/ka_PP-OCRv3_mobile_rec-blank.png",
+      "bytes": 272,
+      "sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "source": "missing_fallbacks/fixtures/ka_PP-OCRv3_mobile_rec-blank.png"
+    },
+    {
+      "path": "missing/fixtures/ka_PP-OCRv3_mobile_rec-script.png",
+      "bytes": 8724,
+      "sha256": "95156a13558291f63b2c94a5d8ee887285f67cd73d9709a8d610e8043ea78505",
+      "source": "missing_fallbacks/fixtures/ka_PP-OCRv3_mobile_rec-script.png"
+    },
+    {
+      "path": "missing/fixtures/ka_PP-OCRv3_mobile_rec-wide.png",
+      "bytes": 10156,
+      "sha256": "9833052a25d265622c787c4060baf76a235289dc090e7d012f9910ec2c465704",
+      "source": "missing_fallbacks/fixtures/ka_PP-OCRv3_mobile_rec-wide.png"
+    },
+    {
+      "path": "missing/fixtures/ta_PP-OCRv5_mobile_rec-blank.png",
+      "bytes": 272,
+      "sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "source": "missing_fallbacks/fixtures/ta_PP-OCRv5_mobile_rec-blank.png"
+    },
+    {
+      "path": "missing/fixtures/ta_PP-OCRv5_mobile_rec-script.png",
+      "bytes": 7863,
+      "sha256": "8f1429929ef68cb13d23234cd12bf541d79c581af1a6cd3a9fe6eefa9c5bd42d",
+      "source": "missing_fallbacks/fixtures/ta_PP-OCRv5_mobile_rec-script.png"
+    },
+    {
+      "path": "missing/fixtures/ta_PP-OCRv5_mobile_rec-wide.png",
+      "bytes": 9307,
+      "sha256": "db48c81a97ac998a4372cc143d1bc1fc990063ee8da4b4c1e39c77ff2d28e8e1",
+      "source": "missing_fallbacks/fixtures/ta_PP-OCRv5_mobile_rec-wide.png"
+    },
+    {
+      "path": "missing/fixtures/te_PP-OCRv5_mobile_rec-blank.png",
+      "bytes": 272,
+      "sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "source": "missing_fallbacks/fixtures/te_PP-OCRv5_mobile_rec-blank.png"
+    },
+    {
+      "path": "missing/fixtures/te_PP-OCRv5_mobile_rec-script.png",
+      "bytes": 8591,
+      "sha256": "bb29fd939e3dc14db469c1d04f5c756760f699c107b7220d439036ae8c1bb5d9",
+      "source": "missing_fallbacks/fixtures/te_PP-OCRv5_mobile_rec-script.png"
+    },
+    {
+      "path": "missing/fixtures/te_PP-OCRv5_mobile_rec-wide.png",
+      "bytes": 10029,
+      "sha256": "624160987254406e3aa014b46adee19c994752e478f68ce65121d5e7838617f5",
+      "source": "missing_fallbacks/fixtures/te_PP-OCRv5_mobile_rec-wide.png"
+    },
+    {
+      "path": "detection/direct-standalone-detection-baseline.json",
+      "bytes": 13604,
+      "sha256": "f5fa35671bdeeb0211f0dfc7203ae22d5c8ae3c7bc019c42876be74659470cb2",
+      "source": "native_ocr/direct-standalone-detection-baseline.json"
+    },
+    {
+      "path": "fixtures/av1_0.5.png",
+      "bytes": 1818,
+      "sha256": "854c3ff6d37c310560cb46f8211a4e7a7d9809c43e5181cac903c6c6c17e3e76",
+      "source": "fixtures/av1_0.5.png"
+    },
+    {
+      "path": "fixtures/av1_1.5.png",
+      "bytes": 18856,
+      "sha256": "ab90021da6bc465cc30237604a91d758a3cbd8b208e50d80d8058f177313be19",
+      "source": "fixtures/av1_1.5.png"
+    },
+    {
+      "path": "fixtures/av1_2.5.png",
+      "bytes": 19467,
+      "sha256": "d3e93f7b2e151293bb971a2819ea66b0bdf3aebf3f851c25832dac7210bde704",
+      "source": "fixtures/av1_2.5.png"
+    },
+    {
+      "path": "fixtures/blank.png",
+      "bytes": 1188,
+      "sha256": "437d66e87b7c1ce6fddfc1759a46d8cc194691a982d77f9bd95d3145439bd76f",
+      "source": "fixtures/blank.png"
+    },
+    {
+      "path": "fixtures/chinese.png",
+      "bytes": 12509,
+      "sha256": "62fd04658349b9510a1a59870dc01b22ceb3535a1fc073363a89eb6b5f1b2471",
+      "source": "fixtures/chinese.png"
+    },
+    {
+      "path": "fixtures/english.png",
+      "bytes": 10062,
+      "sha256": "0333dcb7645327ea312db38b649724591c173267402cc195a826ca1ac0687a5e",
+      "source": "fixtures/english.png"
+    },
+    {
+      "path": "fixtures/japanese.png",
+      "bytes": 11574,
+      "sha256": "4a2ed72b090b6799aac639695a45b87c3443212c4c1a28a2dba8082a4ca92b24",
+      "source": "fixtures/japanese.png"
+    },
+    {
+      "path": "fixtures/mixed.png",
+      "bytes": 18147,
+      "sha256": "958c011084b6a94a2831a1cc2b42afe2aac4f67311d89aec7cca47197f24c58b",
+      "source": "fixtures/mixed.png"
+    },
+    {
+      "path": "fixtures/multiline_0.5.png",
+      "bytes": 1973,
+      "sha256": "51304a6c5f7c121fb149b62c27ca315c6364f91df873fe2916c9ee4719427c81",
+      "source": "fixtures/multiline_0.5.png"
+    },
+    {
+      "path": "fixtures/multiline_1.5.png",
+      "bytes": 34276,
+      "sha256": "6cde53f0216f852bad77d6ee5e347d52ea1fc516a1250d1d8dde9a7e658ac577",
+      "source": "fixtures/multiline_1.5.png"
+    },
+    {
+      "path": "fixtures/multiline_2.5.png",
+      "bytes": 34276,
+      "sha256": "6cde53f0216f852bad77d6ee5e347d52ea1fc516a1250d1d8dde9a7e658ac577",
+      "source": "fixtures/multiline_2.5.png"
+    }
+  ],
+  "copied_payload_bytes": 420540,
+  "png_count": 44
+}

@@ -9,6 +9,7 @@ import os
 import re
 import random
 import math
+import logging
 import shutil
 import traceback
 import queue
@@ -161,8 +162,22 @@ class SubtitleExtractor:
                                     close()
                                 except (OSError, ValueError):
                                     pass
+                primary_error = sys.exc_info()[1]
+                cleanup_errors = []
+                for name in ('ocr', 'sub_detector'):
+                    recognizer = getattr(self, name, None)
+                    if recognizer is not None and hasattr(recognizer, 'close'):
+                        try:
+                            recognizer.close()
+                        except Exception as error:
+                            cleanup_errors.append(error)
+                            logging.getLogger(__name__).exception('Failed to close %s', name)
+                        finally:
+                            setattr(self, name, None)
                 if self.video_cap is not None:
                     self.video_cap.release()
+                if cleanup_errors and primary_error is None:
+                    raise cleanup_errors[0]
 
     def _run_impl(self):
         """

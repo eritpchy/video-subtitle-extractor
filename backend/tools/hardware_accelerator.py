@@ -21,6 +21,10 @@ class HardwareAccelerator:
         self.__enabled = True
 
     def initialize(self):
+        from backend.tools.native_ocr import selected_backend
+        if selected_backend() == 'native':
+            self.__cuda = False
+            return
         self.check_paddle()
 
     def check_paddle(self):

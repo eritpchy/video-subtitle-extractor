@@ -1,0 +1,107 @@
+{
+  "version": "14.44.35211.0",
+  "architecture": "x64",
+  "installer": {
+    "url": "https://download.visualstudio.microsoft.com/download/pr/990c720a-46ce-4dc7-87b9-c2eb615d34b9/CC0FF0EB1DC3F5188AE6300FAEF32BF5BEEBA4BDD6E8E445A9184072096B713B/VC_redist.x64.exe",
+    "bytes": 25635768,
+    "sha256": "cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b"
+  },
+  "cabinets": [
+    {
+      "offset": 479744,
+      "members": [
+        "u4"
+      ],
+      "bytes": 195988,
+      "sha256": "2f57cf2cd504bd100c9222bb123b9c3a40802cca73e89ca05c97885d91be3a78"
+    },
+    {
+      "offset": 686152,
+      "members": [
+        "a12"
+      ],
+      "bytes": 24939223,
+      "sha256": "468f1264d50b9e3b9d309ab9e13c02ff379fd95a2837383bf65c9616583013d6"
+    }
+  ],
+  "runtime_cab": {
+    "member": "a12",
+    "bytes": 987836,
+    "sha256": "640aa6c516c72444523b8fbe034db46ff4e118ed02705340e3ccb62d426ff040"
+  },
+  "files": [
+    {
+      "name": "license.rtf",
+      "cab_member": "u4",
+      "bytes": 9235,
+      "sha256": "8099dc3cf9502c335da829e5c755948a12e3e6de490eb492a99deb673d883d8b"
+    },
+    {
+      "name": "msvcp140.dll",
+      "cab_member": "msvcp140.dll_amd64",
+      "bytes": 557728,
+      "sha256": "0f885b509a685d2bbfa652fed26b5fb31d88fbdab0a978c641d1c7b8aa460aa9",
+      "imports": [
+        "VCRUNTIME140.dll",
+        "VCRUNTIME140_1.dll",
+        "api-ms-win-crt-heap-l1-1-0.dll",
+        "api-ms-win-crt-runtime-l1-1-0.dll",
+        "api-ms-win-crt-string-l1-1-0.dll",
+        "api-ms-win-crt-locale-l1-1-0.dll",
+        "api-ms-win-crt-stdio-l1-1-0.dll",
+        "api-ms-win-crt-filesystem-l1-1-0.dll",
+        "api-ms-win-crt-time-l1-1-0.dll",
+        "api-ms-win-crt-environment-l1-1-0.dll",
+        "api-ms-win-crt-math-l1-1-0.dll",
+        "api-ms-win-crt-convert-l1-1-0.dll",
+        "api-ms-win-crt-utility-l1-1-0.dll",
+        "KERNEL32.dll"
+      ]
+    },
+    {
+      "name": "msvcp140_1.dll",
+      "cab_member": "msvcp140_1.dll_amd64",
+      "bytes": 35952,
+      "sha256": "bfad5aef4c63a669e3c140655cdfdf395b6c979b400a447bd5dcb65ed8826c3d",
+      "imports": [
+        "MSVCP140.dll",
+        "VCRUNTIME140.dll",
+        "api-ms-win-crt-heap-l1-1-0.dll",
+        "api-ms-win-crt-runtime-l1-1-0.dll",
+        "KERNEL32.dll"
+      ]
+    },
+    {
+      "name": "vcruntime140.dll",
+      "cab_member": "vcruntime140.dll_amd64",
+      "bytes": 124544,
+      "sha256": "d5e4d9a3e835fa679450145d6a7d94e36573a509317111904d9b3712c30d9066",
+      "imports": [
+        "api-ms-win-crt-runtime-l1-1-0.dll",
+        "api-ms-win-crt-string-l1-1-0.dll",
+        "api-ms-win-crt-heap-l1-1-0.dll",
+        "api-ms-win-crt-stdio-l1-1-0.dll",
+        "api-ms-win-crt-convert-l1-1-0.dll",
+        "KERNEL32.dll"
+      ]
+    },
+    {
+      "name": "vcruntime140_1.dll",
+      "cab_member": "vcruntime140_1.dll_amd64",
+      "bytes": 49792,
+      "sha256": "1f2d41c4aa5db0bc33ebf7b66d72943a817d7ce6cbe880502a9403823633093f",
+      "imports": [
+        "api-ms-win-crt-runtime-l1-1-0.dll",
+        "api-ms-win-crt-string-l1-1-0.dll",
+        "api-ms-win-crt-heap-l1-1-0.dll",
+        "VCRUNTIME140.dll",
+        "KERNEL32.dll"
+      ]
+    }
+  ],
+  "licensing_sources": [
+    "https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files",
+    "https://learn.microsoft.com/cpp/windows/determining-which-dlls-to-redistribute",
+    "https://visualstudio.microsoft.com/license-terms/vs2022-cruntime/"
+  ]
+}

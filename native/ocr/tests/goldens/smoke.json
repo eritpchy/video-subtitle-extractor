@@ -1,0 +1,3203 @@
+{
+  "schema_version": 1,
+  "confidence_tolerance": 1e-05,
+  "cases": [
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "fixture": "fixtures/english.png",
+      "fixture_sha256": "0333dcb7645327ea312db38b649724591c173267402cc195a826ca1ac0687a5e",
+      "expected": [
+        [
+          [
+            [
+              58,
+              65
+            ],
+            [
+              334,
+              65
+            ],
+            [
+              334,
+              120
+            ],
+            [
+              58,
+              120
+            ]
+          ]
+        ],
+        [
+          [
+            "Hello world",
+            0.9999511241912842
+          ]
+        ]
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "fixture": "fixtures/chinese.png",
+      "fixture_sha256": "62fd04658349b9510a1a59870dc01b22ceb3535a1fc073363a89eb6b5f1b2471",
+      "expected": [
+        [
+          [
+            [
+              55,
+              55
+            ],
+            [
+              353,
+              55
+            ],
+            [
+              353,
+              130
+            ],
+            [
+              55,
+              130
+            ]
+          ]
+        ],
+        [
+          [
+            "中文字幕测试",
+            0.9999063014984131
+          ]
+        ]
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "fixture": "fixtures/japanese.png",
+      "fixture_sha256": "4a2ed72b090b6799aac639695a45b87c3443212c4c1a28a2dba8082a4ca92b24",
+      "expected": [
+        [
+          [
+            [
+              61,
+              55
+            ],
+            [
+              399,
+              55
+            ],
+            [
+              399,
+              130
+            ],
+            [
+              61,
+              130
+            ]
+          ]
+        ],
+        [
+          [
+            "こんにちは世界",
+            0.9999881386756897
+          ]
+        ]
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "fixture": "fixtures/mixed.png",
+      "fixture_sha256": "958c011084b6a94a2831a1cc2b42afe2aac4f67311d89aec7cca47197f24c58b",
+      "expected": [
+        [
+          [
+            [
+              58,
+              64
+            ],
+            [
+              536,
+              64
+            ],
+            [
+              536,
+              124
+            ],
+            [
+              58,
+              124
+            ]
+          ]
+        ],
+        [
+          [
+            "Hello world 字幕测试",
+            0.998725414276123
+          ]
+        ]
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "fixture": "fixtures/blank.png",
+      "fixture_sha256": "437d66e87b7c1ce6fddfc1759a46d8cc194691a982d77f9bd95d3145439bd76f",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "fixture": "fixtures/av1_0.5.png",
+      "fixture_sha256": "854c3ff6d37c310560cb46f8211a4e7a7d9809c43e5181cac903c6c6c17e3e76",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "fixture": "fixtures/av1_1.5.png",
+      "fixture_sha256": "ab90021da6bc465cc30237604a91d758a3cbd8b208e50d80d8058f177313be19",
+      "expected": [
+        [
+          [
+            [
+              202,
+              286
+            ],
+            [
+              436,
+              286
+            ],
+            [
+              436,
+              324
+            ],
+            [
+              202,
+              324
+            ]
+          ]
+        ],
+        [
+          [
+            "HELLO WORLD",
+            0.9993197917938232
+          ]
+        ]
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "fixture": "fixtures/av1_2.5.png",
+      "fixture_sha256": "d3e93f7b2e151293bb971a2819ea66b0bdf3aebf3f851c25832dac7210bde704",
+      "expected": [
+        [
+          [
+            [
+              201,
+              286
+            ],
+            [
+              436,
+              286
+            ],
+            [
+              436,
+              324
+            ],
+            [
+              201,
+              324
+            ]
+          ]
+        ],
+        [
+          [
+            "HELLO WORLD",
+            0.9992897510528564
+          ]
+        ]
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "fixture": "fixtures/multiline_0.5.png",
+      "fixture_sha256": "51304a6c5f7c121fb149b62c27ca315c6364f91df873fe2916c9ee4719427c81",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "fixture": "fixtures/multiline_1.5.png",
+      "fixture_sha256": "6cde53f0216f852bad77d6ee5e347d52ea1fc516a1250d1d8dde9a7e658ac577",
+      "expected": [
+        [
+          [
+            [
+              230,
+              237
+            ],
+            [
+              408,
+              237
+            ],
+            [
+              408,
+              273
+            ],
+            [
+              230,
+              273
+            ]
+          ],
+          [
+            [
+              210,
+              288
+            ],
+            [
+              429,
+              288
+            ],
+            [
+              429,
+              323
+            ],
+            [
+              210,
+              323
+            ]
+          ]
+        ],
+        [
+          [
+            "FIRST LINE",
+            0.9896851778030396
+          ],
+          [
+            "SECOND LINE",
+            0.9724960327148438
+          ]
+        ]
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "fixture": "fixtures/multiline_2.5.png",
+      "fixture_sha256": "6cde53f0216f852bad77d6ee5e347d52ea1fc516a1250d1d8dde9a7e658ac577",
+      "expected": [
+        [
+          [
+            [
+              230,
+              237
+            ],
+            [
+              408,
+              237
+            ],
+            [
+              408,
+              273
+            ],
+            [
+              230,
+              273
+            ]
+          ],
+          [
+            [
+              210,
+              288
+            ],
+            [
+              429,
+              288
+            ],
+            [
+              429,
+              323
+            ],
+            [
+              210,
+              323
+            ]
+          ]
+        ],
+        [
+          [
+            "FIRST LINE",
+            0.9896851778030396
+          ],
+          [
+            "SECOND LINE",
+            0.9724960327148438
+          ]
+        ]
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "fixture": "fixtures/english.png",
+      "fixture_sha256": "0333dcb7645327ea312db38b649724591c173267402cc195a826ca1ac0687a5e",
+      "expected": [
+        [
+          [
+            [
+              58,
+              67
+            ],
+            [
+              335,
+              67
+            ],
+            [
+              335,
+              119
+            ],
+            [
+              58,
+              119
+            ]
+          ]
+        ],
+        [
+          [
+            "Hello world",
+            0.9999942779541016
+          ]
+        ]
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "fixture": "fixtures/chinese.png",
+      "fixture_sha256": "62fd04658349b9510a1a59870dc01b22ceb3535a1fc073363a89eb6b5f1b2471",
+      "expected": [
+        [
+          [
+            [
+              58,
+              67
+            ],
+            [
+              352,
+              67
+            ],
+            [
+              352,
+              122
+            ],
+            [
+              58,
+              122
+            ]
+          ]
+        ],
+        [
+          [
+            "中文字幕测试",
+            0.9998836517333984
+          ]
+        ]
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "fixture": "fixtures/japanese.png",
+      "fixture_sha256": "4a2ed72b090b6799aac639695a45b87c3443212c4c1a28a2dba8082a4ca92b24",
+      "expected": [
+        [
+          [
+            [
+              62,
+              69
+            ],
+            [
+              394,
+              69
+            ],
+            [
+              394,
+              121
+            ],
+            [
+              62,
+              121
+            ]
+          ]
+        ],
+        [
+          [
+            "こんにちは世界",
+            0.9999756217002869
+          ]
+        ]
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "fixture": "fixtures/mixed.png",
+      "fixture_sha256": "958c011084b6a94a2831a1cc2b42afe2aac4f67311d89aec7cca47197f24c58b",
+      "expected": [
+        [
+          [
+            [
+              59,
+              69
+            ],
+            [
+              537,
+              69
+            ],
+            [
+              537,
+              121
+            ],
+            [
+              59,
+              121
+            ]
+          ]
+        ],
+        [
+          [
+            "Hello world 字幕测试",
+            0.9997020959854126
+          ]
+        ]
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "fixture": "fixtures/blank.png",
+      "fixture_sha256": "437d66e87b7c1ce6fddfc1759a46d8cc194691a982d77f9bd95d3145439bd76f",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "fixture": "fixtures/av1_0.5.png",
+      "fixture_sha256": "854c3ff6d37c310560cb46f8211a4e7a7d9809c43e5181cac903c6c6c17e3e76",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "fixture": "fixtures/av1_1.5.png",
+      "fixture_sha256": "ab90021da6bc465cc30237604a91d758a3cbd8b208e50d80d8058f177313be19",
+      "expected": [
+        [
+          [
+            [
+              204,
+              288
+            ],
+            [
+              435,
+              288
+            ],
+            [
+              435,
+              320
+            ],
+            [
+              204,
+              320
+            ]
+          ]
+        ],
+        [
+          [
+            "HELLO WORLD",
+            0.9935817122459412
+          ]
+        ]
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "fixture": "fixtures/av1_2.5.png",
+      "fixture_sha256": "d3e93f7b2e151293bb971a2819ea66b0bdf3aebf3f851c25832dac7210bde704",
+      "expected": [
+        [
+          [
+            [
+              204,
+              289
+            ],
+            [
+              435,
+              289
+            ],
+            [
+              435,
+              321
+            ],
+            [
+              204,
+              321
+            ]
+          ]
+        ],
+        [
+          [
+            "HELLO WORLD",
+            0.9962577819824219
+          ]
+        ]
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "fixture": "fixtures/multiline_0.5.png",
+      "fixture_sha256": "51304a6c5f7c121fb149b62c27ca315c6364f91df873fe2916c9ee4719427c81",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "fixture": "fixtures/multiline_1.5.png",
+      "fixture_sha256": "6cde53f0216f852bad77d6ee5e347d52ea1fc516a1250d1d8dde9a7e658ac577",
+      "expected": [
+        [
+          [
+            [
+              232,
+              238
+            ],
+            [
+              407,
+              238
+            ],
+            [
+              407,
+              273
+            ],
+            [
+              232,
+              273
+            ]
+          ],
+          [
+            [
+              211,
+              288
+            ],
+            [
+              427,
+              288
+            ],
+            [
+              427,
+              322
+            ],
+            [
+              211,
+              322
+            ]
+          ]
+        ],
+        [
+          [
+            "FIRST LINE",
+            0.9891483187675476
+          ],
+          [
+            "SECOND LINE",
+            0.9993180632591248
+          ]
+        ]
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "fixture": "fixtures/multiline_2.5.png",
+      "fixture_sha256": "6cde53f0216f852bad77d6ee5e347d52ea1fc516a1250d1d8dde9a7e658ac577",
+      "expected": [
+        [
+          [
+            [
+              232,
+              238
+            ],
+            [
+              407,
+              238
+            ],
+            [
+              407,
+              273
+            ],
+            [
+              232,
+              273
+            ]
+          ],
+          [
+            [
+              211,
+              288
+            ],
+            [
+              427,
+              288
+            ],
+            [
+              427,
+              322
+            ],
+            [
+              211,
+              322
+            ]
+          ]
+        ],
+        [
+          [
+            "FIRST LINE",
+            0.9891483187675476
+          ],
+          [
+            "SECOND LINE",
+            0.9993180632591248
+          ]
+        ]
+      ],
+      "text_order": "display"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "arabic_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/arabic_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "dce89f5b40d45e3adfef5b8748bb7b269745e461697eeb79f6eb43881ca4dcbe",
+      "expected": [
+        [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              367,
+              0
+            ],
+            [
+              367,
+              64
+            ],
+            [
+              0,
+              64
+            ]
+          ]
+        ],
+        [
+          [
+            "ملاعلاب ابحرم",
+            0.8831772208213806
+          ]
+        ]
+      ],
+      "text_order": "logical",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "arabic_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/arabic_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "logical",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "arabic_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/arabic_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "75ffbba3fe160d0b61e20691f6b4842e9cf610fdf45881f27aec2222018605b2",
+      "expected": [
+        [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              734,
+              0
+            ],
+            [
+              734,
+              64
+            ],
+            [
+              0,
+              64
+            ]
+          ]
+        ],
+        [
+          [
+            "ملاعلاب ابحملاعلاب ابحرم",
+            0.7516489624977112
+          ]
+        ]
+      ],
+      "text_order": "logical",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "arabic_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/arabic_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "dce89f5b40d45e3adfef5b8748bb7b269745e461697eeb79f6eb43881ca4dcbe",
+      "expected": [
+        [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              368,
+              0
+            ],
+            [
+              368,
+              64
+            ],
+            [
+              0,
+              64
+            ]
+          ]
+        ],
+        [
+          [
+            "ملاعلاب ابحرم",
+            0.9351359009742737
+          ]
+        ]
+      ],
+      "text_order": "logical",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "arabic_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/arabic_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "logical",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "arabic_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/arabic_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "75ffbba3fe160d0b61e20691f6b4842e9cf610fdf45881f27aec2222018605b2",
+      "expected": [
+        [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              734,
+              0
+            ],
+            [
+              734,
+              62
+            ],
+            [
+              0,
+              62
+            ]
+          ]
+        ],
+        [
+          [
+            "ملاعلاب ابحملاعلاب ابحرم",
+            0.7733158469200134
+          ]
+        ]
+      ],
+      "text_order": "logical",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "cyrillic_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/cyrillic_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "ab15120414f5fdc0999f2c3af1a7bfc8276486e27e58367d186ee29992c3190b",
+      "expected": [
+        [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              575,
+              0
+            ],
+            [
+              575,
+              56
+            ],
+            [
+              0,
+              56
+            ]
+          ]
+        ],
+        [
+          [
+            "Български текст 123 АВС",
+            0.9602321982383728
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "cyrillic_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/cyrillic_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "cyrillic_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/cyrillic_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "86ced1c33af069c3f38eab8015f792e81bd9709246a97a299238c3e0a6e7ba4c",
+      "expected": [
+        [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              1154,
+              0
+            ],
+            [
+              1154,
+              57
+            ],
+            [
+              0,
+              57
+            ]
+          ]
+        ],
+        [
+          [
+            "Български текст 123 АВС Български текст 123 АВС",
+            0.9855645298957825
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "cyrillic_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/cyrillic_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "ab15120414f5fdc0999f2c3af1a7bfc8276486e27e58367d186ee29992c3190b",
+      "expected": [
+        [
+          [
+            [
+              1,
+              0
+            ],
+            [
+              572,
+              0
+            ],
+            [
+              572,
+              50
+            ],
+            [
+              1,
+              50
+            ]
+          ]
+        ],
+        [
+          [
+            "Български текст 123 АВС",
+            0.9227171540260315
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "cyrillic_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/cyrillic_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "cyrillic_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/cyrillic_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "86ced1c33af069c3f38eab8015f792e81bd9709246a97a299238c3e0a6e7ba4c",
+      "expected": [
+        [
+          [
+            [
+              1,
+              1
+            ],
+            [
+              1150,
+              1
+            ],
+            [
+              1150,
+              50
+            ],
+            [
+              1,
+              50
+            ]
+          ]
+        ],
+        [
+          [
+            "Български текст 123 АВС Български текст 123 АВС",
+            0.8640819191932678
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "devanagari_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/devanagari_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "dfa44676bc4bb0f095f8105e4c22adbdf7417863c04483c21b5b4c2a7c2e2c3d",
+      "expected": [
+        [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              365,
+              0
+            ],
+            [
+              365,
+              54
+            ],
+            [
+              0,
+              54
+            ]
+          ]
+        ],
+        [
+          [
+            "नमस्ते दुनिया 123 ",
+            0.9346937537193298
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "devanagari_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/devanagari_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "devanagari_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/devanagari_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "4dcf501a1089678f7483858d6e846a28c894fb325d0e7969c32b0bbbaf22b29f",
+      "expected": [
+        [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              733,
+              0
+            ],
+            [
+              733,
+              53
+            ],
+            [
+              0,
+              53
+            ]
+          ]
+        ],
+        [
+          [
+            "नमस्ते दुनिया 123  नमस्ते दुनिया 123 ",
+            0.9672383666038513
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "devanagari_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/devanagari_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "dfa44676bc4bb0f095f8105e4c22adbdf7417863c04483c21b5b4c2a7c2e2c3d",
+      "expected": [
+        [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              364,
+              0
+            ],
+            [
+              364,
+              52
+            ],
+            [
+              0,
+              52
+            ]
+          ]
+        ],
+        [
+          [
+            "नमस्ते दुनिया 123 ",
+            0.9761466979980469
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "devanagari_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/devanagari_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "devanagari_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/devanagari_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "4dcf501a1089678f7483858d6e846a28c894fb325d0e7969c32b0bbbaf22b29f",
+      "expected": [
+        [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              732,
+              0
+            ],
+            [
+              732,
+              54
+            ],
+            [
+              0,
+              54
+            ]
+          ]
+        ],
+        [
+          [
+            "नमस्ते दुनिया 123  नमस्ते दुनिया 123 ",
+            0.9414650201797485
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "el_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/el_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "f41fcc781c00f3cee2cd32685650ddae8244f84c313592f5f57087256f45d7fb",
+      "expected": [
+        [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              516,
+              0
+            ],
+            [
+              516,
+              50
+            ],
+            [
+              0,
+              50
+            ]
+          ]
+        ],
+        [
+          [
+            "Γεια σου κόσμε 123 ABC",
+            0.9990774393081665
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "el_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/el_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "el_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/el_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "39a9cfec91dd557229ac7a66a4f0c7e53b4d845f54e57d420c642f4088489f54",
+      "expected": [
+        [
+          [
+            [
+              0,
+              1
+            ],
+            [
+              1040,
+              1
+            ],
+            [
+              1040,
+              50
+            ],
+            [
+              0,
+              50
+            ]
+          ]
+        ],
+        [
+          [
+            "Γεια σου κόσμε 123 ABC Γεια σου κόσμε 123 ABC",
+            0.9950703978538513
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "el_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/el_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "f41fcc781c00f3cee2cd32685650ddae8244f84c313592f5f57087256f45d7fb",
+      "expected": [
+        [
+          [
+            [
+              2,
+              4
+            ],
+            [
+              516,
+              4
+            ],
+            [
+              516,
+              45
+            ],
+            [
+              2,
+              45
+            ]
+          ]
+        ],
+        [
+          [
+            "Γεια σου κόσμε 123 ΑBC",
+            0.9672588109970093
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "el_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/el_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "el_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/el_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "39a9cfec91dd557229ac7a66a4f0c7e53b4d845f54e57d420c642f4088489f54",
+      "expected": [
+        [
+          [
+            [
+              2,
+              3
+            ],
+            [
+              1040,
+              3
+            ],
+            [
+              1040,
+              46
+            ],
+            [
+              2,
+              46
+            ]
+          ]
+        ],
+        [
+          [
+            "Γεια σου κόσμε 123 ΑBC Γεια σου κόσμε 123 ABC",
+            0.9573994278907776
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "eslav_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/eslav_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "a542078b0ecaf4d342218fc110f1d38bf7cb69825491a1a4b84d31cc9f6ad48a",
+      "expected": [
+        [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              458,
+              0
+            ],
+            [
+              458,
+              53
+            ],
+            [
+              0,
+              53
+            ]
+          ]
+        ],
+        [
+          [
+            "Привет мир 123 АВС",
+            0.9801619052886963
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "eslav_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/eslav_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "eslav_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/eslav_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "dc8aa691453f5ec3878b715f0c493bf98bcf9f766f1ce1d929598fd27a4e1aa7",
+      "expected": [
+        [
+          [
+            [
+              0,
+              2
+            ],
+            [
+              925,
+              2
+            ],
+            [
+              925,
+              53
+            ],
+            [
+              0,
+              53
+            ]
+          ]
+        ],
+        [
+          [
+            "Привет мир 123 АВС Привет мир 123 АВС",
+            0.9790769219398499
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "eslav_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/eslav_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "a542078b0ecaf4d342218fc110f1d38bf7cb69825491a1a4b84d31cc9f6ad48a",
+      "expected": [
+        [
+          [
+            [
+              2,
+              4
+            ],
+            [
+              458,
+              4
+            ],
+            [
+              458,
+              52
+            ],
+            [
+              2,
+              52
+            ]
+          ]
+        ],
+        [
+          [
+            "Привет мир 123 АВС",
+            0.9489825367927551
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "eslav_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/eslav_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "eslav_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/eslav_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "dc8aa691453f5ec3878b715f0c493bf98bcf9f766f1ce1d929598fd27a4e1aa7",
+      "expected": [
+        [
+          [
+            [
+              1,
+              3
+            ],
+            [
+              924,
+              3
+            ],
+            [
+              924,
+              52
+            ],
+            [
+              1,
+              52
+            ]
+          ]
+        ],
+        [
+          [
+            "Привет мир 123 АВС Привет мир 123 АВС",
+            0.9570707082748413
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "korean_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/korean_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "2b5daf69c3c2408e75d11e82e6a2b9dd22f3db6aefc40b251966ce13f094f3b5",
+      "expected": [
+        [
+          [
+            [
+              3,
+              0
+            ],
+            [
+              460,
+              0
+            ],
+            [
+              460,
+              45
+            ],
+            [
+              3,
+              45
+            ]
+          ]
+        ],
+        [
+          [
+            "안녕하세요 세계 123 ABC",
+            0.9884706735610962
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "korean_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/korean_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "korean_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/korean_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "05bab57495dda8620ede477042d921b240b9c665282175eab8adf0b6c9555ed1",
+      "expected": [
+        [
+          [
+            [
+              3,
+              0
+            ],
+            [
+              927,
+              0
+            ],
+            [
+              927,
+              44
+            ],
+            [
+              3,
+              44
+            ]
+          ]
+        ],
+        [
+          [
+            "안녕하세요 세계 123 ABC 안녕하세요 세계 123 ABC",
+            0.9863176941871643
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "korean_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/korean_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "2b5daf69c3c2408e75d11e82e6a2b9dd22f3db6aefc40b251966ce13f094f3b5",
+      "expected": [
+        [
+          [
+            [
+              3,
+              0
+            ],
+            [
+              461,
+              0
+            ],
+            [
+              461,
+              43
+            ],
+            [
+              3,
+              43
+            ]
+          ]
+        ],
+        [
+          [
+            "안녕하세요 세계 123 ABC",
+            0.9660653471946716
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "korean_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/korean_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "korean_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/korean_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "05bab57495dda8620ede477042d921b240b9c665282175eab8adf0b6c9555ed1",
+      "expected": [
+        [
+          [
+            [
+              3,
+              0
+            ],
+            [
+              929,
+              0
+            ],
+            [
+              929,
+              44
+            ],
+            [
+              3,
+              44
+            ]
+          ]
+        ],
+        [
+          [
+            "안녕하세요 세계 123 ABC 안녕하세요 세계 123 ABC",
+            0.9871837496757507
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "latin_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/latin_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "16fb88a5ce713ab1fe13b4def646a8f57e248033be0285a110d9ce411191ff89",
+      "expected": [
+        [
+          [
+            [
+              1,
+              3
+            ],
+            [
+              471,
+              3
+            ],
+            [
+              471,
+              46
+            ],
+            [
+              1,
+              46
+            ]
+          ]
+        ],
+        [
+          [
+            "Pāļi dhamma 123 ABC",
+            0.9762547016143799
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "latin_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/latin_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "latin_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/latin_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "598476b50c3e1b93cb9b6020cf12ad2804e925542ac17ce097a7e9745c1669d9",
+      "expected": [
+        [
+          [
+            [
+              2,
+              3
+            ],
+            [
+              953,
+              3
+            ],
+            [
+              953,
+              46
+            ],
+            [
+              2,
+              46
+            ]
+          ]
+        ],
+        [
+          [
+            "Pāi dhamma 123 ABC Pāļi dhamma 123 ABC",
+            0.978062093257904
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "latin_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/latin_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "16fb88a5ce713ab1fe13b4def646a8f57e248033be0285a110d9ce411191ff89",
+      "expected": [
+        [
+          [
+            [
+              3,
+              3
+            ],
+            [
+              473,
+              3
+            ],
+            [
+              473,
+              43
+            ],
+            [
+              3,
+              43
+            ]
+          ]
+        ],
+        [
+          [
+            "Pāli dhamma 123 ABC",
+            0.9788699150085449
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "latin_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/latin_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "latin_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/latin_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "598476b50c3e1b93cb9b6020cf12ad2804e925542ac17ce097a7e9745c1669d9",
+      "expected": [
+        [
+          [
+            [
+              4,
+              5
+            ],
+            [
+              953,
+              5
+            ],
+            [
+              953,
+              42
+            ],
+            [
+              4,
+              42
+            ]
+          ]
+        ],
+        [
+          [
+            "Pāli dhamma 123 ABC Pāli dhamma 123 ABC",
+            0.9872268438339233
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "th_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/th_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "65b81428258aa731bb1cc1f85fe9b3c030b750c379c2dbd122af5e2f585688fa",
+      "expected": [
+        [
+          [
+            [
+              0,
+              2
+            ],
+            [
+              396,
+              2
+            ],
+            [
+              396,
+              54
+            ],
+            [
+              0,
+              54
+            ]
+          ]
+        ],
+        [
+          [
+            "สวัสดีชาวโลก  ",
+            0.9398654699325562
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "th_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/th_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "th_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/th_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "2dd6723b6b6096b53f7ce900527adb63a08e6d38b1732816b074ee0939207cd2",
+      "expected": [
+        [
+          [
+            [
+              0,
+              2
+            ],
+            [
+              796,
+              2
+            ],
+            [
+              796,
+              53
+            ],
+            [
+              0,
+              53
+            ]
+          ]
+        ],
+        [
+          [
+            "สวัสดีชาวโลก   สวัสดีชาวโลก  ",
+            0.949806809425354
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "th_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/th_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "65b81428258aa731bb1cc1f85fe9b3c030b750c379c2dbd122af5e2f585688fa",
+      "expected": [
+        [
+          [
+            [
+              2,
+              8
+            ],
+            [
+              397,
+              8
+            ],
+            [
+              397,
+              52
+            ],
+            [
+              2,
+              52
+            ]
+          ]
+        ],
+        [
+          [
+            "สวัสดีชาวโลก  ",
+            0.9603251814842224
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "th_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/th_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "th_PP-OCRv5_mobile_rec",
+      "fixture": "legacy/fixtures/th_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "2dd6723b6b6096b53f7ce900527adb63a08e6d38b1732816b074ee0939207cd2",
+      "expected": [
+        [
+          [
+            [
+              1,
+              7
+            ],
+            [
+              796,
+              7
+            ],
+            [
+              796,
+              52
+            ],
+            [
+              1,
+              52
+            ]
+          ]
+        ],
+        [
+          [
+            "สวัสดีชาวโลก   สวัสดีชาวโลก  ",
+            0.9625032544136047
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "legacy/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "ta_PP-OCRv5_mobile_rec",
+      "fixture": "missing/fixtures/ta_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "8f1429929ef68cb13d23234cd12bf541d79c581af1a6cd3a9fe6eefa9c5bd42d",
+      "expected": [
+        [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              559,
+              0
+            ],
+            [
+              559,
+              46
+            ],
+            [
+              0,
+              46
+            ]
+          ]
+        ],
+        [
+          [
+            "வணக்கம் உலகம்123 பபப",
+            0.981209397315979
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "missing/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "ta_PP-OCRv5_mobile_rec",
+      "fixture": "missing/fixtures/ta_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "missing/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "ta_PP-OCRv5_mobile_rec",
+      "fixture": "missing/fixtures/ta_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "db48c81a97ac998a4372cc143d1bc1fc990063ee8da4b4c1e39c77ff2d28e8e1",
+      "expected": [
+        [
+          [
+            [
+              1,
+              1
+            ],
+            [
+              1126,
+              1
+            ],
+            [
+              1126,
+              46
+            ],
+            [
+              1,
+              46
+            ]
+          ]
+        ],
+        [
+          [
+            "வணக்கம் உலகம் 123 பபப வணக்கம் உலகம் 123 ப்பப்",
+            0.9690186977386475
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "missing/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "ta_PP-OCRv5_mobile_rec",
+      "fixture": "missing/fixtures/ta_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "8f1429929ef68cb13d23234cd12bf541d79c581af1a6cd3a9fe6eefa9c5bd42d",
+      "expected": [
+        [
+          [
+            [
+              1,
+              1
+            ],
+            [
+              558,
+              1
+            ],
+            [
+              558,
+              42
+            ],
+            [
+              1,
+              42
+            ]
+          ]
+        ],
+        [
+          [
+            "வணக்கம் உலகம் 123 ப்பப",
+            0.9440425634384155
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "missing/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "ta_PP-OCRv5_mobile_rec",
+      "fixture": "missing/fixtures/ta_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "missing/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "ta_PP-OCRv5_mobile_rec",
+      "fixture": "missing/fixtures/ta_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "db48c81a97ac998a4372cc143d1bc1fc990063ee8da4b4c1e39c77ff2d28e8e1",
+      "expected": [
+        [
+          [
+            [
+              1,
+              0
+            ],
+            [
+              1125,
+              0
+            ],
+            [
+              1125,
+              43
+            ],
+            [
+              1,
+              43
+            ]
+          ]
+        ],
+        [
+          [
+            "வணக்கம் உலகம் 123 பபப வணக்கம் உலகம் 123 பபப்",
+            0.9724214673042297
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "missing/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "te_PP-OCRv5_mobile_rec",
+      "fixture": "missing/fixtures/te_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "bb29fd939e3dc14db469c1d04f5c756760f699c107b7220d439036ae8c1bb5d9",
+      "expected": [
+        [
+          [
+            [
+              1,
+              2
+            ],
+            [
+              506,
+              2
+            ],
+            [
+              506,
+              50
+            ],
+            [
+              1,
+              50
+            ]
+          ]
+        ],
+        [
+          [
+            "నమస్కారం ప్రపంచం 123 ",
+            0.9621405601501465
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "missing/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "te_PP-OCRv5_mobile_rec",
+      "fixture": "missing/fixtures/te_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "missing/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "te_PP-OCRv5_mobile_rec",
+      "fixture": "missing/fixtures/te_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "624160987254406e3aa014b46adee19c994752e478f68ce65121d5e7838617f5",
+      "expected": [
+        [
+          [
+            [
+              2,
+              2
+            ],
+            [
+              1017,
+              2
+            ],
+            [
+              1017,
+              49
+            ],
+            [
+              2,
+              49
+            ]
+          ]
+        ],
+        [
+          [
+            "నమస్కారం ప్రపంచం 123 00 నమస్కారం ప్రపంచం 123 ",
+            0.9774466753005981
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "missing/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "te_PP-OCRv5_mobile_rec",
+      "fixture": "missing/fixtures/te_PP-OCRv5_mobile_rec-script.png",
+      "fixture_sha256": "bb29fd939e3dc14db469c1d04f5c756760f699c107b7220d439036ae8c1bb5d9",
+      "expected": [
+        [
+          [
+            [
+              1,
+              1
+            ],
+            [
+              506,
+              1
+            ],
+            [
+              506,
+              51
+            ],
+            [
+              1,
+              51
+            ]
+          ]
+        ],
+        [
+          [
+            "నమస్కారం ప్రపంచం 123 ",
+            0.9898107647895813
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "missing/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "te_PP-OCRv5_mobile_rec",
+      "fixture": "missing/fixtures/te_PP-OCRv5_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "missing/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "te_PP-OCRv5_mobile_rec",
+      "fixture": "missing/fixtures/te_PP-OCRv5_mobile_rec-wide.png",
+      "fixture_sha256": "624160987254406e3aa014b46adee19c994752e478f68ce65121d5e7838617f5",
+      "expected": [
+        [
+          [
+            [
+              1,
+              2
+            ],
+            [
+              1017,
+              2
+            ],
+            [
+              1017,
+              51
+            ],
+            [
+              1,
+              51
+            ]
+          ]
+        ],
+        [
+          [
+            "నమస్కారం ప్రపంచం 123 00 నమస్కారం ప్రపంచం 123 00",
+            0.9598509669303894
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "missing/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "ka_PP-OCRv3_mobile_rec",
+      "fixture": "missing/fixtures/ka_PP-OCRv3_mobile_rec-script.png",
+      "fixture_sha256": "95156a13558291f63b2c94a5d8ee887285f67cd73d9709a8d610e8043ea78505",
+      "expected": [
+        [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              480,
+              0
+            ],
+            [
+              480,
+              49
+            ],
+            [
+              0,
+              49
+            ]
+          ]
+        ],
+        [
+          [
+            "ನಮಸಾರ ಪೃಪಂಚ 125",
+            0.9213008284568787
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "missing/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "ka_PP-OCRv3_mobile_rec",
+      "fixture": "missing/fixtures/ka_PP-OCRv3_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "missing/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "ocr",
+      "rec_model": "ka_PP-OCRv3_mobile_rec",
+      "fixture": "missing/fixtures/ka_PP-OCRv3_mobile_rec-wide.png",
+      "fixture_sha256": "9833052a25d265622c787c4060baf76a235289dc090e7d012f9910ec2c465704",
+      "expected": [
+        [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              966,
+              0
+            ],
+            [
+              966,
+              47
+            ],
+            [
+              0,
+              47
+            ]
+          ]
+        ],
+        [
+          [
+            "ನಮಸಾರ ಪೃಪಂಚ 125ನಮಸಾೃರ ಪೃಪಂಚ 12",
+            0.8818604350090027
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "missing/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "ka_PP-OCRv3_mobile_rec",
+      "fixture": "missing/fixtures/ka_PP-OCRv3_mobile_rec-script.png",
+      "fixture_sha256": "95156a13558291f63b2c94a5d8ee887285f67cd73d9709a8d610e8043ea78505",
+      "expected": [
+        [
+          [
+            [
+              1,
+              0
+            ],
+            [
+              478,
+              0
+            ],
+            [
+              478,
+              44
+            ],
+            [
+              1,
+              44
+            ]
+          ]
+        ],
+        [
+          [
+            "ನಮಸಾರ ಪೃಪಂಚ 123",
+            0.9107993245124817
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "missing/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "ka_PP-OCRv3_mobile_rec",
+      "fixture": "missing/fixtures/ka_PP-OCRv3_mobile_rec-blank.png",
+      "fixture_sha256": "6311000377ac07689238ddcf0b3dd3e71effbd5dc255c494c389a205961dc1e8",
+      "expected": [
+        [],
+        []
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "missing/pipeline-comparison.json"
+    },
+    {
+      "tier": "medium",
+      "operation": "ocr",
+      "rec_model": "ka_PP-OCRv3_mobile_rec",
+      "fixture": "missing/fixtures/ka_PP-OCRv3_mobile_rec-wide.png",
+      "fixture_sha256": "9833052a25d265622c787c4060baf76a235289dc090e7d012f9910ec2c465704",
+      "expected": [
+        [
+          [
+            [
+              2,
+              0
+            ],
+            [
+              965,
+              0
+            ],
+            [
+              965,
+              43
+            ],
+            [
+              2,
+              43
+            ]
+          ]
+        ],
+        [
+          [
+            "ನಮಸಾರ ಪೃಪಂಚ 123ನಮಸಾರಪೃಪಂಚ12",
+            0.9227418303489685
+          ]
+        ]
+      ],
+      "text_order": "display",
+      "paddle_parity_reference": "missing/pipeline-comparison.json"
+    },
+    {
+      "tier": "small",
+      "operation": "detect",
+      "fixture": "fixtures/english.png",
+      "fixture_sha256": "0333dcb7645327ea312db38b649724591c173267402cc195a826ca1ac0687a5e",
+      "expected": [
+        [
+          [
+            58.0,
+            68.0
+          ],
+          [
+            334.0,
+            65.0
+          ],
+          [
+            335.0,
+            120.0
+          ],
+          [
+            59.0,
+            122.0
+          ]
+        ]
+      ]
+    },
+    {
+      "tier": "small",
+      "operation": "detect",
+      "fixture": "fixtures/chinese.png",
+      "fixture_sha256": "62fd04658349b9510a1a59870dc01b22ceb3535a1fc073363a89eb6b5f1b2471",
+      "expected": [
+        [
+          [
+            57.0,
+            56.0
+          ],
+          [
+            353.0,
+            56.0
+          ],
+          [
+            353.0,
+            125.0
+          ],
+          [
+            57.0,
+            125.0
+          ]
+        ]
+      ]
+    },
+    {
+      "tier": "small",
+      "operation": "detect",
+      "fixture": "fixtures/japanese.png",
+      "fixture_sha256": "4a2ed72b090b6799aac639695a45b87c3443212c4c1a28a2dba8082a4ca92b24",
+      "expected": [
+        [
+          [
+            65.0,
+            57.0
+          ],
+          [
+            397.0,
+            57.0
+          ],
+          [
+            397.0,
+            126.0
+          ],
+          [
+            65.0,
+            126.0
+          ]
+        ]
+      ]
+    },
+    {
+      "tier": "small",
+      "operation": "detect",
+      "fixture": "fixtures/mixed.png",
+      "fixture_sha256": "958c011084b6a94a2831a1cc2b42afe2aac4f67311d89aec7cca47197f24c58b",
+      "expected": [
+        [
+          [
+            56.0,
+            61.0
+          ],
+          [
+            537.0,
+            59.0
+          ],
+          [
+            538.0,
+            122.0
+          ],
+          [
+            56.0,
+            124.0
+          ]
+        ]
+      ]
+    },
+    {
+      "tier": "small",
+      "operation": "detect",
+      "fixture": "fixtures/blank.png",
+      "fixture_sha256": "437d66e87b7c1ce6fddfc1759a46d8cc194691a982d77f9bd95d3145439bd76f",
+      "expected": []
+    },
+    {
+      "tier": "small",
+      "operation": "detect",
+      "fixture": "fixtures/av1_0.5.png",
+      "fixture_sha256": "854c3ff6d37c310560cb46f8211a4e7a7d9809c43e5181cac903c6c6c17e3e76",
+      "expected": [
+        [
+          [
+            0.0,
+            0.0
+          ],
+          [
+            640.0,
+            0.0
+          ],
+          [
+            640.0,
+            360.0
+          ],
+          [
+            0.0,
+            360.0
+          ]
+        ]
+      ]
+    },
+    {
+      "tier": "small",
+      "operation": "detect",
+      "fixture": "fixtures/av1_1.5.png",
+      "fixture_sha256": "ab90021da6bc465cc30237604a91d758a3cbd8b208e50d80d8058f177313be19",
+      "expected": [
+        [
+          [
+            201.0,
+            286.0
+          ],
+          [
+            436.0,
+            289.0
+          ],
+          [
+            436.0,
+            324.0
+          ],
+          [
+            201.0,
+            322.0
+          ]
+        ]
+      ]
+    },
+    {
+      "tier": "small",
+      "operation": "detect",
+      "fixture": "fixtures/av1_2.5.png",
+      "fixture_sha256": "d3e93f7b2e151293bb971a2819ea66b0bdf3aebf3f851c25832dac7210bde704",
+      "expected": [
+        [
+          [
+            202.0,
+            287.0
+          ],
+          [
+            436.0,
+            287.0
+          ],
+          [
+            436.0,
+            323.0
+          ],
+          [
+            202.0,
+            323.0
+          ]
+        ]
+      ]
+    },
+    {
+      "tier": "small",
+      "operation": "detect",
+      "fixture": "fixtures/multiline_0.5.png",
+      "fixture_sha256": "51304a6c5f7c121fb149b62c27ca315c6364f91df873fe2916c9ee4719427c81",
+      "expected": [
+        [
+          [
+            0.0,
+            0.0
+          ],
+          [
+            640.0,
+            0.0
+          ],
+          [
+            640.0,
+            360.0
+          ],
+          [
+            0.0,
+            360.0
+          ]
+        ]
+      ]
+    },
+    {
+      "tier": "small",
+      "operation": "detect",
+      "fixture": "fixtures/multiline_1.5.png",
+      "fixture_sha256": "6cde53f0216f852bad77d6ee5e347d52ea1fc516a1250d1d8dde9a7e658ac577",
+      "expected": [
+        [
+          [
+            211.0,
+            289.0
+          ],
+          [
+            428.0,
+            289.0
+          ],
+          [
+            428.0,
+            322.0
+          ],
+          [
+            211.0,
+            322.0
+          ]
+        ],
+        [
+          [
+            230.0,
+            237.0
+          ],
+          [
+            409.0,
+            237.0
+          ],
+          [
+            409.0,
+            273.0
+          ],
+          [
+            230.0,
+            273.0
+          ]
+        ]
+      ]
+    },
+    {
+      "tier": "small",
+      "operation": "detect",
+      "fixture": "fixtures/multiline_2.5.png",
+      "fixture_sha256": "6cde53f0216f852bad77d6ee5e347d52ea1fc516a1250d1d8dde9a7e658ac577",
+      "expected": [
+        [
+          [
+            211.0,
+            289.0
+          ],
+          [
+            428.0,
+            289.0
+          ],
+          [
+            428.0,
+            322.0
+          ],
+          [
+            211.0,
+            322.0
+          ]
+        ],
+        [
+          [
+            230.0,
+            237.0
+          ],
+          [
+            409.0,
+            237.0
+          ],
+          [
+            409.0,
+            273.0
+          ],
+          [
+            230.0,
+            273.0
+          ]
+        ]
+      ]
+    },
+    {
+      "tier": "medium",
+      "operation": "detect",
+      "fixture": "fixtures/english.png",
+      "fixture_sha256": "0333dcb7645327ea312db38b649724591c173267402cc195a826ca1ac0687a5e",
+      "expected": [
+        [
+          [
+            60.0,
+            72.0
+          ],
+          [
+            332.0,
+            72.0
+          ],
+          [
+            332.0,
+            118.0
+          ],
+          [
+            60.0,
+            118.0
+          ]
+        ]
+      ]
+    },
+    {
+      "tier": "medium",
+      "operation": "detect",
+      "fixture": "fixtures/chinese.png",
+      "fixture_sha256": "62fd04658349b9510a1a59870dc01b22ceb3535a1fc073363a89eb6b5f1b2471",
+      "expected": [
+        [
+          [
+            59.0,
+            69.0
+          ],
+          [
+            351.0,
+            69.0
+          ],
+          [
+            351.0,
+            122.0
+          ],
+          [
+            59.0,
+            122.0
+          ]
+        ]
+      ]
+    },
+    {
+      "tier": "medium",
+      "operation": "detect",
+      "fixture": "fixtures/japanese.png",
+      "fixture_sha256": "4a2ed72b090b6799aac639695a45b87c3443212c4c1a28a2dba8082a4ca92b24",
+      "expected": [
+        [
+          [
+            64.0,
+            69.0
+          ],
+          [
+            394.0,
+            69.0
+          ],
+          [
+            394.0,
+            121.0
+          ],
+          [
+            64.0,
+            121.0
+          ]
+        ]
+      ]
+    },
+    {
+      "tier": "medium",
+      "operation": "detect",
+      "fixture": "fixtures/mixed.png",
+      "fixture_sha256": "958c011084b6a94a2831a1cc2b42afe2aac4f67311d89aec7cca47197f24c58b",
+      "expected": [
+        [
+          [
+            60.0,
+            71.0
+          ],
+          [
+            536.0,
+            71.0
+          ],
+          [
+            536.0,
+            120.0
+          ],
+          [
+            60.0,
+            120.0
+          ]
+        ]
+      ]
+    },
+    {
+      "tier": "medium",
+      "operation": "detect",
+      "fixture": "fixtures/blank.png",
+      "fixture_sha256": "437d66e87b7c1ce6fddfc1759a46d8cc194691a982d77f9bd95d3145439bd76f",
+      "expected": []
+    },
+    {
+      "tier": "medium",
+      "operation": "detect",
+      "fixture": "fixtures/av1_0.5.png",
+      "fixture_sha256": "854c3ff6d37c310560cb46f8211a4e7a7d9809c43e5181cac903c6c6c17e3e76",
+      "expected": []
+    },
+    {
+      "tier": "medium",
+      "operation": "detect",
+      "fixture": "fixtures/av1_1.5.png",
+      "fixture_sha256": "ab90021da6bc465cc30237604a91d758a3cbd8b208e50d80d8058f177313be19",
+      "expected": [
+        [
+          [
+            203.0,
+            290.0
+          ],
+          [
+            435.0,
+            287.0
+          ],
+          [
+            435.0,
+            320.0
+          ],
+          [
+            203.0,
+            322.0
+          ]
+        ]
+      ]
+    },
+    {
+      "tier": "medium",
+      "operation": "detect",
+      "fixture": "fixtures/av1_2.5.png",
+      "fixture_sha256": "d3e93f7b2e151293bb971a2819ea66b0bdf3aebf3f851c25832dac7210bde704",
+      "expected": [
+        [
+          [
+            204.0,
+            289.0
+          ],
+          [
+            435.0,
+            289.0
+          ],
+          [
+            435.0,
+            321.0
+          ],
+          [
+            204.0,
+            321.0
+          ]
+        ]
+      ]
+    },
+    {
+      "tier": "medium",
+      "operation": "detect",
+      "fixture": "fixtures/multiline_0.5.png",
+      "fixture_sha256": "51304a6c5f7c121fb149b62c27ca315c6364f91df873fe2916c9ee4719427c81",
+      "expected": []
+    },
+    {
+      "tier": "medium",
+      "operation": "detect",
+      "fixture": "fixtures/multiline_1.5.png",
+      "fixture_sha256": "6cde53f0216f852bad77d6ee5e347d52ea1fc516a1250d1d8dde9a7e658ac577",
+      "expected": [
+        [
+          [
+            211.0,
+            291.0
+          ],
+          [
+            427.0,
+            288.0
+          ],
+          [
+            427.0,
+            321.0
+          ],
+          [
+            211.0,
+            323.0
+          ]
+        ],
+        [
+          [
+            233.0,
+            239.0
+          ],
+          [
+            406.0,
+            239.0
+          ],
+          [
+            406.0,
+            272.0
+          ],
+          [
+            233.0,
+            272.0
+          ]
+        ]
+      ]
+    },
+    {
+      "tier": "medium",
+      "operation": "detect",
+      "fixture": "fixtures/multiline_2.5.png",
+      "fixture_sha256": "6cde53f0216f852bad77d6ee5e347d52ea1fc516a1250d1d8dde9a7e658ac577",
+      "expected": [
+        [
+          [
+            211.0,
+            291.0
+          ],
+          [
+            427.0,
+            288.0
+          ],
+          [
+            427.0,
+            321.0
+          ],
+          [
+            211.0,
+            323.0
+          ]
+        ],
+        [
+          [
+            233.0,
+            239.0
+          ],
+          [
+            406.0,
+            239.0
+          ],
+          [
+            406.0,
+            272.0
+          ],
+          [
+            233.0,
+            272.0
+          ]
+        ]
+      ]
+    }
+  ],
+  "scope": "Frozen Paddle-equivalent fixtures; Arabic raw logical expectations separately validated through production bidi adapter. Not a language accuracy benchmark."
+}
