@@ -116,12 +116,16 @@ def vc_runtime(directory, license_file, stage, required, acknowledged=False):
     from vc_runtime_helper import verify_source
     manifest, _ = verify_source(directory, license_file)
     directory, license_file = Path(directory).resolve(strict=True), Path(license_file).resolve(strict=True)
-    paths = {p.name.lower(): p for p in directory.iterdir() if p.is_file() and not p.is_symlink()}
+    # The SDK's imports are not the complete worker closure: the compiled worker
+    # also imports CONCRT140. Stage only, but all of, the reviewed native runtime
+    # manifest (five exact DLLs), in the executable's own directory.
+    reviewed = {row['name']: row for row in manifest['files'] if row['name'].endswith('.dll')}
+    unreviewed = {name.lower() for name in required} - reviewed.keys()
+    if unreviewed:
+        raise ValueError('Required redistributable DLL is not reviewed: ' + ', '.join(sorted(unreviewed)))
     records = []
-    for name in required:
-        p = paths.get(name.lower())
-        if not p:
-            raise FileNotFoundError('Required redistributable DLL missing: ' + name)
+    for name in reviewed:
+        p = directory / name
         shutil.copy2(p, stage / name)
         records.append({'source': str(p), 'file': name, 'sha256': sha256(p), 'bytes': p.stat().st_size})
     notices = []
@@ -132,7 +136,8 @@ def vc_runtime(directory, license_file, stage, required, acknowledged=False):
         target = stage / 'licenses' / ('Visual-Cpp-redistributable-' + row['name'])
         shutil.copy2(source, target)  # Keep original document bytes/format, including the previous notice.
         notices.append({'file': target.relative_to(stage).as_posix(), 'sha256': sha256(source), 'source': row['url']})
-    return {'complete': True, 'files': records, 'license_sha256': sha256(license_file), 'notices': notices, 'official_source': manifest['installer'],
+    return {'complete': True, 'files': records, 'sdk_required_dlls': required, 'runtime_version': manifest['version'],
+            'license_sha256': sha256(license_file), 'notices': notices, 'official_source': manifest['installer'],
             'scope': 'Caller-supplied licensed redistributable source; final PE/ownership audit remains required.'}
 
 

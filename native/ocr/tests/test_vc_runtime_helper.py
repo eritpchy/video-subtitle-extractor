@@ -2,16 +2,16 @@ import hashlib,json,pathlib,struct,tempfile,unittest
 from unittest.mock import patch
 import vc_runtime_helper as h
 class VCTests(unittest.TestCase):
- def test_synthetic_four_dll_hashes_and_machine(self):
+ def test_synthetic_five_dll_hashes_and_machine(self):
   # Unit fixture only: no Microsoft binaries or license acceptance in the repo.
   with tempfile.TemporaryDirectory() as t:
    root=pathlib.Path(t);rows=[]
-   for name in ['license.docx','license-2015-2022.docx','msvcp140.dll','msvcp140_1.dll','vcruntime140.dll','vcruntime140_1.dll']:
+   for name in ['license.docx','license-2015-2022.docx','msvcp140.dll','msvcp140_1.dll','vcruntime140.dll','vcruntime140_1.dll','concrt140.dll']:
     body=bytearray(128);body[:2]=b'MZ';struct.pack_into('<I',body,0x3c,64);body[64:68]=b'PE\0\0';struct.pack_into('<H',body,68,0x8664)
     data=b'synthetic test license' if name.endswith('.docx') else bytes(body)+name.encode()
     (root/name).write_bytes(data);rows.append({'name':name,'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()})
    with patch.object(h,'load_manifest',return_value={'files':rows,'license_file':'license.docx'}):
-    m,values=h.verify_source(root,root/'license.docx');self.assertEqual(len(values),6)
+    m,values=h.verify_source(root,root/'license.docx');self.assertEqual(len(values),7)
  def test_license_assertion_required(self):
   with self.assertRaises(PermissionError):h.fetch('unused','unused')
  def test_offline_never_downloads(self):
@@ -41,9 +41,13 @@ def test_committed_manifest_exact_runtime_and_independent_notices():
  assert m['license_file']=='license.docx'
  assert m['installer']['sha256']=='843068991daaa1f73ad9f6239bce4d0f6a07a51f18c37ea2a867e9beca71295c'
  assert m['runtime_cab']['member']=='a4'
+ assert h.DLL_NAMES=={'msvcp140.dll','msvcp140_1.dll','vcruntime140.dll','vcruntime140_1.dll','concrt140.dll'}
  assert {r['name'] for r in m['files']}==h.DLL_NAMES|h.LICENSE_NAMES
  assert all(r['file_version']==m['version'] for r in m['files'] if r['name'] in h.DLL_NAMES)
  assert all(r['url'].startswith('https://visualstudio.microsoft.com/') for r in m['files'] if r['name'] in h.LICENSE_NAMES)
+ concrt=next(r for r in m['files'] if r['name']=='concrt140.dll')
+ assert concrt['sha256']=='54716f0738af891f283d213b5c8d11b25896bb8ee3097d301eae718560cf974e'
+ assert concrt['bytes']==374200 and concrt['cab_member']=='concrt140.dll_amd64'
 
 
 def source(data,url='https://visualstudio.microsoft.com/pinned-source'):
@@ -81,12 +85,14 @@ def test_cached_source_rejects_unsafe_digest_path_and_symlink(tmp_path):
 
 
 def test_manifest_rejects_unreviewed_license_or_runtime_metadata(tmp_path):
- for change in ('license','source','version','member'):
+ for change in ('license','source','version','member','missing_worker_runtime','extra_runtime'):
   m=h.load_manifest()
   if change=='license':m['license_file']='license-2015-2022.docx'
   elif change=='source':m['files'][0]['url']='https://example.invalid/terms.docx'
   elif change=='version':next(r for r in m['files'] if r['name'] in h.DLL_NAMES)['file_version']='14.44.35211.0'
-  else:next(r for r in m['files'] if r['name'] in h.DLL_NAMES)['cab_member']='other.dll_amd64'
+  elif change=='member':next(r for r in m['files'] if r['name'] in h.DLL_NAMES)['cab_member']='other.dll_amd64'
+  elif change=='missing_worker_runtime':m['files']=[r for r in m['files'] if r['name']!='concrt140.dll']
+  else:m['files'].append({'name':'unknown_vendor.dll'})
   p=tmp_path/'manifest.json';p.write_text(json.dumps(m))
   with pytest.raises(ValueError):h.load_manifest(p)
 
@@ -96,14 +102,28 @@ def test_build_stages_current_and_previous_notice_without_format_change(tmp_path
  directory=tmp_path/'source';directory.mkdir();stage=tmp_path/'stage';(stage/'licenses').mkdir(parents=True)
  m=h.load_manifest()
  for row in m['files']:(directory/row['name']).write_bytes(('fixture '+row['name']).encode())
+ # ORT's four names intentionally omit the additional compiled-worker dependency.
+ sdk_required=sorted(h.DLL_NAMES-{'concrt140.dll'})
  with patch.object(h,'verify_source',return_value=(m,{})):
-  result=build.vc_runtime(directory,directory/m['license_file'],stage,sorted(h.DLL_NAMES),True)
+  result=build.vc_runtime(directory,directory/m['license_file'],stage,sdk_required,True)
  assert result['complete'] and len(result['notices'])==2
+ assert result['sdk_required_dlls']==sdk_required
+ assert 'concrt140.dll' not in sdk_required and (stage/'concrt140.dll').is_file()
  for row in result['notices']:
   p=stage/row['file'];assert p.suffix=='.docx'
   original=directory/p.name.removeprefix('Visual-Cpp-redistributable-')
   assert p.read_bytes()==original.read_bytes()
- assert len(list(stage.glob('*.dll')))==4
+ assert {p.name for p in stage.glob('*.dll')}==h.DLL_NAMES
+
+
+def test_build_rejects_unreviewed_sdk_runtime_before_copying(tmp_path):
+ import build
+ directory=tmp_path/'source';directory.mkdir();stage=tmp_path/'stage';stage.mkdir()
+ (directory/'license.docx').write_bytes(b'test notice; never executed')
+ with patch.object(h,'verify_source',return_value=(h.load_manifest(),{})):
+  with pytest.raises(ValueError,match='not reviewed: unknown_vendor.dll'):
+   build.vc_runtime(directory,directory/'license.docx',stage,['unknown_vendor.dll'],True)
+ assert not list(stage.iterdir())
 
 
 def test_static_fetch_requires_both_notices_before_publication_and_reuse(tmp_path):

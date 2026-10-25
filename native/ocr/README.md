@@ -177,12 +177,12 @@ The helper statically extracts the reviewed **14.51.36247.0** official package; 
 never executes the installer or copies ordinary System32 DLLs. This pin covers
 the actual **14.44.35220.0** CRT headers observed in Server 2022/2025 CI; neither
 the 14.44 compiler-family restriction nor the header/runtime comparison is relaxed.
-Four x64 DLLs and two independently hash-pinned official license documents are
+Five x64 DLLs and two independently hash-pinned official license documents are
 verified. The current package links to the 2026 terms instead of embedding an RTF;
 the original 2015–2022 notice is also preserved, without replacing the current
 terms. Downloads are content-addressed and verified even on cache hits.
 `--vc-runtime-dir` + `--vc-license` can instead supply those same pinned bytes
-explicitly (`license.docx` plus the historical notice and four DLLs). Merely finding Visual Studio on a runner does
+explicitly (`license.docx` plus the historical notice and five DLLs). Merely finding Visual Studio on a runner does
 not establish the repository owner's licensing qualification.
 
 Microsoft's [redistribution guidance](https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files?view=msvc-170)
@@ -198,12 +198,18 @@ The 2026 terms have changed, including use/updated-terms, feedback and trade-law
 provisions. Reviewing/downloading these documents is not an explicit acceptance;
 the applicable qualification must be established before activating distribution.
 Python's existing Shiboken/PySide CRT source is separate and is not changed here.
+The native manifest includes `concrt140.dll` from that same approved installer:
+the actual Server 2022 worker imports it in addition to the ORT SDK's four CRT
+DLLs. All five reviewed files are staged beside `native-ocr.exe`; the SDK's four
+names alone must not limit worker staging. CONCRT's mandatory imports resolve
+to those staged MSVCP/VCRUNTIME files and base Windows/UCRT, not host VC runtime.
 
 ## Remaining release gates
 
 - Official Mac SDK and wheel both require **macOS 14.0**; no older baseline claim.
-- The Windows SDK needs four VC DLLs; their exact SDK import symbols were verified,
-  but the newly compiled worker and actual Windows load must still be audited.
+- The Windows SDK needs four VC DLLs and the actual native worker additionally
+  imports CONCRT140. The combined five-DLL closure is pinned and staged app-local;
+  exact worker import symbols and actual Windows loads must still be audited.
 - Linux GCC/libstdc++/libgcc provenance and supported OS baseline must come from
   the attributable CI runner, not this diagnostic container's unattributable libs.
 - Windows/macOS native execution, actual loaded libraries, read-only relocation,

@@ -371,6 +371,25 @@ def test_pe_recursive_runtime_dependencies_must_be_reachable(tmp_path):
     assert result['executables']['vsf/VideoSubFinder.exe']['runtime/vcruntime140.dll']['ucrtbase.dll'] == 'Windows base OS'
 
 
+def test_native_worker_concurrency_runtime_must_be_beside_worker_not_only_in_python(tmp_path):
+    executable = tmp_path / 'native-ocr/native-ocr.exe'
+    runtime_python = tmp_path / 'runtime/python.exe'
+    _write_pe(executable, ['CONCRT140.dll', 'MSVCP140.dll'])
+    _write_pe(tmp_path / 'native-ocr/msvcp140.dll', ['VCRUNTIME140.dll'])
+    _write_pe(tmp_path / 'native-ocr/vcruntime140.dll', ['KERNEL32.dll'])
+    _write_pe(tmp_path / 'runtime/Lib/site-packages/shiboken6/concrt140.dll', ['MSVCP140.dll'])
+    reports = tmp_path / 'reports'
+    with pytest.raises(RuntimeError, match='unbundled/unreachable DLL: CONCRT140.dll'):
+        probe.audit_windows_executables(tmp_path, runtime_python, reports, [executable])
+    _write_pe(tmp_path / 'native-ocr/concrt140.dll', ['MSVCP140.dll', 'VCRUNTIME140.dll', 'KERNEL32.dll'])
+    result = probe.audit_windows_executables(tmp_path, runtime_python, reports, [executable])
+    graph = result['executables']['native-ocr/native-ocr.exe']
+    assert result['passed']
+    assert graph['native-ocr/native-ocr.exe']['CONCRT140.dll'] == 'native-ocr/concrt140.dll'
+    assert graph['native-ocr/concrt140.dll']['MSVCP140.dll'] == 'native-ocr/msvcp140.dll'
+    assert probe.library_violation(r'C:\Windows\System32\CONCRT140.dll', r'C:\VSE', 'Windows')
+
+
 def test_linux_only_glibc_images_allowed_externally():
     assert probe.library_violation('/lib/x86_64-linux-gnu/libc.so.6', '/app', 'Linux') is None
     assert probe.library_violation('/lib/x86_64-linux-gnu/libQt6Core.so.6', '/app', 'Linux')

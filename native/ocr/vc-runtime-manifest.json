@@ -100,6 +100,24 @@
         "VCRUNTIME140.dll",
         "KERNEL32.dll"
       ]
+    },
+    {
+      "name": "concrt140.dll",
+      "cab_member": "concrt140.dll_amd64",
+      "bytes": 374200,
+      "sha256": "54716f0738af891f283d213b5c8d11b25896bb8ee3097d301eae718560cf974e",
+      "file_version": "14.51.36247.0",
+      "imports": [
+        "MSVCP140.dll",
+        "VCRUNTIME140_1.dll",
+        "VCRUNTIME140.dll",
+        "api-ms-win-crt-heap-l1-1-0.dll",
+        "api-ms-win-crt-math-l1-1-0.dll",
+        "api-ms-win-crt-runtime-l1-1-0.dll",
+        "api-ms-win-crt-string-l1-1-0.dll",
+        "api-ms-win-crt-stdio-l1-1-0.dll",
+        "KERNEL32.dll"
+      ]
     }
   ],
   "licensing_sources": [

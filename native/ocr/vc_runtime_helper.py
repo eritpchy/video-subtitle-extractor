@@ -6,7 +6,7 @@ not entitlement. Only supports the exact reviewed, SHA256-pinned MSZIP cabinets.
 """
 import argparse,hashlib,json,os,pathlib,shutil,struct,tempfile,urllib.request,zlib,subprocess
 
-DLL_NAMES={'msvcp140.dll','msvcp140_1.dll','vcruntime140.dll','vcruntime140_1.dll'}
+DLL_NAMES={'msvcp140.dll','msvcp140_1.dll','vcruntime140.dll','vcruntime140_1.dll','concrt140.dll'}
 LICENSE_NAMES={'license.docx','license-2015-2022.docx'}
 
 def digest(b):return hashlib.sha256(b).hexdigest()
