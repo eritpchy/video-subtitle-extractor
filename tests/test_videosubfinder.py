@@ -263,3 +263,35 @@ def test_invalid_archive_does_not_replace_previous_installation(tmp_path):
         installer.install(system="windows", arch="x64", destination=destination, archive=archive, checksums=manifest)
     assert (destination / "keep").read_text() == "previous"
     assert not (tmp_path / "escaped.exe").exists()
+
+
+@pytest.mark.parametrize('message', [
+    '[av1 @ 1234] Failed to get pixel format.',
+    '[av1 @ 1234] Get current frame error',
+    'OCVVideo::OpenMovie(): ERROR: Cannot decode the first frame of video \"bad.mkv\"',
+    'ERROR: Cannot decode the first frame of video',
+])
+def test_decoder_error_is_failure_even_with_exit_zero_and_finish(message):
+    progress = []
+    with pytest.raises(vsf.VideoSubFinderDecodeError, match='native video decoding failed'):
+        vsf.run_command(fake_command(f"print({message!r}); print('Progress: 100%'); print('FINISH')"),
+                        on_progress=progress.append)
+    assert 100 not in progress
+
+
+def test_normal_eof_empty_clip_does_not_trigger_decoder_retry():
+    result = vsf.run_command(fake_command("print('Video ended or cannot read new frames.Progress: 100%'); print('FINISH')"))
+    assert result.timestamps_ms == () and result.returncode == 0
+
+
+def test_decoder_words_inside_filename_are_not_decoder_errors():
+    result = vsf.run_command(fake_command("print('Opening file Get current frame error.mkv'); print('FINISH')"))
+    assert result.timestamps_ms == ()
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX signal exit semantics')
+def test_signalled_decoder_with_error_log_does_not_request_retry():
+    command = fake_command("import os, signal; print('[av1 @ 1234] Failed to get pixel format.', flush=True); os.kill(os.getpid(), signal.SIGTERM)")
+    with pytest.raises(vsf.VideoSubFinderError, match='exit -15') as error:
+        vsf.run_command(command)
+    assert not isinstance(error.value, vsf.VideoSubFinderDecodeError)

@@ -35,7 +35,7 @@ from backend.tools.video_decode import read_frame, compatible_video
 from backend.tools.paddle_model_config import PaddleModelConfig
 from backend.tools.process_manager import ProcessManager
 from backend.tools.videosubfinder import (build_command, resolve_binary, run_command,
-                                         timestamp_to_frame, verify_binary, VideoSubFinderError)
+                                         timestamp_to_frame, verify_binary, VideoSubFinderError, VideoSubFinderDecodeError)
 from backend.tools.subtitle_detect import SubtitleDetect
 from backend.bean.subtitle_area import SubtitleArea
 import threading
@@ -472,15 +472,28 @@ class SubtitleExtractor:
 
         self.vsf_running = True
         try:
-            source = nullcontext(self.video_path)
-            if getattr(self, '_needs_compatible_video', False):
-                self.append_output("OpenCV cannot decode this codec; preparing a lossless temporary video for VideoSubFinder")
-                source = compatible_video(self.video_path, self.temp_output_dir, on_spawn=register_process)
-            with source as compatible_path:
-                command[command.index('-i') + 1] = str(compatible_path)
-                result = run_command(command,
-                    on_progress=lambda value: self.update_progress(frame_extract=value),
-                    on_log=self.append_output, on_spawn=register_process)
+            needs_compatible = getattr(self, '_needs_compatible_video', False)
+            while True:
+                source = nullcontext(self.video_path)
+                if needs_compatible:
+                    self.append_output("Video decoder cannot read this codec; preparing a lossless temporary video for VideoSubFinder")
+                    source = compatible_video(self.video_path, self.temp_output_dir, on_spawn=register_process)
+                try:
+                    with source as compatible_path:
+                        command[command.index('-i') + 1] = str(compatible_path)
+                        result = run_command(command,
+                            on_progress=lambda value: self.update_progress(frame_extract=value),
+                            on_log=self.append_output, on_spawn=register_process)
+                    break
+                except VideoSubFinderDecodeError:
+                    if needs_compatible:
+                        raise  # Never loop or accept a failed compatibility decode.
+                    # Python OpenCV and the native VSF package have independent
+                    # decoder builds. Retry only an explicit native decode error,
+                    # not a legitimate empty subtitle result or unrelated failure.
+                    needs_compatible = True
+                    if os.path.isfile(self.vsf_subtitle):
+                        os.remove(self.vsf_subtitle)
             if not os.path.isfile(self.vsf_subtitle):
                 raise VideoSubFinderError("VideoSubFinderCli did not write the requested SRT timing file")
             # Frame events can arrive out of order from the CLI worker pool.

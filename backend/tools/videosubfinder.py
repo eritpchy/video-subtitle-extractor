@@ -19,10 +19,18 @@ VSF_RELEASE_BASE = "https://github.com/eritpchy/videosubfinder-cli/releases/down
 _FRAME_RE = re.compile(r"^Frame:\s+(\d+)_(\d+)_(\d+)_(\d+)__")
 _PROGRESS_RE = re.compile(r"^Progress:\s*(\d+(?:\.\d+)?)%")
 _VERSION_RE = re.compile(r"^VideoSubFinderCli (\d+)\.(\d+)(?:\.(\d+))?\s*$")
+_DECODE_ERROR_RE = re.compile(
+    r"^(?:\[[^\]\r\n]+ @ [0-9a-fx]+\]\s+(?:Failed to get pixel format\.?|Get current frame error\.?)\s*$"
+    r"|(?:OCVVideo::OpenMovie\(\): )?ERROR: Cannot decode the first frame of video\b)",
+    re.IGNORECASE)
 
 
 class VideoSubFinderError(RuntimeError):
     """The CLI is unavailable, incompatible, or failed to extract subtitles."""
+
+
+class VideoSubFinderDecodeError(VideoSubFinderError):
+    """The native decoder failed, even if an older CLI reports exit zero."""
 
 
 def platform_target(system=None, machine=None):
@@ -161,6 +169,7 @@ def run_command(command, *, on_progress: Optional[Callable] = None,
         kwargs["start_new_session"] = True
     tail, timestamps = deque(maxlen=40), set()
     finished = False
+    decode_errors = []
     try:
         process = subprocess.Popen(command, **kwargs)
     except OSError as error:
@@ -171,6 +180,12 @@ def run_command(command, *, on_progress: Optional[Callable] = None,
         for line in process.stdout:
             event, value = parse_event(line)
             tail.append(line.rstrip())
+            # Older portable OpenCV builds can fail AV1 while Python's wheel
+            # decodes it. These are decoder errors, unlike the normal EOF log
+            # "Video ended or cannot read new frames" or a subtitle-free clip.
+            if _DECODE_ERROR_RE.search(line):
+                if len(decode_errors) < 8:
+                    decode_errors.append(line.rstrip())
             if event == "frame":
                 timestamps.add(value)
             elif event == "progress":
@@ -192,6 +207,9 @@ def run_command(command, *, on_progress: Optional[Callable] = None,
         raise
     finally:
         process.stdout.close()
+    if decode_errors and returncode >= 0 and returncode != 0xC000013A:
+        # Cancellation (POSIX signal or Windows Ctrl-C) must never retry.
+        raise VideoSubFinderDecodeError("VideoSubFinder native video decoding failed:\n" + "\n".join(decode_errors))
     if returncode != 0 or not finished:
         reason = f"exit {returncode}" if returncode else "missing FINISH marker"
         raise VideoSubFinderError(f"VideoSubFinderCli failed ({reason}):\n" + "\n".join(tail))
