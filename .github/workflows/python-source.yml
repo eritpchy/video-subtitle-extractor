@@ -202,3 +202,116 @@ jobs:
         run: |
           echo 'This validates Python application source with standard third-party libraries and VSF, not a claim that Qt/ORT/FFmpeg are implemented in Python.' >> "$GITHUB_STEP_SUMMARY"
           echo 'No custom OCR worker or C++ build is used. CoreML execution evidence is not physical GPU, timing or final distribution certification.' >> "$GITHUB_STEP_SUMMARY"
+
+
+  original-models:
+    # CI reuses already accepted original data; source users use public model URLs.
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/paddle-models.yml
+
+  windows-source-cuda:
+    name: Windows Server 2022 / Python source CUDA ${{ matrix.cuda }} / explicit CPU acceptance
+    needs: original-models
+    runs-on: windows-2022
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda: '11.8'
+            requirements: requirements-source-cuda118.txt
+          - cuda: '12.6'
+            requirements: requirements-source-cuda126.txt
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      QT_QPA_PLATFORM: windows
+      VSE_OCR_BACKEND: paddle
+      VSE_MODEL_DIR: ${{ github.workspace }}/build/paddle-seed/models
+      VSE_NATIVE_OCR_ROOT: ${{ github.workspace }}/build/absent-native-worker
+      VSE_OFFLINE: '1'
+      PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: 'True'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Create a distinct empty Python source virtual environment
+        run: |
+          python - <<'PY'
+          import os, pathlib, subprocess, sys
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'cuda-source-venv'
+          if root.exists() or root.is_symlink():
+              raise RuntimeError('Source validation requires a new virtual environment, never an existing directory')
+          subprocess.run([sys.executable, '-m', 'venv', str(root)], check=True)
+          pathlib.Path('test-results/python-source-cuda').mkdir(parents=True)
+          with open(os.environ['GITHUB_PATH'], 'a', encoding='utf-8') as target:
+              target.write(str(root / 'Scripts') + '\n')
+          PY
+      - name: Ordinary source pip install, not distribution meta-package substitution
+        run: |
+          python -m pip install -r ${{ matrix.requirements }} pytest==8.3.5 --report test-results/python-source-cuda/pip-install.json
+          python -m pip check
+          python -m pip freeze > test-results/python-source-cuda/pip-freeze.txt
+      - name: Verify exact whole-wheel identity and genuine CUDA build, while selecting CPU
+        run: >-
+          python scripts/check_source_cuda_environment.py --cuda ${{ matrix.cuda }}
+          --pip-report test-results/python-source-cuda/pip-install.json
+          --report test-results/python-source-cuda/environment.json
+      - name: Source dependency and fail-closed environment contracts
+        run: >-
+          python -m pytest tests/test_source_cuda_requirements.py tests/test_source_cuda_environment.py
+          tests/test_python_source_workflow.py tests/test_paddle_package_models.py
+          tests/test_check_paddle_models.py tests/test_e2e_modes.py -q
+          --junitxml=test-results/python-source-cuda/contracts.xml
+      - name: Download this run's independently verified original-model seed
+        uses: actions/download-artifact@v4
+        with:
+          name: paddle-original-models-${{ github.sha }}
+          path: build/paddle-seed
+      - name: Recheck all source model bytes without any model-origin request
+        run: |
+          python scripts/paddle_model_seed_ci.py --verify-seed build/paddle-seed
+          python -S scripts/prepare_source_models.py verify --format paddle build/paddle-seed/models
+      - name: Verify the unchanged VSF release and absence of a project OCR worker
+        run: |
+          python scripts/install_videosubfinder.py --version 6.10.7
+          python scripts/install_videosubfinder.py --verify-only
+          python - <<'PY'
+          import pathlib
+          workers = [str(path) for path in pathlib.Path('.').rglob('*') if path.is_file() and path.name in ('native-ocr', 'native-ocr.exe')]
+          if workers:
+              raise RuntimeError('Custom OCR workers must not be present in source validation: ' + str(workers))
+          PY
+      - name: Actual Python GUI startup and CLI entrypoint
+        run: |
+          python gui.py --smoke-test
+          python -m backend.cli --version
+          python -m backend.cli --help
+      - name: All 15 original models and 168 real source CPU cases in all three modes
+        run: >-
+          python scripts/check_paddle_models.py --app-root .
+          --fixtures native/ocr/tests/evidence --report test-results/python-source-cuda/cpu-all.json
+      - name: Actual source CLI video extraction in all three modes, explicitly CPU
+        run: >-
+          python scripts/e2e_smoke.py --all-modes --provider cpu
+          --output test-results/python-source-cuda/video
+      - name: Preserve source CUDA evidence including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-source-cuda-${{ matrix.cuda }}-${{ github.sha }}
+          path: |
+            test-results/python-source-cuda/
+            docs/audits/source-cuda-wheel-pins.json
+            requirements-source*.txt
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Keep compiled CUDA identity and real GPU execution distinct
+        if: always()
+        run: |
+          echo 'Fresh ordinary-pip Python source environment; no project C++ worker or package bootstrap. Every OCR gate explicitly selects CPU.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'CUDA wheel identity is not GPU hardware/OCR certification. Client one-click packages remain a separate acceptance chain.' >> "$GITHUB_STEP_SUMMARY"
