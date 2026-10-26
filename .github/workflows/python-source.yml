@@ -1,0 +1,150 @@
+name: Complete Python source inference validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: python-source-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  source:
+    name: Clean Python 3.12 / ${{ matrix.name }} / no custom worker
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: Linux explicit CPU
+            architecture: x64
+            provider: cpu
+          - os: macos-26
+            name: macOS explicit CPU and CoreML
+            architecture: arm64
+            provider: both
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      ORT_DISABLE_TELEMETRY: '1'
+      QT_QPA_PLATFORM: ${{ matrix.os == 'macos-26' && 'cocoa' || 'offscreen' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: ${{ matrix.architecture }}
+      - name: Install Linux Qt runtime libraries, not an OCR compiler
+        if: runner.os == 'Linux'
+        run: >-
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          libgl1 libegl1 libglib2.0-0 libdbus-1-3 libxkbcommon0 libfontconfig1
+          libfreetype6 libx11-6 libx11-xcb1 libxext6 libxrender1 libxi6 libxfixes3
+          libsm6 libice6 libxcb1 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1
+          libxcb-image0 libxcb-util1 libxcb-randr0 libxcb-render0 libxcb-render-util0
+          libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-xkb1
+          libxcb-glx0 libxkbcommon-x11-0
+      - name: Create a new interpreter environment and empty user cache
+        run: |
+          python -m venv "$RUNNER_TEMP/python-source-venv"
+          mkdir -p "$RUNNER_TEMP/python-source-home" test-results/python-source
+          echo "$RUNNER_TEMP/python-source-venv/bin" >> "$GITHUB_PATH"
+          echo "HOME=$RUNNER_TEMP/python-source-home" >> "$GITHUB_ENV"
+          echo "XDG_CACHE_HOME=$RUNNER_TEMP/python-source-home/cache" >> "$GITHUB_ENV"
+      - name: Install public Python source dependencies in the new environment
+        run: |
+          python -m pip install -r requirements-coreml-inference.txt pytest==8.3.5 --report test-results/python-source/pip-install.json
+          python -m pip check
+          python -m pip freeze > test-results/python-source/pip-freeze.txt
+      - name: Check default source dispatch without any inference runtime initialization
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, subprocess, sys
+          root = pathlib.Path.cwd()
+          env = {key: value for key, value in os.environ.items() if not key.startswith('VSE_')}
+          code = "import sys; sys.path.insert(0, sys.argv[1]); from backend.tools.native_ocr import selected_backend; assert selected_backend() == 'paddle'; assert not {'paddle','onnxruntime','PySide6'} & set(sys.modules); print('Python Paddle is the source default; no custom worker or inference runtime initialized')"
+          result = subprocess.run([sys.executable, '-I', '-S', '-c', code, str(root)], env=env, check=True, capture_output=True, text=True)
+          workers = [str(path.relative_to(root)) for path in root.rglob('*') if path.is_file() and path.name in ('native-ocr', 'native-ocr.exe')]
+          if workers:
+              raise RuntimeError('A compiled custom OCR worker unexpectedly exists in the source checkout: ' + str(workers))
+          pathlib.Path('test-results/python-source/source-default.json').write_text(json.dumps({'source_default': 'paddle', 'custom_worker_files': workers, 'stdout': result.stdout, 'interpreter': sys.executable, 'scope': 'Clean source selection, not an inference or GPU claim'}, indent=2) + '\n')
+          PY
+      - name: Unit tests for Python provider, source-only data and evidence contracts
+        run: >-
+          python -m pytest tests/test_python_coreml*.py tests/test_prepare_source_models.py
+          tests/test_e2e_python_coreml.py tests/test_python_source_workflow.py
+          -q --junitxml=test-results/python-source/contracts.xml
+      - name: Restore only the exact immutable public model-data archive
+        uses: actions/cache@v4
+        with:
+          path: build/source-model-downloads
+          key: source-model-data-60e6f8098c058777273b5a6820d804731b5c93c45c78b14f5d8d1d1165361a11
+      - name: Prepare all 15 ONNX graphs from public data, never a worker dependency
+        run: |
+          python -S scripts/prepare_source_models.py onnx --output build/source-models --cache build/source-model-downloads
+          python -S scripts/prepare_source_models.py verify --format onnx build/source-models
+      - name: Install and verify the unchanged third-party video tool
+        run: |
+          python scripts/install_videosubfinder.py --version 6.10.7
+          python scripts/install_videosubfinder.py --verify-only
+      - name: Select the complete Python inference backend, not the native distribution
+        run: |
+          echo "VSE_OCR_BACKEND=python-coreml" >> "$GITHUB_ENV"
+          echo "VSE_PYTHON_COREML_MODEL_ROOT=$GITHUB_WORKSPACE/build/source-models" >> "$GITHUB_ENV"
+          echo "VSE_NATIVE_OCR_ROOT=$RUNNER_TEMP/absent-native-worker" >> "$GITHUB_ENV"
+          echo "VSE_OFFLINE=1" >> "$GITHUB_ENV"
+      - name: Real Python GUI startup and CLI entrypoint
+        run: |
+          python gui.py --smoke-test
+          python -m backend.cli --version
+          python -m backend.cli --help
+      - name: Actual Python CoreML small and medium compatibility before wider coverage
+        if: runner.os == 'macOS'
+        run: >-
+          python scripts/check_python_coreml.py --models build/source-models
+          --fixtures native/ocr/tests/evidence --provider coreml --case-set early
+          --report test-results/python-source/coreml-early.json
+      - name: Actual Python CoreML execution of every fixed model
+        if: runner.os == 'macOS'
+        run: >-
+          python scripts/check_python_coreml.py --models build/source-models
+          --fixtures native/ocr/tests/evidence --provider coreml --case-set models
+          --report test-results/python-source/coreml-models.json
+      - name: All 168 cases across three production modes on explicit Python CPU
+        run: >-
+          python scripts/check_python_coreml.py --models build/source-models
+          --fixtures native/ocr/tests/evidence --provider cpu --case-set all
+          --report test-results/python-source/cpu-all.json
+      - name: All 168 cases across three production modes on Python CoreML
+        if: runner.os == 'macOS'
+        run: >-
+          python scripts/check_python_coreml.py --models build/source-models
+          --fixtures native/ocr/tests/evidence --provider coreml --case-set all
+          --report test-results/python-source/coreml-all.json
+      - name: Real source CLI video to SRT in all modes with same-video provider comparison
+        run: >-
+          python scripts/e2e_python_coreml.py --models build/source-models
+          --provider ${{ matrix.provider }} --output test-results/python-source/video
+      - name: Preserve source evidence including genuine failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-source-evidence-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            test-results/python-source/
+            backend/tools/python_coreml_runtime.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Keep source, native distribution and GPU proof separate
+        if: always()
+        run: |
+          echo 'This validates Python application source with standard third-party libraries and VSF, not a claim that Qt/ORT/FFmpeg are implemented in Python.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No custom OCR worker or C++ build is used. CoreML execution evidence is not physical GPU, timing or final distribution certification.' >> "$GITHUB_STEP_SUMMARY"
