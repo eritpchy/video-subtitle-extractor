@@ -1,5 +1,10 @@
 """Source-only CI cannot silently replace native release or claim GPU proof."""
 from pathlib import Path
+import json
+import os
+import subprocess
+import sys
+import textwrap
 
 ROOT = Path(__file__).resolve().parents[1]
 PATHS = (
@@ -76,3 +81,41 @@ def test_only_a_separate_diagnostic_snapshot_can_add_its_exact_trigger():
     for file in (release, standard):
         assert expected in file.split('  push:', 1)[1].split('  pull_request:', 1)[0]
         assert '  pull_request:' in file and '  workflow_dispatch:' in file
+
+
+def test_host_loader_cleanup_keeps_the_strict_source_guard_and_precedes_installation():
+    value = workflow()
+    assert value.index('Prove the fresh interpreter starts') < value.index('Install public Python source dependencies')
+    assert "name.startswith(('LD_', 'DYLD_'))" in value
+    assert "[str(interpreter), '-I', '-c', code]" in value
+    assert 'env=clean, check=True' in value
+    assert 'clean-interpreter.json' in value
+    checker = (ROOT / 'scripts/check_python_coreml.py').read_text(encoding='utf-8')
+    assert 'Start a fresh Python source process without loader overrides' in checker
+    assert '/opt/hostedtoolcache' not in checker
+
+
+def test_actual_workflow_cleanup_starts_a_fresh_venv_without_poisoned_loader_values(tmp_path):
+    step = workflow().split('- name: Prove the fresh interpreter starts', 1)[1].split('- name:', 1)[0]
+    code = textwrap.dedent(step.split("python - <<'PY'\n", 1)[1].rsplit('          PY', 1)[0])
+    venv = tmp_path / 'python-source-venv'
+    subprocess.run([sys.executable, '-m', 'venv', '--without-pip', str(venv)], check=True)
+    (tmp_path / 'test-results/python-source').mkdir(parents=True)
+    environment_file = tmp_path / 'github-env'
+    environment_file.write_text('EXISTING_VALUE=preserved\n')
+    env = dict(os.environ, RUNNER_TEMP=str(tmp_path), GITHUB_ENV=str(environment_file),
+               LD_LIBRARY_PATH=str(tmp_path / 'not-the-python-library'),
+               DYLD_LIBRARY_PATH=str(tmp_path / 'not-the-runtime'),
+               DYLD_FALLBACK_LIBRARY_PATH=str(tmp_path / 'not-the-fallback'))
+    result = subprocess.run([sys.executable, '-I', '-c', code], cwd=tmp_path, env=env,
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    report = json.loads((tmp_path / 'test-results/python-source/clean-interpreter.json').read_text())
+    assert report['probe']['loader_overrides'] == {}
+    assert Path(report['probe']['prefix']).resolve() == venv.resolve()
+    written = environment_file.read_text()
+    assert written.startswith('EXISTING_VALUE=preserved\n')
+    for name in ('LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH'):
+        assert name in report['removed_loader_variable_names']
+        assert name + '=\n' in written
+    assert 'not-the-' not in written

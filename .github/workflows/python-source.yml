@@ -93,6 +93,25 @@ jobs:
           echo "$RUNNER_TEMP/python-source-venv/bin" >> "$GITHUB_PATH"
           echo "HOME=$RUNNER_TEMP/python-source-home" >> "$GITHUB_ENV"
           echo "XDG_CACHE_HOME=$RUNNER_TEMP/python-source-home/cache" >> "$GITHUB_ENV"
+      - name: Prove the fresh interpreter starts without host loader overrides
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, re, subprocess
+          removed = sorted(name for name in os.environ if name.startswith(('LD_', 'DYLD_')))
+          if any(not re.fullmatch('[A-Z][A-Z0-9_]*', name) for name in removed):
+              raise RuntimeError('Invalid loader environment variable name')
+          clean = {name: value for name, value in os.environ.items() if name not in removed}
+          interpreter = pathlib.Path(os.environ['RUNNER_TEMP']) / 'python-source-venv/bin/python'
+          code = "import json,os,sys; remaining={k:v for k,v in os.environ.items() if k.startswith(('LD_','DYLD_')) and v}; assert not remaining,remaining; print(json.dumps({'interpreter':sys.executable,'prefix':sys.prefix,'version':sys.version,'loader_overrides':remaining}))"
+          result = subprocess.run([str(interpreter), '-I', '-c', code], env=clean, check=True, capture_output=True, text=True)
+          probe = json.loads(result.stdout)
+          if pathlib.Path(probe['prefix']).resolve() != interpreter.parent.parent.resolve():
+              raise RuntimeError('Clean loader probe did not run the new virtual environment')
+          pathlib.Path('test-results/python-source/clean-interpreter.json').write_text(json.dumps({'removed_loader_variable_names':removed,'probe':probe,'scope':'Clean interpreter startup only; inference is separately required'}, indent=2) + '\n')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as target:
+              for name in removed:
+                  target.write(name + '=\n')
+          PY
       - name: Install public Python source dependencies in the new environment
         run: |
           python -m pip install -r requirements-coreml-inference.txt pytest==8.3.5 --report test-results/python-source/pip-install.json
