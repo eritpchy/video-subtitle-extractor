@@ -1,0 +1,119 @@
+{
+  "schema": 1,
+  "qt_version": "6.12.0",
+  "architecture": "arm64",
+  "minimum_macos_version": "26.0",
+  "production_integration_allowed": false,
+  "admission": {
+    "status": "blocked-pending-full-acceptance",
+    "required": [
+      "complete-user-M5-external-AX-diagnostic",
+      "source-GUI-external-AX",
+      "final-integrated-CoreML-ZIP-CI",
+      "final-integrated-CoreML-ZIP-user-M5"
+    ],
+    "note": "A successful diagnostic snapshot is not final-package or source GUI approval."
+  },
+  "resource": {
+    "bytes": 2547078,
+    "name": "vse-qt6.12.0-macos-arm64-ax772484-ps6.zip",
+    "sha256": "9ffa26a3ecf5296d9d9eb9841789307e75aa352eafc9539f31ae80e382135441",
+    "root": "vse-qt6.12.0-macos-arm64-ax772484-ps6",
+    "url": "https://github.com/eritpchy/video-subtitle-extractor/releases/download/2.3.1/vse-qt6.12.0-macos-arm64-ax772484-ps6.zip"
+  },
+  "source_resource": {
+    "bytes": 51103812,
+    "name": "vse-qtbase6.12.0-ax772484-ps6-source.tar.xz",
+    "sha256": "5c4df52a68232eac6fb40cc4f09ed93ff92d30c8ab8bf88f245cee6b482238bd"
+  },
+  "source_url": "https://github.com/eritpchy/video-subtitle-extractor/releases/download/2.3.1/vse-qtbase6.12.0-ax772484-ps6-source.tar.xz",
+  "resource_manifest_sha256": "3fe81ba24769e3a2c9a793956ea641995e1dade79d42f45b8809ab47a6180c0d",
+  "plugin": {
+    "bytes": 1290224,
+    "path": "libqcocoa.dylib",
+    "sha256": "d23ea2a1e3201ec85f4fd35ee8bff32d7217ce6b0bbb51058339f1abca612941",
+    "uuid": "0ebfed21-3178-3917-962b-cf2cc420fcfa"
+  },
+  "candidate_manifest_sha256": "bb07a028a411edc3fa4ccfbd884846d00e618529bb7a503d5e71f6b609a4ed13",
+  "original_cocoa_sha256": "e355b16024485dbacac13ea13a1ce46bca4cf682f8b7b698c557e5960185d636",
+  "official_frameworks": {
+    "QtCore": "f9b5066d08409573d5d380738debe8fb6fdbd62b85488747647e71671fc6a079",
+    "QtGui": "a637b9db8047245b28520c901a3b1c915b4c7af17b4b558a38c6ef760ee7ceb4"
+  },
+  "abi_files": {
+    "PySide6/QtConcurrent.abi3.so": "1f8b856d6e2ed9f6f148e1b7ec668b778d0138420cdac4965e1dfd3e9d9aac49",
+    "PySide6/QtCore.abi3.so": "1288c120342b8460a8829856a07abf2d7d63be8f72502c3dcffc146bb780cbec",
+    "PySide6/QtDBus.abi3.so": "d72310dca5fa56ab735fd559a336d0a0b439d313f2da31b31ac28d00e99c4ac9",
+    "PySide6/QtDesigner.abi3.so": "c9d8d64b64ff873b4a1e4ae2d3f656c0ef9719b7c120d8283cb6ca8837325007",
+    "PySide6/QtGui.abi3.so": "26baca4950d51fc763c17babf84163e1d1472643bfe720f81e17f508d773d03d",
+    "PySide6/QtHelp.abi3.so": "be725cef3c7f370a3d96bdc6af4893d000dae7b94922aea2b61d6745faf9fc9c",
+    "PySide6/QtLabsStyleKit.abi3.so": "126b4391458cd7bb0eb476a6a526da9d25e94e4948b652dde2df851007d456a3",
+    "PySide6/QtNetwork.abi3.so": "c091751c44bae7ea378fd16bf414cf36cd20c05a55ccd69f056b489c166d3f25",
+    "PySide6/QtOpenGL.abi3.so": "f79415b0fdc11fc9621f473decd2796435b944fa95a3ec47081f0a6e5d5f92de",
+    "PySide6/QtOpenGLWidgets.abi3.so": "bb316a7252081a5120b2da4682c176c713540cabe138cc47fdd305a01f525f95",
+    "PySide6/QtPrintSupport.abi3.so": "fbbcda4a475d5f2ff603d8260d81dbb7417610d9fffdacdfc4ef0c9b75978371",
+    "PySide6/QtQml.abi3.so": "6e6aba96a6626f41ee3f79494a447049b42679977baeb3e3e2981428b82af01b",
+    "PySide6/QtQmlFeatures.abi3.so": "a17472c2b4622c336e65fbe450e77803410b093072f59e98879752a40f87be99",
+    "PySide6/QtQuick.abi3.so": "a3d45c5528f2be04f77db15bf314d6e4ede90ddf97cd9cd73d117fe85ac06f5d",
+    "PySide6/QtQuickControls2.abi3.so": "16e97131603567dc0e172c21c73a2f362426b38644da1268b3c8c1a5120de0fe",
+    "PySide6/QtQuickTest.abi3.so": "0552ccf8646c7ed24c50e0dbeee36f7c6d8afce1493b73f1dbb0f54b9feb1b8c",
+    "PySide6/QtQuickWidgets.abi3.so": "d8b9a10d327dd870b96173fb9f78becd24e4b275fd6a61ba2d048ce98dd9d526",
+    "PySide6/QtSql.abi3.so": "945815cccb4e56fb77282ac8bc60dcb677f34bdd82cd191344917a2822fe30a9",
+    "PySide6/QtSvg.abi3.so": "a30caa42a6d76d151bdee29400eda2012df327862e7ec4805c13fe5f5d825176",
+    "PySide6/QtSvgWidgets.abi3.so": "9fdae1acb98b33ed7409c300515577a5a83d13147207aa40de33bd429d85532e",
+    "PySide6/QtTest.abi3.so": "a61bcc0c402745f406508631a21a879f58e3df672c241428658d7c7ec22137f2",
+    "PySide6/QtUiTools.abi3.so": "c071e7a12c60f86d501baff1a03d0c6ccc5f7a8e3f275f0a4d996a74a467510a",
+    "PySide6/QtWidgets.abi3.so": "bfc7de9e486491f8339a2f0727f86a880b9838987eaaa1f227bfe13adb45d220",
+    "PySide6/QtXml.abi3.so": "d0bce6d4b5fbab01687e7d370a16299521a8db81ea7453bd82d90d142340b64e",
+    "PySide6/libpyside6.abi3.6.12.dylib": "d6144b1cc798d3ab6ffa3e521ace92819f02777291f290f312e7fddff5f4e2cf",
+    "PySide6/libpyside6qml.abi3.6.12.dylib": "fe6219a4844e08a549956071060fce430a2dd3925c0787bab657f7a2f9eacc58",
+    "shiboken6/Shiboken.abi3.so": "1af1093973a0a644ae80d2f98313c472549df016470001a50ff1a8d25502c54c",
+    "shiboken6/libshiboken6.abi3.6.12.dylib": "9f9b5b5a0e0b4f7474fc9da1d7f4421b21d72c8d821c4ee9170640fc1ba58611"
+  },
+  "upstream_pins": {
+    "patch": {
+      "change": 772484,
+      "decoded_sha256": "fbc6e92fb2e27c220821cbaaf8e16579cb77dbc83eb7acffe8ae3df7ed3a503b",
+      "patch_set": 6,
+      "revision": "bbe938de0b5863fe8edd77bea2dffb97c35e0db9",
+      "status_observed_2026_10_26": "NEW; Code-Review +2; Sanity-Review +1; not merged or released",
+      "url": "https://codereview.qt-project.org/changes/772484/revisions/bbe938de0b5863fe8edd77bea2dffb97c35e0db9/patch"
+    },
+    "patched_sources": {
+      "src/plugins/platforms/cocoa/qcocoaaccessibilityelement.h": "99185a8e33a3b9838e1e24c71b48e52125d1d4090c8d0ea98dcf9fd58163f301",
+      "src/plugins/platforms/cocoa/qcocoaaccessibilityelement.mm": "5442fbf479dad835ed54c97947bc019db869f7dbd00666c303560c0db5003396"
+    },
+    "purpose": "Independent CI diagnostic candidate only; not a released Qt fix or production-package override",
+    "qt_version": "6.12.0",
+    "schema": 1,
+    "source": {
+      "root": "qtbase-everywhere-src-6.12.0",
+      "sha256": "a951bd163c7b80fc6b8c88d7668fb56abf91c152373e13c10666763238131307",
+      "url": "https://download.qt.io/official_releases/qt/6.12/6.12.0/submodules/qtbase-everywhere-src-6.12.0.tar.xz"
+    },
+    "toolchain": {
+      "arch": "arm64",
+      "cmake": "4.1.2",
+      "deployment_target": "14.4",
+      "ninja": "1.13.0",
+      "ninja_binary": "1.13.0.git.kitware.jobserver-pipe-1",
+      "sdk_version": "26.0",
+      "xcode_build": "17A400",
+      "xcode_version": "26.0.1"
+    },
+    "wheel": {
+      "filename": "pyside6_essentials-6.12.0-cp310-abi3-macosx_14_0_universal2.whl",
+      "original_arm64_uuid": "028e2655-9fd8-3e6e-a861-d6cd79b760bc",
+      "original_cocoa_sha256": "e355b16024485dbacac13ea13a1ce46bca4cf682f8b7b698c557e5960185d636",
+      "sha256": "0867b709a724db28b161227c7d6ecb5ed10cc09226a53542417ac6dee1308239"
+    }
+  },
+  "historical_evidence": {
+    "source_build_run": 40260642504,
+    "source_build_commit": "561de09ed45180362732725d24640862d3fa1ceb",
+    "diagnostic_zip_run": 40265586298,
+    "diagnostic_zip_sha256": "de249155bc0da5fde413a0e5fe3552ebd162007f679cdca9df7b321559a5e4ed",
+    "diagnostic_zip_receipt_sha256": "345a335bf7ca1d02d355d19c7de75ae19883a29eb1e6c960e90b64d9ec0cfcb6"
+  },
+  "scope": "Prepared exact resources only. Public URLs are reserved for the eventual new VSE 2.3.1 release, not yet published. No existing tag or release is changed."
+}
