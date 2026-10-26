@@ -50,6 +50,46 @@ public:
 struct LocalFreeDeleter { void operator()(void* value) const { if (value) LocalFree(value); } };
 using LocalMemory = std::unique_ptr<void, LocalFreeDeleter>;
 
+Handle inheritable_duplicate(HANDLE original) {
+    HANDLE duplicate = nullptr;
+    if (!DuplicateHandle(GetCurrentProcess(), original, GetCurrentProcess(), &duplicate,
+                         0, TRUE, DUPLICATE_SAME_ACCESS)) winfail(L"Cannot prepare explicit child handle");
+    return Handle(duplicate);
+}
+Handle child_output(DWORD standard) {
+    const HANDLE original = GetStdHandle(standard);
+    if (original && original != INVALID_HANDLE_VALUE) return inheritable_duplicate(original);
+    // A double-click may have no console. This fixed OS null device is never
+    // derived from a user path; it is not a general device-path allowance.
+    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+    Handle output(CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                              &attributes, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+    if (!output.valid()) winfail(L"Cannot prepare child diagnostic output");
+    return output;
+}
+class ChildAttributes {
+    std::vector<unsigned char> storage_;
+    LPPROC_THREAD_ATTRIBUTE_LIST list_ = nullptr;
+public:
+    ChildAttributes() {
+        SIZE_T bytes = 0;
+        if (InitializeProcThreadAttributeList(nullptr, 1, 0, &bytes) ||
+            GetLastError() != ERROR_INSUFFICIENT_BUFFER || !bytes) winfail(L"Cannot size child handle allowlist");
+        storage_.resize(bytes);
+        auto list = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage_.data());
+        if (!InitializeProcThreadAttributeList(list, 1, 0, &bytes)) winfail(L"Cannot initialize child handle allowlist");
+        list_ = list;
+    }
+    ~ChildAttributes() { if (list_) DeleteProcThreadAttributeList(list_); }
+    ChildAttributes(const ChildAttributes&) = delete;
+    ChildAttributes& operator=(const ChildAttributes&) = delete;
+    LPPROC_THREAD_ATTRIBUTE_LIST get() const { return list_; }
+    void allow(std::array<HANDLE, 3>& handles) {
+        if (!UpdateProcThreadAttribute(list_, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                       handles.data(), handles.size() * sizeof(HANDLE), nullptr, nullptr)) winfail(L"Cannot restrict child handle inheritance");
+    }
+};
+
 // Prefix only already validated internal paths. User-supplied device/UNC
 // namespace paths never reach this conversion; no LongPathsEnabled change.
 std::wstring native_path(const std::wstring& path) {
@@ -222,7 +262,7 @@ void check_space(const std::wstring& parent) {
     const auto needed = vse::required_space(bundle::archive_bytes, bundle::uncompressed_bytes, bundle::entry_count);
     if (available.QuadPart < needed) fail(L"Insufficient free space: need at least " + std::to_wstring(needed) + L" bytes in the destination (downloaded parts are additional).");
 }
-void extract_with_system_tar(const std::wstring& zip, const std::wstring& destination) {
+void extract_with_system_tar(HANDLE verified_zip, const std::wstring& destination) {
     wchar_t directory[MAX_PATH + 1]{};
     const UINT count = GetSystemDirectoryW(directory, MAX_PATH + 1);
     if (!count || count > MAX_PATH) winfail(L"Cannot locate Windows system directory");
@@ -236,16 +276,33 @@ void extract_with_system_tar(const std::wstring& zip, const std::wstring& destin
     std::wstring environment = std::wstring(L"SystemRoot=") + windows;
     environment.push_back(L'\0'); environment += std::wstring(L"WINDIR=") + windows;
     environment.push_back(L'\0'); environment.push_back(L'\0');
-    std::wstring command = vse::quote_arg(tar) + L" -x --no-same-owner --no-same-permissions -f " + vse::quote_arg(native_path(zip)) + L" -C " + vse::quote_arg(native_path(destination));
+    // Some OS bsdtar versions use narrow argv even when the caller uses
+    // CreateProcessW. Do not send either Unicode path through that conversion.
+    // stdin is a seekable duplicate of the SAME fully verified, read-only,
+    // no-write/no-delete ZIP handle, not a pipe or a pathname reopened by tar.
+    rewind_file(verified_zip);
+    auto input = inheritable_duplicate(verified_zip);
+    auto output = child_output(STD_OUTPUT_HANDLE), error = child_output(STD_ERROR_HANDLE);
+    std::array<HANDLE, 3> inherited{input.get(), output.get(), error.get()};
+    ChildAttributes attributes; attributes.allow(inherited);
+    const auto working_directory = native_path(destination);
+    std::wstring command = vse::quote_arg(tar) + L" -x --no-same-owner --no-same-permissions -f -";
     Handle job(CreateJobObjectW(nullptr, nullptr));
     if (!job.valid()) winfail(L"Cannot create extraction job");
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
     if (!SetInformationJobObject(job.get(), JobObjectExtendedLimitInformation, &limits, sizeof(limits))) winfail(L"Cannot bind extraction lifetime");
-    STARTUPINFOW startup{}; startup.cb = sizeof(startup);
+    STARTUPINFOEXW startup{}; startup.StartupInfo.cb = sizeof(startup);
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdInput = input.get(); startup.StartupInfo.hStdOutput = output.get();
+    startup.StartupInfo.hStdError = error.get(); startup.lpAttributeList = attributes.get();
     PROCESS_INFORMATION process{};
-    if (!CreateProcessW(tar.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
-                        environment.data(), system.path.c_str(), &startup, &process)) winfail(L"Cannot start system tar; no dependency will be downloaded");
+    // The empty private target itself (still ancestor-locked by the caller) is
+    // the UTF-16 cwd. No ASCII staging relocation or -C argument is involved.
+    // Only the above three handles inherit; no source/ancestor locks escape.
+    if (!CreateProcessW(tar.c_str(), command.data(), nullptr, nullptr, TRUE,
+                        CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
+                        environment.data(), working_directory.c_str(), &startup.StartupInfo, &process)) winfail(L"Cannot start system tar; no dependency will be downloaded");
     Handle process_handle(process.hProcess), thread_handle(process.hThread);
     if (!AssignProcessToJobObject(job.get(), process_handle.get())) { TerminateProcess(process_handle.get(), 1); winfail(L"Cannot bind system tar to restoration job"); }
     if (ResumeThread(thread_handle.get()) == static_cast<DWORD>(-1)) winfail(L"Cannot resume system tar");
@@ -336,7 +393,7 @@ void restore(const std::wstring& source_path, const std::wstring& destination_pa
     if (!FlushFileBuffers(output.get())) winfail(L"Cannot flush reconstructed ZIP");
     verify_file(output.get(), bundle::archive_bytes, bundle::archive_sha256, buffer); // Re-read actual disk bytes.
     // Reopen read-only under the private stage after verification. Re-verify on
-    // the retained no-write/no-delete handle before handing the path to tar.
+    // the retained no-write/no-delete handle before giving tar a stdin duplicate.
     output.reset();
     auto verified_zip = open_input(temporary_zip);
     const auto owned_zip_identity = info(verified_zip.get());
@@ -344,7 +401,7 @@ void restore(const std::wstring& source_path, const std::wstring& destination_pa
     const auto extracted = vse::join(incomplete, L"payload");
     if (!CreateDirectoryW(native_path(extracted).c_str(), nullptr)) winfail(L"Cannot create empty extraction directory");
     auto extraction_directory = open_directory(extracted);
-    extract_with_system_tar(temporary_zip, extracted);
+    extract_with_system_tar(verified_zip.get(), extracted);
     const auto restored = vse::join(extracted, bundle::root_name);
     auto restored_root = open_directory(restored, true);
     std::map<std::wstring, const vse::Entry*> expected;

@@ -36,7 +36,13 @@ download. This is **not** Windows 10/11 or real-GPU certification.
    back. After reopening it with a retained read-only/no-write/no-delete handle,
    its full hash is checked again before extraction. Offsets and sizes are
    unsigned 64-bit; no entire part or ZIP is allocated in RAM.
-4. Only the verified ZIP is passed to the OS tar via `CreateProcessW`. Its exact
+4. Only the verified ZIP is passed to the OS tar via `CreateProcessW`. A seekable,
+   read-only duplicate of the retained verified ZIP handle becomes stdin after
+   rewinding. `tar -f -` therefore cannot reopen a lossy/changed archive pathname.
+   The private, ancestor-locked Unicode destination is supplied directly as the
+   UTF-16 `lpCurrentDirectory`, not a narrow `-C` argument or an ASCII relocation.
+   `STARTUPINFOEXW` explicitly permits only stdin/stdout/stderr duplicates to
+   inherit; no source/ancestor locks or unrelated handles inherit. Its exact
    executable is derived from `GetSystemDirectoryW`, not PATH or `%SystemRoot%`.
    Arguments use the Microsoft C argv quote grammar, never `cmd.exe` or a shell.
    The environment is minimal (no TAR_OPTIONS/Python/Conda contamination). A
@@ -69,7 +75,9 @@ not the build directory's mutable manifest.
   handles and allowed. They are not confused with an archive member alias.
 * Internal I/O uses a controlled extended-length path prefix **only after**
   validating a normal drive-absolute path; arbitrary user device syntax is not
-  accepted. System tar receives these internal long `-f`/`-C` paths. An OS-reported extended module path from `GetModuleFileNameW` is safely
+  accepted. System tar receives an internal extended Unicode cwd through the
+  Win32 process API, but **no archive/destination path in its arguments**.
+  An OS-reported extended module path from `GetModuleFileNameW` is safely
   converted to an ordinary drive path before the same checks; this does not
   permit user-supplied device paths. Actual >260-character EXE placement still
   requires native coverage. Individual
@@ -78,6 +86,10 @@ not the build directory's mutable manifest.
   required native gate, not assumed from a small fixture. Real current CUDA
   inventories have members at least 191 characters long before the parent and
   staging path; therefore a MAX_PATH-only implementation would be insufficient.
+  Windows documents limitations for process creation with a cwd beyond
+  `MAX_PATH`; the separate >260-character destination-cwd gate remains mandatory
+  and may still fail independently of Unicode or deep archive-member handling.
+  Do not change registry policy or relocate to an ASCII folder to waive a gate.
 * A random `.vse-incomplete-...` directory is atomically created with an ACL for
   the current user and SYSTEM. No existing tree is reused. Preflight requires
   free space for merged ZIP + extracted bytes + 64 KiB per inventory entry +
@@ -204,10 +216,42 @@ logs, `fixture-build-record.json`, exact `fixture-source/` and
 Do not upload the synthetic EXE/object as customer binaries. Fixture binaries and inputs are marked `SYNTHETIC` and carry no
 package acceptance receipt. The script compiles `/MT`, checks PE imports and
 runs Unicode/space/`&!%()` paths, poisoned PATH/SystemRoot/TAR_OPTIONS, a >260
-character ZIP member, missing/modified/swapped/hardlinked volumes, ancestor
+character ZIP member and a >260-character Unicode destination cwd,
+missing/modified/swapped/hardlinked volumes, ancestor
 junctions, UNC/device syntax, existing-user-data protection, insufficient-space
 preflight, a real >2-GiB stored ZIP/ZIP64 member, and abrupt interruption. Without
 `--large` the report is only partial; it must not satisfy the release gate.
+
+Before the restorer cases, `system-tar-probe-report.json` records the actual
+`GetSystemDirectoryW` tar path, SHA256, bytes, `--version` output, ACP/OEM/console
+code pages, and before/after tar identity. Four direct-argv controls compare
+ASCII/Unicode paths with ordinary/extended prefixes. Four stdin/cwd controls use
+those same path classes, followed by ordinary/extended truly long Unicode cwd
+controls. Each independently generated control archive has identical fixed
+bytes and a Unicode member; reports check the exact Unicode output and payload
+SHA rather than trusting console rendering or tar exit alone. All stdout/stderr
+bytes are retained. Control failures are observations, **not a substitute for or
+waiver of** the mandatory native-restorer gates.
+After the common small fixture builds, each native gate records its own outcome
+and continues to the independent gates, including ZIP64, after an earlier
+runtime failure. A post-extraction SHA mismatch changes that case to failed;
+one failed/blocked gate keeps the overall result failed and the test process
+nonzero. Negative tests verify the shared source parts are pristine before and
+after temporary mutations, preventing one failed cleanup from manufacturing
+later apparent passes. Compilation/prerequisite failures remain explicit.
+
+### Unicode handoff failure being investigated
+
+The preserved Server 2022/2025 run `40268712355` at `810d07d` failed to open the
+verified archive in the first Unicode case; nothing was published, and the large
+ZIP64 case was not reached. The original evidence ZIP is 291,288 bytes, SHA256
+`1789ff849364ca5d8332aa69be2014293bff018835b2d45b928d6b37af3f5f3f`.
+Both stderr files show `??`, but that alone cannot distinguish lossy argument
+conversion from lossy diagnostics or establish extended-prefix compatibility.
+The upstream [Windows bsdtar Unicode argv issue](https://github.com/libarchive/libarchive/issues/2092)
+supports investigating narrow argv handling; it is **not proof of the unique
+cause in these exact OS binaries**. The handle/cwd handoff is an unvalidated fix
+candidate until both Servers pass the unchanged gates and new path probes.
 
 The separate gate must ALSO establish these integration facts, not merely
 summarize the synthetic report:
@@ -243,3 +287,7 @@ of this transport. This directory does not schedule, publish or modify CI.
 API contracts: [CreateFile sharing and reparse flags](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew),
 [FILE_RENAME_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info),
 [Microsoft argv parsing](https://learn.microsoft.com/en-us/cpp/c-language/parsing-c-command-line-arguments).
+The new handoff also follows [CreateProcessW and explicit inherited-handle lists](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw)
+and [redirected standard handles](https://learn.microsoft.com/en-us/windows/win32/procthread/creating-a-child-process-with-redirected-input-and-output).
+The [documented cwd length limitation](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-setcurrentdirectory)
+is not treated as resolved by extended file-I/O support.

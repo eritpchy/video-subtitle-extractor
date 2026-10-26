@@ -31,6 +31,74 @@ metadata = module('restorer_metadata', HERE / 'generate_metadata.py')
 builder = module('restorer_builder', HERE / 'build.py')
 
 
+class TarHandoffSourceTests(unittest.TestCase):
+    """Structural regression guards, not a substitute for real Server runs."""
+    def test_verified_seekable_handle_and_unicode_cwd_do_not_become_narrow_argv(self):
+        source = (HERE / 'restorer.cpp').read_text(encoding='utf-8')
+        body = source.split('void extract_with_system_tar(HANDLE verified_zip,', 1)[1].split('struct TreeLocks', 1)[0]
+        self.assertIn('rewind_file(verified_zip)', body)
+        self.assertIn('inheritable_duplicate(verified_zip)', body)
+        self.assertLess(body.index('rewind_file(verified_zip)'), body.index('inheritable_duplicate(verified_zip)'))
+        command = next(line for line in body.splitlines() if 'std::wstring command =' in line)
+        self.assertIn('-f -', command)
+        self.assertNotIn('-C', command)
+        self.assertNotIn('destination', command)
+        self.assertNotIn('zip', command)
+        self.assertIn('working_directory = native_path(destination)', body)
+        self.assertIn('environment.data(), working_directory.c_str(), &startup.StartupInfo', body)
+        self.assertIn('extract_with_system_tar(verified_zip.get(), extracted)', source)
+        self.assertIn('auto extraction_directory = open_directory(extracted)', source)
+        self.assertIn('verify_file(verified_zip.get(), bundle::archive_bytes, bundle::archive_sha256', source)
+        self.assertIn('check_tree(extracted,', source)
+
+    def test_only_three_explicit_handles_inherit_and_job_still_precedes_execution(self):
+        source = (HERE / 'restorer.cpp').read_text(encoding='utf-8')
+        body = source.split('void extract_with_system_tar(HANDLE verified_zip,', 1)[1].split('struct TreeLocks', 1)[0]
+        self.assertIn('PROC_THREAD_ATTRIBUTE_HANDLE_LIST', source)
+        self.assertIn('std::array<HANDLE, 3> inherited{input.get(), output.get(), error.get()}', body)
+        self.assertIn('STARTF_USESTDHANDLES', body)
+        self.assertIn('EXTENDED_STARTUPINFO_PRESENT', body)
+        self.assertIn('JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE', body)
+        self.assertLess(body.index('AssignProcessToJobObject'), body.index('ResumeThread'))
+        self.assertIn('GetSystemDirectoryW', body)
+        self.assertIn('auto tar_lock = open_input(tar, true)', body)
+
+    def test_server_probe_keeps_four_argv_controls_and_unicode_long_cwd_gates(self):
+        server = module('restorer_server_source_test', HERE / 'tests/windows_server_tests.py')
+        cases = server.tar_probe_cases()
+        argv = [row for row in cases if row['transport'] == 'argv']
+        self.assertEqual({(row['alphabet'], row['extended']) for row in argv},
+                         {('ascii', False), ('ascii', True), ('unicode', False), ('unicode', True)})
+        self.assertEqual(len(argv), 4)
+        self.assertEqual(len([row for row in cases if row['long_cwd']]), 2)
+        self.assertTrue(all(row['alphabet'] == 'unicode' and row['transport'] == 'stdin-cwd'
+                            for row in cases if row['long_cwd']))
+        source = (HERE / 'tests/windows_server_tests.py').read_text(encoding='utf-8')
+        for required in ('GetSystemDirectoryW', 'GetACP', "'version_stdout'", "'tar_unchanged'",
+                         'over-260-unicode-destination-cwd', 'real-over-2gib-zip64',
+                         'unicode-and-shell-metacharacters-clean-system-tar'):
+            self.assertIn(required, source)
+
+    def test_failed_native_case_is_preserved_but_does_not_hide_later_zip64_gate(self):
+        server = module('restorer_server_collection_test', HERE / 'tests/windows_server_tests.py')
+        records = []
+        with server.collect_case(records, 'unicode'):
+            records.append({'case': 'unicode', 'passed': False, 'exit_code': 1})
+            raise AssertionError('native Unicode failed')
+        with server.collect_case(records, 'zip64'):
+            records.append({'case': 'zip64', 'passed': True, 'exit_code': 0})
+        self.assertEqual([row['case'] for row in records], ['unicode', 'zip64'])
+        self.assertFalse(records[0]['passed']); self.assertTrue(records[1]['passed'])
+        self.assertEqual(server.result_for_cases(records, large=True), 'failed')
+        with server.collect_case(records, 'post-extraction-hash'):
+            records.append({'case': 'post-extraction-hash', 'passed': True})
+            raise AssertionError('actual bytes differ')
+        self.assertFalse(records[-1]['passed'])
+        self.assertEqual(server.result_for_cases([{'passed': True}], large=False), 'partial')
+        self.assertEqual(server.result_for_cases([{'passed': True}], large=True), 'passed')
+        self.assertEqual(server.result_for_cases([], large=True), 'failed')
+
+
 def fixture():
     return {'schema': 1, 'format': 'vse-zip-byte-volumes',
             'archive': {'name': 'vse-test.zip', 'root': 'vse-test', 'size': 3000000017,
