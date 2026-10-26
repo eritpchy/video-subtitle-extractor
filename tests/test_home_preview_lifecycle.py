@@ -260,6 +260,38 @@ class HomePreviewLifecycleTests(ThemeTestCase):
         self.assertFalse(widget.running_task)
         self.assertTrue(all(t.status == TaskStatus.COMPLETED for t in widget.task_list_component.tasks))
 
+    def assert_batch_stopped_after_first_failure(self, widget, worker):
+        tasks = widget.task_list_component.get_all_tasks()
+        self.assertEqual([task.status for task in tasks],
+                         [TaskStatus.FAILED, TaskStatus.PENDING])
+        self.assertFalse(widget.running_task)
+        self.assertIsNone(widget._active_job)
+        self.assertFalse(widget._next_task_timer.isActive())
+        self.assertTrue(widget.run_button.isVisible())
+        self.assertFalse(widget.stop_button.isVisible())
+        self.assertIsNone(widget.video_cap)
+        widget._start_next_task()
+        self.app.processEvents()
+        self.assertEqual(worker.jobs, [])
+        self.assertEqual(tasks[1].status, TaskStatus.PENDING)
+
+    def test_preparation_exception_stops_batch_and_leaves_next_task_pending(self):
+        widget, worker = self.widget(('a.mp4', 'b.mp4'))
+        with patch.object(widget.video_display_component, 'save_selections_to_config',
+                          side_effect=RuntimeError('preparation failed')):
+            widget.run_button_clicked()
+        self.assertIn('preparation failed', widget.output_text.toPlainText())
+        self.assert_batch_stopped_after_first_failure(widget, worker)
+
+    def test_worker_orchestration_exception_stops_batch_after_queued_completion(self):
+        widget, worker = self.widget(('a.mp4', 'b.mp4'))
+        with patch.object(widget, 'run_subtitle_extractor_process',
+                          side_effect=RuntimeError('Extractor callback stream did not finish')):
+            widget.run_button_clicked()
+            self.pump(lambda: widget._active_job is None)
+        self.assertIn('Extractor callback stream did not finish', widget.output_text.toPlainText())
+        self.assert_batch_stopped_after_first_failure(widget, worker)
+
     def test_deleting_preceding_row_keeps_job_progress_floor(self):
         widget, worker = self.widget(('done.mp4', 'active.mp4'))
         widget.task_list_component.update_task_status(0, TaskStatus.COMPLETED)

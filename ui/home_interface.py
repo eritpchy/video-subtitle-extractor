@@ -408,7 +408,10 @@ class HomeInterface(QWidget):
                 self.append_output(f"Error: {error}")
                 self.task_list_component.update_task_status(index, TaskStatus.FAILED)
                 self._active_job = None
-                self._release_preview()
+                # Preserve the original batch policy: unexpected orchestration
+                # failures stop the batch, leaving later tasks pending.
+                self.stop_button_clicked()
+                return
 
     def _emit_worker_event(self, job, kind, payload):
         # Serialize emission with shutdown. Checking only after emit raises is
@@ -459,7 +462,10 @@ class HomeInterface(QWidget):
                 self._release_preview()
             self._active_job = None
             self.current_processing_task_index = -1
-            self._next_task_timer.start(1000)
+            if error:
+                self.stop_button_clicked()
+            else:
+                self._next_task_timer.start(1000)
 
     @staticmethod
     def extractor_process(queue, video_path, output_path, options):

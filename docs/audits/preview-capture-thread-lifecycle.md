@@ -51,6 +51,9 @@ a CPU inference defect or a recurrence of the Qt Cocoa AX-cache defect.
 - OCR `isFinished` does not end the process or batch. Drain the child's FINISH
   stream before posting process completion, preserve an ERROR even for exit
   code zero, and fail on missing FINISH or reader/callback failure.
+- Preserve the batch's existing error policy: unexpected preparation/process
+  orchestration exceptions stop the batch and leave later tasks pending; normal
+  per-task failures do not silently become successful completion.
 - Main-window close explicitly shuts down HomeInterface before child widgets
   die. Invalidate jobs and serialize signal emission with shutdown, so a late
   worker does not emit through a destroyed native QObject. Disconnecting alone
@@ -76,7 +79,7 @@ an owned GUI timer instead of a worker sleeping while touching shared UI state.
 - Terminal progress vs authoritative completion, duplicate Run, Stop→Run with old
   progress/error/completion, two-task transition, deleting a preceding row,
   replacing the same file path, queued callbacks at close, parent-window shutdown,
-  and failed first decode cleanup.
+  failed first decode cleanup, and stopping a batch on orchestration exceptions.
 - Three repeated generated MJPG-video runs through real OpenCV VideoCapture,
   slider seeks, completion and reload; inference is controlled in this test.
 - Actual process-orchestration/IPC wiring with a controlled process endpoint:
