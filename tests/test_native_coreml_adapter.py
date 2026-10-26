@@ -15,6 +15,7 @@ from backend.tools import native_ocr as adapter
 from backend.tools.hardware_accelerator import HardwareAccelerator
 from backend.tools.paddle_model_config import PaddleModelConfig
 from tests.test_native_ocr import native_root
+from tests.native_shape_evidence import shape_aggregate
 
 
 @pytest.fixture
@@ -27,7 +28,7 @@ def coreml_host(monkeypatch):
 
 
 def evidence_response(provider='coreml', *, operation='ocr', blank=False):
-    request = {'provider': provider, 'tier': 'small', 'rec_model': 'PP-OCRv6_small_rec', 'operation': operation}
+    request = {'provider': provider, 'tier': 'small', 'rec_model': 'PP-OCRv6_small_rec', 'operation': operation, 'batch_size': 6}
     coreml = provider == 'coreml'
     actual = 'CoreMLExecutionProvider' if coreml else 'CPUExecutionProvider'
     def session(model, run=True):
@@ -44,6 +45,13 @@ def evidence_response(provider='coreml', *, operation='ocr', blank=False):
                              'rec': None if operation == 'detect' else session(request['rec_model'], not blank)}}
     response = {'requested_provider': provider, 'actual_provider': actual, 'execution_evidence': evidence,
                 'result': [[], []] if blank else [[[[0, 0], [2, 0], [2, 2], [0, 2]]], [['x', .9]]]}
+    if coreml:
+        window = {'worker_pid': 123, 'utc_start_ns': 100, 'utc_end_ns': 200,
+                  'monotonic_start_ns': 1000, 'monotonic_end_ns': 1100}
+        response['execution_window'] = window
+        for role, item in evidence['sessions'].items():
+            if item is not None:
+                evidence['sessions'][role] = shape_aggregate(item, role, window)
     return request, response
 
 
@@ -231,7 +239,10 @@ def test_session_evidence_cannot_substitute_config_for_execution(field, value):
 
 def test_first_run_profile_extensions_do_not_become_current_gpu_proof():
     request, response = evidence_response()
-    response['execution_evidence']['sessions']['det'].update(capture='first_successful_run', session_run_count=10, request_run_count=1, evidence_reused=True)
+    session = response['execution_evidence']['sessions']['det']
+    session.update(session_run_count=10, evidence_reused=True)
+    session['shape_sessions'][0].update(session_run_count=10, evidence_reused=True)
+    session['shape_sessions'][0]['profile_window'].update(monotonic_start_ns=800, monotonic_end_ns=900)
     response['execution_window'] = {'worker_pid': 123, 'utc_start_ns': 100, 'utc_end_ns': 200, 'monotonic_start_ns': 1000, 'monotonic_end_ns': 1100}
     result = adapter.validate_execution_evidence(response, request)
     assert result['sessions']['det']['evidence_reused'] is True and result['gpu_execution_verified'] is False
@@ -250,7 +261,7 @@ def test_execution_window_cannot_claim_another_worker_or_invalid_time(field, val
 def test_cached_then_blank_recognition_does_not_claim_reused_execution():
     request, response = evidence_response(blank=True)
     response['execution_evidence']['sessions']['rec'].update(
-        capture='first_successful_run', session_run_count=10, request_run_count=0, evidence_reused=False)
+        session_run_count=10, request_run_count=0, evidence_reused=False)
     result = adapter.validate_execution_evidence(response, request)
     assert result['sessions']['rec']['status'] == 'not_run'
     response['execution_evidence']['sessions']['rec']['evidence_reused'] = True

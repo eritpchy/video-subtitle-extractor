@@ -7,6 +7,7 @@ import pytest
 
 from scripts import check_native_models as checker
 from scripts import check_paddle_models as frozen
+from tests.native_shape_evidence import shape_aggregate
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'native/ocr/tests/evidence'
@@ -43,7 +44,9 @@ def report_fixture(providers=('cpu', 'coreml')):
             row['fixture_encoded_png_bytes'] = 123
             row['actual'] = copy.deepcopy(case['expected'])
             row.update(frozen.compare_ocr(row['actual'], row['expected']) if case['operation'] == 'ocr' else {'same_boxes': True, 'passed': True})
-            request = {'id': case['id'] + 1, 'provider': provider, 'tier': case['tier'], 'operation': case['operation'],
+            # Independent synthetic processes, never cached execution proof.
+            window['worker_pid'] = (7 if provider == 'cpu' else 8) + case['id'] * 2
+            request = {'id': 1, 'provider': provider, 'tier': case['tier'], 'operation': case['operation'],
                        'rec_model': case['rec_model'] or f"PP-OCRv6_{case['tier']}_rec", 'batch_size': 6, 'cpu_threads': 2,
                        'image_sha256': 'c' * 64, 'image_bytes': 123, 'image_format': 'png'}
             reference = goldens[(case['tier'], case['operation'], case['rec_model'] if case['rec_model'] in frozen.LEGACY else None, case['fixture'])]
@@ -63,6 +66,8 @@ def report_fixture(providers=('cpu', 'coreml')):
                           'request_run_count': int(executed), 'session_run_count': int(executed), 'evidence_reused': False}
                 if coreml and executed:
                     values['profile_window'] = copy.deepcopy(window)
+                if coreml:
+                    values = shape_aggregate(values, 'det' if name.endswith('_det') else 'rec', window)
                 return values
             sessions = {'det': session(case['det_model']),
                         'rec': None if case['operation'] == 'detect' else session(case['rec_model'], bool(reference[0]))}
@@ -143,3 +148,28 @@ def test_missing_or_self_authored_module_model_identity_cannot_pass(field):
     with pytest.raises(ValueError): checker.validate_report(report)
     report = report_fixture(); report[field] = {} if field != 'runtime_sha256' else 'wrong'
     with pytest.raises(ValueError): checker.validate_report(report)
+
+
+def test_complete_model_receipt_rejects_same_shape_id_relabelled_across_cases():
+    from backend.tools.native_ocr import validate_execution_evidence
+    report = report_fixture()
+    first, second = report['providers']['coreml']['cases'][:2]
+    original = first['request_evidence']
+    record = second['request_evidence']
+    record['worker_pid'] = original['worker_pid']
+    record['request']['id'] = record['response']['id'] = 2
+    window = record['response']['execution_window']
+    window['worker_pid'] = original['worker_pid']
+    for field in ('utc_start_ns', 'utc_end_ns', 'monotonic_start_ns', 'monotonic_end_ns'):
+        window[field] += 1000
+    for role, session in record['response']['execution_evidence']['sessions'].items():
+        session.update(session_run_count=2, evidence_reused=True)
+        shape = session['shape_sessions'][0]
+        shape.update(session_run_count=2, evidence_reused=True)
+        shape['profile_window'] = copy.deepcopy(original['response']['execution_window'])
+        if role == 'rec':
+            shape['input_shape'][3] = 640
+            shape['free_dimension_overrides']['DynamicDimension.1'] = 640
+    validate_execution_evidence(record['response'], record['request'], worker_pid=record['worker_pid'])
+    with pytest.raises(ValueError, match='shape/profile identity'):
+        checker.validate_report(report)

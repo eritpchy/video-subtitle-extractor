@@ -257,7 +257,190 @@ def _validated_execution_window(value, *, worker_pid=None):
     return value
 
 
-def validate_execution_evidence(response, request, *, worker_pid=None):
+def _validate_session_evidence(session, model, role, provider, response, worker_pid, *, aggregate=False):
+    if not isinstance(session, dict) or session.get('model') != model:
+        raise ValueError(f'Native execution evidence model mismatch: {role}')
+    status = session.get('status')
+    if status not in ('executed', 'not_run') or (status == 'not_run' and (role != 'rec' or response.get('result') != [[], []])):
+        raise ValueError(f'Invalid native session execution status: {role}')
+    if session.get('source') != ('ort_first_run_profile' if provider == 'coreml' else 'explicit_cpu_session'):
+        raise ValueError('Native session execution evidence has an unsupported source')
+    if 'profile_window' in session:
+        _validated_execution_window(session['profile_window'], worker_pid=worker_pid)
+    if 'capture' in session and session['capture'] != ('per_shape_first_successful_run' if aggregate else 'first_successful_run' if provider == 'coreml' else 'explicit_cpu_session'):
+        raise ValueError('Native execution evidence capture scope is inconsistent')
+    if 'request_run_count' in session or 'session_run_count' in session:
+        current, cumulative = session.get('request_run_count'), session.get('session_run_count')
+        if (type(current) is not int or type(cumulative) is not int or not 0 <= current <= cumulative
+                or (status == 'executed') != (current > 0)):
+            raise ValueError('Native session/request run counts disagree with execution status')
+        if not aggregate and session.get('evidence_reused') is not (provider == 'coreml' and current > 0 and cumulative > current):
+            raise ValueError('Native reused first-run evidence is mislabeled')
+    if session.get('gpu_execution_verified') is not False:
+        raise ValueError('ORT provider profiling is not physical GPU execution verification')
+    counts = {}
+    for key in ('coreml_kernel_events', 'cpu_kernel_events'):
+        value = session.get(key)
+        if type(value) is not int or not 0 <= value <= 1000000000:
+            raise ValueError('Invalid native provider kernel-event count')
+        counts[key] = value
+    coreml_executed = counts['coreml_kernel_events'] > 0
+    cpu_executed = counts['cpu_kernel_events'] > 0 if provider == 'coreml' else status == 'executed'
+    if (type(session.get('coreml_ep_executed')) is not bool or session['coreml_ep_executed'] != coreml_executed
+            or type(session.get('cpu_ep_executed')) is not bool or session['cpu_ep_executed'] != cpu_executed):
+        raise ValueError('Native provider execution flags disagree with session evidence')
+    if status == 'not_run' and any(counts.values()):
+        raise ValueError('Unexecuted native session must not report kernel events')
+    if provider == 'cpu' and any(counts.values()):
+        raise ValueError('Explicit CPU session must not fabricate profile events')
+    if provider == 'coreml' and status == 'executed' and not coreml_executed:
+        raise ValueError('No CoreML kernel executed; all-CPU fallback refused')
+    expected = ({'CoreMLExecutionProvider'} if coreml_executed else set()) | ({'CPUExecutionProvider'} if cpu_executed else set())
+    observed = session.get('observed_providers')
+    if (not isinstance(observed, list) or any(not isinstance(item, str) for item in observed)
+            or len(observed) != len(set(observed)) or set(observed) != expected):
+        raise ValueError('Native observed providers disagree with executed sessions')
+    return coreml_executed, cpu_executed
+
+
+def _validate_shape_sessions(session, role, request, response, worker_pid):
+    """Bind each first-run profile to one exact, actually used tensor shape.
+
+    These are the dim_param identities of the fixed 15 FP32 model graphs, not
+    shape buckets or a license to alter preprocessing/model bytes.
+    """
+    window = _validated_execution_window(response.get('execution_window'), worker_pid=worker_pid)
+    children = session.get('shape_sessions')
+    current, total = session.get('request_run_count'), session.get('session_run_count')
+    if (type(current) is not int or type(total) is not int or not 0 <= current <= total < 2**63
+            or not isinstance(children, list) or len(children) > current
+            or bool(children) != (session['status'] == 'executed')
+            or session.get('capture') != 'per_shape_first_successful_run'
+            or 'profile_window' in session or session.get('shape_cache_scope') != 'exact_input_shape_lru'):
+        raise ValueError('CoreML requires precise per-shape capture/run/cache semantics')
+    capacity = 2 if role == 'det' else 4
+    count, cached = session.get('cached_shape_session_count'), session.get('cached_shape_session_ids')
+    if (type(session.get('cache_capacity')) is not int or session['cache_capacity'] != capacity
+            or type(count) is not int or not 0 <= count <= min(capacity, total)
+            or not isinstance(cached, list) or len(cached) != count
+            or any(type(value) is not int or not 0 < value < 2**63 for value in cached)
+            or len(set(cached)) != len(cached) or (current > 0 and not count)):
+        raise ValueError('Invalid bounded CoreML shape cache identity')
+    ids, counts, runs, cumulative, reused = set(), [0, 0], 0, 0, False
+    for child in children:
+        _validate_session_evidence(child, session['model'], role, 'coreml', response, window['worker_pid'])
+        shape_id, shape = child.get('shape_session_id'), child.get('input_shape')
+        if (type(shape_id) is not int or not 0 < shape_id < 2**63 or shape_id in ids
+                or child.get('status') != 'executed' or child.get('capture') != 'first_successful_run'
+                or not isinstance(shape, list) or len(shape) != 4
+                or any(type(value) is not int or value < 1 for value in shape)
+                or math.prod(shape) > 64000000 or shape[1] != 3
+                or child.get('require_static_input_shapes') is not True
+                or any(key in child for key in ('shape_sessions', 'cached_shape_session_ids'))):
+            raise ValueError('Invalid/duplicated concrete CoreML shape session')
+        n, _, h, w = shape
+        if role == 'det':
+            if n != 1 or min(h, w) < 32 or max(h, w) > 4000 or h % 32 or w % 32:
+                raise ValueError('CoreML detector shape differs from production preprocessing')
+            overrides = {'DynamicDimension.0': n, 'DynamicDimension.1': h, 'DynamicDimension.2': w}
+        else:
+            batch = request.get('batch_size')
+            if type(batch) is not int or not 1 <= batch <= 100 or n > batch or h != 48 or w > 3200:
+                raise ValueError('CoreML recognizer shape differs from production preprocessing')
+            overrides = {'DynamicDimension.0': n, 'DynamicDimension.1': w}
+        bound = child.get('free_dimension_overrides')
+        if (not isinstance(bound, dict) or set(bound) != set(overrides)
+                or any(type(bound[key]) is not int or bound[key] != value for key, value in overrides.items())):
+            raise ValueError('CoreML symbolic overrides do not bind this exact tensor shape')
+        first = _validated_execution_window(child.get('profile_window'), worker_pid=window['worker_pid'])
+        child_current, child_total = child.get('request_run_count'), child.get('session_run_count')
+        if (type(child_current) is not int or type(child_total) is not int
+                or not 0 < child_current <= child_total < 2**63):
+            raise ValueError('Missing actual shape-session run counts')
+        # Only monotonic timestamps are comparable across requests: wall clocks
+        # can legitimately be adjusted. A reused profile must predate this Run.
+        if first['monotonic_end_ns'] > window['monotonic_end_ns']:
+            raise ValueError('CoreML first-run profile lies after its request')
+        if child['evidence_reused']:
+            if first['monotonic_end_ns'] > window['monotonic_start_ns']:
+                raise ValueError('Reused CoreML shape profile does not predate this request')
+        elif first['monotonic_start_ns'] < window['monotonic_start_ns']:
+            raise ValueError('Fresh CoreML shape profile belongs to an older request')
+        ids.add(shape_id)
+        counts[0] += child['coreml_kernel_events']; counts[1] += child['cpu_kernel_events']
+        runs += child_current; cumulative += child_total; reused |= child['evidence_reused']
+    if (session['request_run_count'] != runs or cumulative > total
+            or session['coreml_kernel_events'] != counts[0] or session['cpu_kernel_events'] != counts[1]
+            or session.get('evidence_reused') is not reused):
+        raise ValueError('CoreML shape aggregate counts/reused evidence are mislabeled')
+    if role == 'det' and (current != 1 or len(children) != 1):
+        raise ValueError('Production detection must execute exactly one concrete shape')
+    return children
+
+
+class CoremlShapeEvidenceState:
+    """Bounded live-worker continuity: only det2/rec4 cached profiles are kept.
+
+    A shape-session ID is process-global and never reused after eviction. This
+    catches a previously profiled width being relabeled for another width.
+    It is protocol consistency, not hardware/device or memory attestation.
+    """
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        self.pid = None
+        self.key = None
+        self.highest_id = 0
+        self.cached = {'det': {}, 'rec': {}}
+        self.totals = {'det': 0, 'rec': 0}
+
+    def validate(self, evidence, request, window):
+        if request['provider'] != 'coreml':
+            return
+        pid = window['worker_pid']
+        if self.pid not in (None, pid):
+            raise ValueError('CoreML shape history belongs to another worker')
+        key = tuple(request.get(field) for field in ('tier', 'rec_model', 'cpu_threads', 'operation', 'provider'))
+        previous = self.cached if self.key == key else {'det': {}, 'rec': {}}
+        totals = self.totals if self.key == key else {'det': 0, 'rec': 0}
+        new_cache, new_totals, new_ids = {}, {}, set()
+        for role, aggregate in evidence['sessions'].items():
+            if aggregate is None:
+                new_cache[role], new_totals[role] = {}, 0
+                continue
+            available = dict(previous[role])
+            if aggregate['session_run_count'] != totals[role] + aggregate['request_run_count']:
+                raise ValueError('CoreML dispatcher lifetime count changed unexpectedly')
+            for child in aggregate['shape_sessions']:
+                sid = child['shape_session_id']
+                # Counters vary per request; every identity/profile field is
+                # immutable for the lifetime of this exact compiled shape.
+                fixed = {key: value for key, value in child.items()
+                         if key not in ('request_run_count', 'session_run_count', 'evidence_reused')}
+                prior = previous[role].get(sid)
+                if prior is None:
+                    if sid <= self.highest_id or sid in new_ids or child['evidence_reused']:
+                        raise ValueError('Unknown or evicted CoreML shape-session evidence reused')
+                    if child['session_run_count'] != child['request_run_count']:
+                        raise ValueError('New CoreML shape session has prior execution counts')
+                    new_ids.add(sid)
+                elif (fixed != prior['fixed'] or not child['evidence_reused']
+                      or child['session_run_count'] != prior['runs'] + child['request_run_count']):
+                    raise ValueError('CoreML shape/profile identity or cumulative count changed')
+                available[sid] = {'fixed': json.loads(json.dumps(fixed)), 'runs': child['session_run_count']}
+            cached_ids = aggregate['cached_shape_session_ids']
+            if any(sid not in available for sid in cached_ids):
+                raise ValueError('CoreML cache claims an unobserved shape session')
+            new_cache[role] = {sid: available[sid] for sid in cached_ids}
+            new_totals[role] = aggregate['session_run_count']
+        # Commit only after both roles pass; failures cannot poison live history.
+        self.pid, self.key = pid, key
+        self.cached, self.totals = new_cache, new_totals
+        self.highest_id = max({self.highest_id} | new_ids)
+
+
+def validate_execution_evidence(response, request, *, worker_pid=None, shape_state=None):
     """Validate actual native EP evidence; never convert configuration into GPU proof."""
     if 'execution_window' in response:
         _validated_execution_window(response['execution_window'], worker_pid=worker_pid)
@@ -276,61 +459,72 @@ def validate_execution_evidence(response, request, *, worker_pid=None):
         raise ValueError('Native execution evidence requires detection and recognition session identities')
     expected_models = {'det': f"PP-OCRv6_{request['tier']}_det", 'rec': request['rec_model']}
     observed_coreml, observed_cpu = False, False
+    shape_ids_seen = set()
     for role in ('det', 'rec'):
         session = sessions[role]
         if role == 'rec' and request['operation'] == 'detect':
             if session is not None:
                 raise ValueError('Detection-only evidence must not claim recognition execution')
             continue
-        if not isinstance(session, dict) or session.get('model') != expected_models[role]:
-            raise ValueError(f'Native execution evidence model mismatch: {role}')
-        status = session.get('status')
-        if status not in ('executed', 'not_run') or (status == 'not_run' and (role != 'rec' or response.get('result') != [[], []])):
-            raise ValueError(f'Invalid native session execution status: {role}')
-        if session.get('source') != ('ort_first_run_profile' if provider == 'coreml' else 'explicit_cpu_session'):
-            raise ValueError('Native session execution evidence has an unsupported source')
-        if 'profile_window' in session:
-            _validated_execution_window(session['profile_window'], worker_pid=worker_pid)
-        if 'capture' in session and session['capture'] != ('first_successful_run' if provider == 'coreml' else 'explicit_cpu_session'):
-            raise ValueError('Native execution evidence capture scope is inconsistent')
-        if 'request_run_count' in session or 'session_run_count' in session:
-            current, cumulative = session.get('request_run_count'), session.get('session_run_count')
-            if (type(current) is not int or type(cumulative) is not int or not 0 <= current <= cumulative
-                    or (status == 'executed') != (current > 0)):
-                raise ValueError('Native session/request run counts disagree with execution status')
-            if session.get('evidence_reused') is not (provider == 'coreml' and current > 0 and cumulative > current):
-                raise ValueError('Native reused first-run evidence is mislabeled')
-        if session.get('gpu_execution_verified') is not False:
-            raise ValueError('ORT provider profiling is not physical GPU execution verification')
-        counts = {}
-        for key in ('coreml_kernel_events', 'cpu_kernel_events'):
-            value = session.get(key)
-            if type(value) is not int or not 0 <= value <= 1000000000:
-                raise ValueError('Invalid native provider kernel-event count')
-            counts[key] = value
-        coreml_executed = counts['coreml_kernel_events'] > 0
-        cpu_executed = counts['cpu_kernel_events'] > 0 if provider == 'coreml' else status == 'executed'
-        if (type(session.get('coreml_ep_executed')) is not bool or session['coreml_ep_executed'] != coreml_executed
-                or type(session.get('cpu_ep_executed')) is not bool or session['cpu_ep_executed'] != cpu_executed):
-            raise ValueError('Native provider execution flags disagree with session evidence')
-        if status == 'not_run' and any(counts.values()):
-            raise ValueError('Unexecuted native session must not report kernel events')
-        if provider == 'cpu' and any(counts.values()):
-            raise ValueError('Explicit CPU session must not fabricate profile events')
-        if provider == 'coreml' and status == 'executed' and not coreml_executed:
-            raise ValueError('No CoreML kernel executed; all-CPU fallback refused')
-        expected = ({'CoreMLExecutionProvider'} if coreml_executed else set()) | ({'CPUExecutionProvider'} if cpu_executed else set())
-        observed = session.get('observed_providers')
-        if (not isinstance(observed, list) or any(not isinstance(item, str) for item in observed)
-                or len(observed) != len(set(observed)) or set(observed) != expected):
-            raise ValueError('Native observed providers disagree with executed sessions')
+        coreml_executed, cpu_executed = _validate_session_evidence(
+            session, expected_models[role], role, provider, response, worker_pid, aggregate=provider == 'coreml')
+        if provider == 'coreml':
+            children = _validate_shape_sessions(session, role, request, response, worker_pid)
+            shape_ids = {child['shape_session_id'] for child in children} | set(session['cached_shape_session_ids'])
+            if shape_ids_seen & shape_ids:
+                raise ValueError('CoreML shape-session ID is reused across models')
+            shape_ids_seen |= shape_ids
         observed_coreml |= coreml_executed
         observed_cpu |= cpu_executed
     if (type(evidence.get('coreml_ep_executed')) is not bool or evidence['coreml_ep_executed'] != observed_coreml
             or type(evidence.get('cpu_fallback_observed')) is not bool
             or evidence['cpu_fallback_observed'] != (provider == 'coreml' and observed_cpu)):
         raise ValueError('Native aggregate provider evidence disagrees with session evidence')
+    if shape_state is not None and provider == 'coreml':
+        shape_state.validate(evidence, request, response['execution_window'])
     return evidence
+
+
+def validate_coreml_record_sequence(documents):
+    """Recheck a complete receipt's per-worker continuity with bounded state.
+
+    Files need not be listed in numeric request order. PID reuse is permitted
+    only at a fresh request 1 with a nonoverlapping monotonic window. A restarted
+    process must prove fresh profiles; no cached evidence crosses that boundary.
+    This is protocol evidence, not an external process/physical GPU attestation.
+    """
+    ordered = []
+    for document in documents:
+        if not isinstance(document, dict):
+            raise ValueError('Invalid CoreML request evidence document')
+        request, response = document.get('request'), document.get('response')
+        pid = document.get('worker_pid')
+        if (not isinstance(request, dict) or not isinstance(response, dict)
+                or request.get('provider') != 'coreml' or type(pid) is not int or pid < 1
+                or type(request.get('id')) is not int or request['id'] < 1
+                or type(response.get('id')) is not int or response['id'] != request['id']
+                or response.get('ok') is not True):
+            raise ValueError('Invalid complete CoreML request sequence identity')
+        window = _validated_execution_window(response.get('execution_window'), worker_pid=pid)
+        validate_execution_evidence(response, request, worker_pid=pid)
+        ordered.append((pid, window['monotonic_start_ns'], request['id'], document))
+    state = CoremlShapeEvidenceState()
+    previous_pid, previous_id, previous_end = None, 0, 0
+    for pid, start, request_id, document in sorted(ordered, key=lambda row: row[:3]):
+        if pid != previous_pid:
+            state.clear()
+            previous_id, previous_end = 0, 0
+        elif start < previous_end or (request_id == 1 and start == previous_end):
+            raise ValueError('Overlapping/replayed CoreML requests in the same worker')
+        if request_id == 1:
+            state.clear()  # A fresh process, including honest OS PID reuse.
+            previous_id = 0
+        if request_id != previous_id + 1:
+            raise ValueError('Incomplete or out-of-order CoreML worker request sequence')
+        response, request = document['response'], document['request']
+        validate_execution_evidence(response, request, worker_pid=pid, shape_state=state)
+        previous_pid, previous_id = pid, request_id
+        previous_end = response['execution_window']['monotonic_end_ns']
 
 
 def _reap(process):
@@ -394,6 +588,7 @@ class NativeOcr:
         self.execution_window = None
         self.last_request_evidence = None
         self._worker_sha256 = None
+        self._shape_evidence_state = CoremlShapeEvidenceState()
         self._evidence_directory = os.environ.get('VSE_NATIVE_EVIDENCE_DIR')
         self._reported_evidence = False
         self._capabilities = None
@@ -504,6 +699,7 @@ class NativeOcr:
             return process
 
     def _discard(self):
+        self._shape_evidence_state.clear()
         self.execution_evidence = None
         self.execution_window = None
         self.last_request_evidence = None
@@ -580,7 +776,8 @@ class NativeOcr:
                 for setting in ('rec_model', 'batch_size', 'cpu_threads'):
                     if type(response.get(setting)) is not type(request[setting]) or response.get(setting) != request[setting]:
                         raise ValueError(f'Native OCR did not honor requested {setting}')
-                evidence = validate_execution_evidence(response, request, worker_pid=process.pid)
+                evidence = validate_execution_evidence(response, request, worker_pid=process.pid,
+                                                       shape_state=self._shape_evidence_state)
                 self.execution_evidence = json.loads(json.dumps(evidence))
                 self.execution_window = json.loads(json.dumps(response.get('execution_window')))
                 # In-memory only: the caller/checker may retain this bounded raw

@@ -69,7 +69,8 @@ def check_srt(path):
 
 def validate_coreml_video_evidence(report, documents):
     """Validate actual per-request worker evidence, not merely CLI switches."""
-    from backend.tools.native_ocr import validate_execution_evidence, _validated_execution_window
+    from backend.tools.native_ocr import (validate_execution_evidence, _validated_execution_window,
+                                          validate_coreml_record_sequence)
     if (report.get('requested_provider') != 'coreml' or report.get('cpu_forced') is not False
             or report.get('gpu_inference_verified') is not False or not documents):
         raise ValueError('Missing explicit CoreML video execution evidence')
@@ -101,9 +102,10 @@ def validate_coreml_video_evidence(report, documents):
                 if any(key not in session for key in ('capture', 'request_run_count', 'session_run_count', 'evidence_reused')):
                     raise ValueError('CoreML video session lacks precise profile capture/reuse semantics')
                 if session['status'] == 'executed':
-                    if 'profile_window' not in session:
-                        raise ValueError('CoreML video profile has no attributable first-run window')
+                    # Shared validator above requires each actual shape's
+                    # profile_window, not a misleading aggregate window.
                     executed.add(session['model'])
+    validate_coreml_record_sequence(documents)
     if executed != {f'PP-OCRv6_{tier}_det', f'PP-OCRv6_{tier}_rec'}:
         raise ValueError('CoreML video did not execute both expected production models')
     return sorted(executed)
