@@ -134,9 +134,37 @@ extraction remains the parent application's pinned FFmpeg responsibility.
 
 Binary stdin/stdout: uint32 little-endian byte length plus UTF-8 JSON, maximum
 request 65,536 bytes. Request fields: `id`, `tier` (`small`/`medium`), `path`, optional
-`operation` (`ocr`/`detect`), `provider` (`cpu` only), `batch_size` (1..100),
+`operation` (`ocr`/`detect`), `provider` (`cpu`, or `coreml` on supported Macs), `batch_size` (1..100),
 `cpu_threads` (1..128), `timeout_ms` (1..120000), and exact `rec_model` without `_infer`.
 Unknown fields/providers are rejected; GPU requests never silently fall back to CPU.
+
+The process launcher must set `ORT_DISABLE_TELEMETRY=1` **before process creation**;
+the worker rejects a missing/different inherited value before using ORT APIs and
+also calls `DisableTelemetryEvents` after creating its environment. `--capabilities`
+needs no models and reports the loaded ORT version, available EPs and supported
+request providers. The build records this JSON as `native-capabilities.json`, bound
+to worker/runtime hashes in `size-audit.json` provenance. Availability is not proof
+of model compatibility or actual GPU dispatch.
+
+`coreml` requires macOS and the pinned ORT 1.31.0 CoreML EP. It uses `MLProgram`,
+`MLComputeUnits=CPUAndGPU` (ANE excluded), and disables low-precision GPU
+accumulation without replacing/converting the model assets. Registration failure
+or no observed CoreML kernel execution fails the request; CPU use must be explicit.
+Mixed ORT CoreML/CPU partitions are allowed but reported. Every success includes
+`requested_provider`, `actual_provider`, and `execution_evidence.sessions.det/rec`.
+CoreML sessions profile their first successful `OrtRun`; later requests explicitly
+mark reused evidence. Event counts describe EP execution, **not GPU utilization**,
+and `gpu_execution_verified` remains false. Production retains only the bounded
+summary and deletes the private raw profile; the independent diagnostic preserves
+raw evidence for audits. A blank image's recognizer is `not_run`, even when that
+cached recognizer executed on an earlier image. Detect-only has `rec=null`.
+
+`execution_window` identifies the worker PID and UTC/steady-clock nanosecond
+interval for the OCR pipeline (including lazy recognizer initialization, excluding
+image decoding and initial detector setup). CoreML `profile_window` identifies only
+the first successful model Run. These allow external trace correlation; neither is
+hardware attribution. Same-device CPU/CoreML parity, actual GPU evidence and total
+video performance remain Mac acceptance gates, not results of a Linux build.
 
 OCR returns `result: [boxes, [[text, confidence], ...]]`. Detection returns top-level
 raw `dt_polys` without recognition filtering or axis-aligned conversion. Crucially,
@@ -215,7 +243,9 @@ to those staged MSVCP/VCRUNTIME files and base Windows/UCRT, not host VC runtime
 - Windows/macOS native execution, actual loaded libraries, read-only relocation,
   clean no-network/no-host-Python client tests and full GUI/video/SRT tests remain
   distinct gates. `release_ready` stays false until final packaging closes them.
-- Mac's SDK contains other providers, but this worker enables only CPU. CUDA,
-  DirectML/CoreML hardware behavior is unverified and not implicitly enabled.
+- Mac production acceleration is explicitly selected with `coreml`; an explicit
+  CPU path remains available. CUDA, DirectML and WebGPU requests are not enabled
+  by this worker. CoreML availability/CPUAndGPU permission must not be presented
+  as verified GPU dispatch or a measured GPU speedup.
 
 No push, tag, release or change to the default backend is performed by these helpers.

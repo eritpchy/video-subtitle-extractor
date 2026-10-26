@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reproducible native CPU worker assembly. Build tools never enter runtime.
+"""Reproducible native CPU/CoreML worker assembly. Build tools never enter runtime.
 
 This helper certifies pinned inputs, not final platform dependency closure. The
 outer application packager must run attributable runtime/clean-client audits.
@@ -167,6 +167,49 @@ def inventory(stage, target, provenance):
     return report
 
 
+def record_capabilities(stage, executable, runtime):
+    """Probe the assembled worker, with telemetry disabled before process load.
+
+    Availability is not execution evidence or proof of GPU hardware dispatch.
+    The application packager separately decides which provider the profile needs.
+    """
+    env = dict(os.environ, ORT_DISABLE_TELEMETRY='1')
+    for key in list(env):
+        if key in ('LD_PRELOAD', 'LD_LIBRARY_PATH') or key.startswith('DYLD_'):
+            del env[key]
+    completed = subprocess.run([str(stage / executable), '--capabilities'],
+                               check=True, capture_output=True, text=True,
+                               encoding='utf-8', timeout=30, env=env)
+    if len(completed.stdout.encode('utf-8')) > 65536:
+        raise ValueError('Native capability response exceeds 65536 bytes')
+    report = json.loads(completed.stdout)
+    if (not isinstance(report, dict) or report.get('schema_version') != 1
+            or report.get('ort_version') != '1.31.0'
+            or report.get('default_request_provider') != 'cpu'
+            or report.get('gpu_execution_verified') is not False):
+        raise ValueError('Invalid native capability identity/version')
+    available, supported = report.get('available_providers'), report.get('supported_request_providers')
+    coreml = report.get('coreml')
+    if (not isinstance(available, list) or not all(isinstance(p, str) for p in available)
+            or 'CPUExecutionProvider' not in available
+            or supported not in (['cpu'], ['cpu', 'coreml'])
+            or not isinstance(coreml, dict)
+            or coreml.get('available') is not ('coreml' in supported)
+            or (coreml['available'] and 'CoreMLExecutionProvider' not in available)
+            or coreml.get('model_format') != 'MLProgram'
+            or coreml.get('compute_units') != 'CPUAndGPU'
+            or coreml.get('ane_allowed') is not False
+            or coreml.get('gpu_execution_verified') is not False):
+        raise ValueError('Invalid native provider capability contract')
+    path = stage / 'native-capabilities.json'
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    return {'path': path.name, 'sha256': sha256(path),
+            'worker_sha256': sha256(stage / executable),
+            'runtime_sha256': sha256(stage / runtime),
+            'telemetry_disabled_before_exec': True,
+            'scope': 'Assembled worker provider availability only; no model execution or GPU hardware verification'}
+
+
 def build(a):
     target = a.platform + '-' + a.arch
     native_target(target)
@@ -254,6 +297,7 @@ def build(a):
         dependency = {'native_sources': json.loads((ROOT / 'deps/source-pins.json').read_text()),
                       'onnxruntime': {'version': sdk_manifest['version'], 'target': target, **sdk_record},
                       'build_inputs': {'worker_sha256': sha256(ROOT / 'worker.cpp'),
+                                       'provider_evidence_sha256': sha256(ROOT / 'provider_evidence.hpp'),
                                        'cmake_sha256': sha256(ROOT / 'CMakeLists.txt')}}
         (stage / 'dependency-source-manifest.json').write_text(json.dumps(dependency, indent=2) + '\n', encoding='utf-8')
         copy_notices(source, sdk, stage, sdk_record)
@@ -265,6 +309,9 @@ def build(a):
         provenance = {'cmake': subprocess.check_output([a.cmake, '--version'], text=True).splitlines()[0],
                       'host': platform.platform(), 'ort_archive': sdk_record['archive'],
                       'minimum_macos': sdk_record.get('minimum_macos'), 'vc_runtime': vc}
+        runtime_name = {'linux': 'libonnxruntime.so.1', 'macos': 'libonnxruntime.1.dylib',
+                        'windows': 'onnxruntime.dll'}[a.platform]
+        provenance['native_capabilities'] = record_capabilities(stage, executable, runtime_name)
         if windows_tools:
             provenance['windows_toolchain'] = windows_tools
         if a.runner_test_only:

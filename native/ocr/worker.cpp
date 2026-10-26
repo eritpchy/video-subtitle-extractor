@@ -4,9 +4,11 @@
 #include "clipper.hpp"
 #include "json.hpp"
 #include "onnxruntime_c_api.h"
+#include "provider_evidence.hpp"
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <cstdlib>
@@ -68,44 +70,221 @@ struct Tensor {
 #ifdef VSE_OCR_PRECISION_DIAGNOSTIC
 #include "precision_diagnostic.hpp"
 #endif
+J available_providers() {
+  char **names = nullptr;
+  int count = 0;
+  check(api->GetAvailableProviders(&names, &count));
+  J result = J::array();
+  for (int i = 0; i < count; ++i)
+    result.push_back(names[i]);
+  check(api->ReleaseAvailableProviders(names, count));
+  return result;
+}
+bool coreml_available(const J &providers) {
+#ifdef __APPLE__
+  return std::string(OrtGetApiBase()->GetVersionString()) == "1.31.0" &&
+         std::find(providers.begin(), providers.end(), "CoreMLExecutionProvider") !=
+             providers.end();
+#else
+  (void)providers;
+  return false;
+#endif
+}
+void require_provider(const std::string &provider) {
+  if (provider == "cpu")
+    return;
+  if (provider != "coreml")
+    throw std::runtime_error("unsupported native provider; use cpu or coreml");
+  if (!coreml_available(available_providers()))
+    throw std::runtime_error(
+        "CoreML requires macOS and the pinned ORT 1.31.0 CoreML provider; "
+        "CPU fallback is refused (select CPU explicitly to use CPU)");
+}
+J provider_capabilities() {
+  auto providers = available_providers();
+  bool coreml = coreml_available(providers);
+  J supported = J::array({"cpu"});
+  if (coreml)
+    supported.push_back("coreml");
+  return {{"schema_version", 1},
+          {"ort_version", OrtGetApiBase()->GetVersionString()},
+          {"available_providers", providers},
+          {"supported_request_providers", supported},
+          {"default_request_provider", "cpu"},
+          {"coreml", native_provider::coreml_configuration(coreml)},
+          {"gpu_execution_verified", false}};
+}
+std::string model_identifier(const fs::path &path) {
+  auto name = path.filename().u8string();
+  const std::string suffix = "_infer.onnx";
+  if (name.size() > suffix.size() &&
+      name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0)
+    name.resize(name.size() - suffix.size());
+  return name;
+}
+struct ExecutionClock {
+  int64_t utc_ns, monotonic_ns;
+  ExecutionClock()
+      : utc_ns(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   std::chrono::system_clock::now().time_since_epoch()).count()),
+        monotonic_ns(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch()).count()) {}
+};
+J execution_window(const ExecutionClock &start, const ExecutionClock &end,
+                   const char *scope) {
+#ifdef _WIN32
+  auto pid = GetCurrentProcessId();
+#else
+  auto pid = getpid();
+#endif
+  return {{"worker_pid", pid}, {"utc_start_ns", start.utc_ns},
+          {"utc_end_ns", end.utc_ns},
+          {"monotonic_start_ns", start.monotonic_ns},
+          {"monotonic_end_ns", end.monotonic_ns},
+          {"monotonic_clock", "std::chrono::steady_clock"}, {"scope", scope}};
+}
 struct Session {
   OrtSession *s = nullptr;
   std::string input, output;
+  std::string provider, model, provider_error;
+  fs::path profile_directory;
+  bool profiling = false;
+  uint64_t run_count = 0, request_run_count = 0;
+  J execution_evidence;
 #ifdef VSE_OCR_PRECISION_DIAGNOSTIC
   fs::path diagnostic_model;
 #endif
-  Session(OrtEnv *env, const fs::path &path, int threads) {
+  Session(OrtEnv *env, const fs::path &path, int threads,
+          const std::string &requested_provider = "cpu")
+      : provider(requested_provider), model(model_identifier(path)),
+        execution_evidence(native_provider::initial_session_evidence(provider,
+                                                                     model)) {
+    require_provider(provider);
     OrtSessionOptions *o = nullptr;
     check(api->CreateSessionOptions(&o));
     try {
       check(api->SetIntraOpNumThreads(o, threads));
       check(api->SetInterOpNumThreads(o, 1));
       check(api->SetSessionGraphOptimizationLevel(o, ORT_ENABLE_ALL));
+      if (provider == "coreml") {
+#ifdef __APPLE__
+        // A private, bounded first-inference profile proves EP execution, not
+        // actual GPU dispatch. Only this explicitly requested path is profiled.
+        auto pattern = (fs::temp_directory_path() / "vse-coreml-XXXXXX").string();
+        std::vector<char> buffer(pattern.begin(), pattern.end());
+        buffer.push_back('\0');
+        auto directory = mkdtemp(buffer.data());
+        if (!directory)
+          throw std::runtime_error("cannot create private CoreML evidence directory");
+        profile_directory = fs::canonical(directory);
+        check(api->EnableProfiling(o, (profile_directory / "execution").c_str()));
+        const char *keys[] = {"ModelFormat", "MLComputeUnits",
+                             "AllowLowPrecisionAccumulationOnGPU",
+                             "RequireStaticInputShapes", "EnableOnSubgraphs"};
+        const char *values[] = {"MLProgram", "CPUAndGPU", "0", "0", "0"};
+        check(api->SessionOptionsAppendExecutionProvider(o, "CoreML", keys,
+                                                        values, 5));
+        profiling = true;
+#endif
+      }
 #ifdef VSE_OCR_PRECISION_DIAGNOSTIC
       diagnostic_model = path;
       precision_diagnostic::configure(o);
 #endif
       check(api->CreateSession(env, path.c_str(), o, &s));
       api->ReleaseSessionOptions(o);
+      o = nullptr;
+      OrtAllocator *a = nullptr;
+      check(api->GetAllocatorWithDefaultOptions(&a));
+      char *n = nullptr;
+      check(api->SessionGetInputName(s, 0, a, &n));
+      input = n;
+      a->Free(a, n);
+      check(api->SessionGetOutputName(s, 0, a, &n));
+      output = n;
+      a->Free(a, n);
     } catch (...) {
-      api->ReleaseSessionOptions(o);
+      if (o)
+        api->ReleaseSessionOptions(o);
+      if (s)
+        api->ReleaseSession(s);
+      s = nullptr;
+      cleanup_profile();
       throw;
     }
-    OrtAllocator *a = nullptr;
-    check(api->GetAllocatorWithDefaultOptions(&a));
-    char *n = nullptr;
-    check(api->SessionGetInputName(s, 0, a, &n));
-    input = n;
-    a->Free(a, n);
-    check(api->SessionGetOutputName(s, 0, a, &n));
-    output = n;
-    a->Free(a, n);
   }
   ~Session() {
     if (s)
       api->ReleaseSession(s);
+    cleanup_profile();
+  }
+  void cleanup_profile() noexcept {
+    if (!profile_directory.empty()) {
+      std::error_code ignored;
+      fs::remove_all(profile_directory, ignored);
+      if (!ignored)
+        profile_directory.clear();
+    }
+  }
+  J request_evidence() const {
+    // A recognizer used by a previous image is not execution evidence for a
+    // later blank image. Preserve the session lifetime count separately.
+    J evidence = request_run_count ? execution_evidence
+        : native_provider::initial_session_evidence(provider, model);
+    evidence["session_run_count"] = run_count;
+    evidence["request_run_count"] = request_run_count;
+    evidence["capture"] = provider == "coreml" ? "first_successful_run"
+                                               : "explicit_cpu_session";
+    evidence["evidence_reused"] = provider == "coreml" && request_run_count &&
+                                   run_count > request_run_count;
+    return evidence;
+  }
+  void record_first_execution() {
+    if (provider == "cpu") {
+      execution_evidence["status"] = "executed";
+      execution_evidence["cpu_ep_executed"] = true;
+      execution_evidence["observed_providers"] = J::array({"CPUExecutionProvider"});
+      return;
+    }
+    if (!profiling)
+      return;
+    profiling = false;
+    try {
+      OrtAllocator *allocator = nullptr;
+      check(api->GetAllocatorWithDefaultOptions(&allocator));
+      char *name = nullptr;
+      check(api->SessionEndProfiling(s, allocator, &name));
+      if (!name)
+        throw std::runtime_error("CoreML profile filename missing");
+      fs::path path;
+      try {
+        path = fs::u8path(name);
+      } catch (...) {
+        allocator->Free(allocator, name);
+        throw;
+      }
+      allocator->Free(allocator, name);
+      if (fs::is_symlink(path) || !fs::is_regular_file(path) ||
+          fs::canonical(path.parent_path()) != profile_directory ||
+          fs::file_size(path) > 16 * 1024 * 1024)
+        throw std::runtime_error("invalid CoreML execution profile path or size");
+      std::ifstream stream(path);
+      auto events = J::parse(stream, [](int depth, J::parse_event_t, const J &) {
+        if (depth > 32)
+          throw std::runtime_error("CoreML profile nesting limit exceeded");
+        return true;
+      });
+      execution_evidence = native_provider::summarize_coreml_profile(events, model);
+      cleanup_profile();
+    } catch (const std::exception &error) {
+      provider_error = error.what();
+      cleanup_profile();
+      throw;
+    }
   }
   Tensor run(Tensor &x, int timeout) {
+    if (!provider_error.empty())
+      throw std::runtime_error(provider_error);
     OrtMemoryInfo *m = nullptr;
     check(api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &m));
     Value in, out;
@@ -130,7 +309,9 @@ struct Session {
     });
     const char *ins[] = {input.c_str()}, *outs[] = {output.c_str()};
     const OrtValue *ivs[] = {in.p};
+    ExecutionClock run_start;
     status = api->Run(s, r, ins, ivs, 1, outs, 1, &out.p);
+    ExecutionClock run_end;
     {
       std::lock_guard<std::mutex> lock(mutex);
       done = true;
@@ -138,7 +319,22 @@ struct Session {
     cv.notify_all();
     timer.join();
     api->ReleaseRunOptions(r);
-    check(status);
+    try {
+      check(status);
+      record_first_execution();
+    } catch (const std::exception &error) {
+      // Never let a later successful Run inherit a partial/failed Run's
+      // profile. Main discards this CoreML engine; a new request can retry in
+      // a fresh session without silently switching to CPU.
+      if (provider == "coreml")
+        provider_error = error.what();
+      throw;
+    }
+    ++run_count;
+    ++request_run_count;
+    if (provider == "coreml" && run_count == 1)
+      execution_evidence["profile_window"] = execution_window(
+          run_start, run_end, "first successful OrtRun; ORT EP profile only, not GPU hardware attribution");
     Info info;
     check(api->GetTensorTypeAndShape(out.p, &info.p));
     size_t rank, n;
@@ -348,6 +544,7 @@ struct Engine {
   OrtEnv *environment;
   fs::path rec_path;
   int threads;
+  std::string provider;
   std::vector<std::string> chars;
   std::array<float, 3> alpha, beta;
   int rec_h, rec_w, max_candidates;
@@ -356,11 +553,11 @@ struct Engine {
   double det_thresh = .3, det_box_thresh = .6, det_unclip = 1.5;
   Engine(OrtEnv *env, const fs::path &models, const fs::path &configs,
          const std::string &tier, const std::string &rec_name, int thread_count,
-         bool detect_only)
+         bool detect_only, const std::string &requested_provider = "cpu")
       : det(env, models / ("PP-OCRv6_" + tier + "_det_infer.onnx"),
-            thread_count),
+            thread_count, requested_provider),
         environment(env), rec_path(models / (rec_name + "_infer.onnx")),
-        threads(thread_count) {
+        threads(thread_count), provider(requested_provider) {
     std::ifstream f(configs / (tier + ".json"));
     J cfg;
     f >> cfg;
@@ -417,7 +614,26 @@ struct Engine {
       }
     max_candidates = cfg["det"]["PostProcess"].value("max_candidates", 1000);
   }
+  J provider_evidence() const {
+    const auto det_evidence = det.request_evidence();
+    const auto rec_evidence = rec ? rec->request_evidence() : J(nullptr);
+    const bool coreml_executed = det_evidence["coreml_ep_executed"];
+    const bool cpu_executed = bool(det_evidence["cpu_ep_executed"]) ||
+        (rec && bool(rec_evidence["cpu_ep_executed"]));
+    return {{"schema_version", 1}, {"requested_provider", provider},
+            {"actual_provider", provider == "coreml" ? "CoreMLExecutionProvider"
+                                                       : "CPUExecutionProvider"},
+            {"compute_units", provider == "coreml" ? "CPUAndGPU" : "CPUOnly"},
+            {"ane_allowed", false}, {"gpu_execution_verified", false},
+            {"evidence_scope", "Per-request session use with first-successful-Run ORT EP evidence; cached profiles do not certify per-frame GPU execution or CoreML-internal fallback"},
+            {"coreml_ep_executed", coreml_executed},
+            {"cpu_fallback_observed", provider == "coreml" && cpu_executed},
+            {"sessions", {{"det", det_evidence}, {"rec", rec_evidence}}}};
+  }
   J predict(const cv::Mat &src, int timeout, bool detect_only, int batch_size) {
+    det.request_run_count = 0;
+    if (rec)
+      rec->request_run_count = 0;
     auto deadline =
         std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout);
     auto remaining = [&]() {
@@ -474,7 +690,7 @@ struct Engine {
       return polys;
     }
     if (!rec)
-      rec = std::make_unique<Session>(environment, rec_path, threads);
+      rec = std::make_unique<Session>(environment, rec_path, threads, provider);
     std::vector<Entry> entries;
     for (auto &q : boxes) {
       auto image = crop(src, q);
@@ -720,6 +936,11 @@ int wmain(int argc, wchar_t **argv) {
 #else
 int main(int argc, char **argv) {
 #endif
+  const char *telemetry_optout = std::getenv("ORT_DISABLE_TELEMETRY");
+  if (!telemetry_optout || std::string(telemetry_optout) != "1") {
+    std::cerr << "native-ocr: launch requires ORT_DISABLE_TELEMETRY=1 before process initialization\n";
+    return 2;
+  }
   env_set("ORT_DISABLE_TELEMETRY", "1");
   env_set("OPENCV_IO_MAX_IMAGE_PIXELS", "16000000");
   env_set("OPENCV_IO_MAX_IMAGE_WIDTH", "16384");
@@ -729,6 +950,17 @@ int main(int argc, char **argv) {
   _setmode(_fileno(stdout), _O_BINARY);
 #endif
   try {
+    api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
+    if (!api)
+      throw std::runtime_error("ORT API unavailable");
+#ifdef _WIN32
+    if (argc == 2 && std::wstring(argv[1]) == L"--capabilities") {
+#else
+    if (argc == 2 && std::string(argv[1]) == "--capabilities") {
+#endif
+      std::cout << provider_capabilities().dump() << '\n';
+      return 0;
+    }
     ParentGuard parent_guard;
     int env_threads = default_threads();
     fs::path models, config;
@@ -751,9 +983,6 @@ int main(int argc, char **argv) {
     }
     if (models.empty() || config.empty())
       throw std::runtime_error("usage: native-ocr --models DIR --config DIR");
-    api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
-    if (!api)
-      throw std::runtime_error("ORT API unavailable");
     OrtEnv *env = nullptr;
     check(api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "vse-native-ocr", &env));
     auto guard = std::unique_ptr<OrtEnv, void (*)(OrtEnv *)>(
@@ -793,9 +1022,9 @@ int main(int argc, char **argv) {
               it.key() != "operation" && it.key() != "batch_size" &&
               it.key() != "cpu_threads" && it.key() != "rec_model")
             throw std::runtime_error("unknown request field: " + it.key());
-        if (request.value("provider", std::string("cpu")) != "cpu")
-          throw std::runtime_error(
-              "only CPU provider is validated; GPU request refused");
+        auto provider = request.value("provider", std::string("cpu"));
+        result["requested_provider"] = provider;
+        require_provider(provider);
         auto tier = request.at("tier").get<std::string>();
         if (tier != "small" && tier != "medium")
           throw std::runtime_error("unsupported tier");
@@ -813,24 +1042,35 @@ int main(int argc, char **argv) {
           throw std::runtime_error("invalid recognizer model name");
         auto image = read_image(request.at("path").get<std::string>());
         auto key = tier + ":" + rec_name + ":" + std::to_string(cpu_threads) +
-                   ":" + operation;
+                   ":" + operation + ":" + provider;
         if (!engine || key != engine_key) {
           engine.reset();
           engine = std::make_unique<Engine>(env, models, config, tier, rec_name,
-                                            cpu_threads, detect_only);
+                                            cpu_threads, detect_only, provider);
           engine_key = key;
         }
+        ExecutionClock inference_start;
         auto prediction =
             engine->predict(image, timeout, detect_only, batch_size);
+        result["execution_window"] = execution_window(
+            inference_start, ExecutionClock(),
+            "OCR pipeline including pre/postprocessing, model Runs and lazy recognizer initialization; excludes image decoding and initial detector/session setup");
         result[detect_only ? "dt_polys" : "result"] = prediction;
         result["cpu_threads"] = cpu_threads;
         result["batch_size"] = batch_size;
         result["rec_model"] = rec_name;
+        result["actual_provider"] = provider == "coreml" ? "CoreMLExecutionProvider"
+                                                       : "CPUExecutionProvider";
+        result["execution_evidence"] = engine->provider_evidence();
         result["text_order"] =
             (rec_name.rfind("arabic_", 0) == 0 ? "logical" : "display");
         result["ok"] = true;
       } catch (const std::exception &e) {
         result["error"] = e.what();
+        if (engine && engine->provider == "coreml") {
+          engine.reset();
+          engine_key.clear();
+        }
       }
       std::string out =
           result.dump(-1, ' ', false, J::error_handler_t::replace);
