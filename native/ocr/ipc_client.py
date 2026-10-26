@@ -133,7 +133,12 @@ def native_evidence(pid, executable):
 
 def raw_case(command, name, data, expect_zero=False):
     try:
-        result = subprocess.run(command, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+        # These malformed-frame probes also load ORT. Set its privacy control
+        # before process/library initialization, not just inside worker main or
+        # after CreateEnv. Never rely on the caller having run the CI workflow.
+        environment = dict(os.environ, ORT_DISABLE_TELEMETRY='1')
+        result = subprocess.run(command, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                timeout=30, env=environment)
         passed = result.returncode == 0 if expect_zero else result.returncode > 0
         return {'name': name, 'passed': passed, 'returncode': result.returncode,
                 'stdout_bytes': len(result.stdout), 'stderr': result.stderr.decode(errors='replace')[-2000:]}
