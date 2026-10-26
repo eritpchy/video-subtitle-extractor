@@ -22,9 +22,9 @@ Video-subtitle-extractor (VSE) 是一款将视频中的硬字幕提取为外挂�
 - 支持视频字幕**批量提取**
 - 多语言：支持**简体中文（中英双语）**、**繁体中文**、**英文**、**日语**、**韩语**、**越南语**、**阿拉伯语**、**法语**、**德语**、**俄语**、**西班牙语**、**葡萄牙语**、**意大利语**等**87种**语言的字幕提取
 - 多模式：
-  - **快速**：（推荐）使用轻量模型，快速提取字幕，可能丢少量字幕、存在少量错别字
-  - **自动**：（推荐）自动判断模型，CPU下使用轻量模型；GPU下使用精准模型，提取字幕速度较慢，可能丢少量字幕、几乎不存在错别字
-  - **精准**：（不推荐）使用精准模型，GPU下逐帧检测，不丢字幕，几乎不存在错别字，但速度**非常慢**
+  - **快速**：（推荐）v6 支持语言使用 small 模型，兼容语言保留专用识别器。
+  - **自动**：只有启用且可用的 Paddle CUDA 使用 medium；CPU、DirectML、Python/Native CoreML 使用 small。
+  - **精准**：使用 medium 检测/适用的识别模型；仍可能漏字或误识别，速度取决于后端、视频与硬件。
 
 > 请优先使用快速/自动模式，如果前两种模式存在较多丢字幕轴情况时，再使用精准模式
  
@@ -33,7 +33,7 @@ Video-subtitle-extractor (VSE) 是一款将视频中的硬字幕提取为外挂�
 **项目特色**：
 
 - 采用本地进行OCR识别，无需设置调用任何API，不需要接入百度、阿里等在线OCR服务即可本地完成文本识别
-- 支持GPU加速，GPU加速后可以获得更高的准确率与更快的提取速度
+- 支持显式后端加速；速度须实际测量。同一模式/模型不会因为换成 GPU 就自动获得更高准确率。
 
 **使用说明**：
 
@@ -66,8 +66,8 @@ Video-subtitle-extractor (VSE) 是一款将视频中的硬字幕提取为外挂�
 
 **识别模式**：
 - 快速：支持语言使用 PP-OCRv6 small，VideoSubFinder 提取关键帧。
-- 自动：CPU 使用 small，可用 Paddle CUDA 设备使用 medium。
-- 精准：使用 medium 模型；CPU 保持 VideoSubFinder 检测，兼容的 GPU 配置可使用逐帧检测。
+- 自动：仅启用且可用的 Paddle CUDA 使用 medium；CPU、DirectML 和 CoreML 保持 small。
+- 精准：使用 medium 模型；CPU/CoreML 保持 VideoSubFinder 检测，Paddle CUDA/DirectML 可使用逐帧检测。
 - v6 未覆盖的语言明确回退到 v5/v3 专用识别模型，详见[模型覆盖说明](docs/PP-OCRv6.md)。
 
 源码提供默认 Paddle、Windows DirectML 和 macOS Python CoreML 路径；一键包的 Native 实现与源码安装独立。可用后端不等于已完成硬件验收，请以对应提交的实际 CI 证据为准。
@@ -136,7 +136,18 @@ $env:VSE_MODEL_DIR = "$PWD/build/source-paddle-models"
 python gui.py
 ```
 
-### 3. DirectML / Python CoreML 源码路径
+### 3. Windows Python CUDA 11.8 / 12.6 源码路径
+
+在全新 Windows x64 / Python 3.12 虚拟环境中，选择
+`requirements-source-cuda118.txt` **或** `requirements-source-cuda126.txt`，不要与 CPU Paddle
+或另一 CUDA 变体混装。这两条路径使用完整 PySide6 和普通 pip，不运行自研 C++ worker。
+系统仍需兼容的 NVIDIA 驱动；CUDA wheel/运行库不包含系统显卡驱动。
+完整环境创建、安装、`pip check`、设备探测、全 15 模型与 CLI 命令见
+[Windows CUDA 源码安装步骤](docs/USAGE.md#windows-python-cuda-118-or-126-source-backend)。
+目前的 Windows Server 包验收是明确 CPU 推理证据，不代表这些新源码安装步骤或真实 CUDA 硬件已验收。
+CUDA 10.2 仅保留旧 2.2.0 下载，不属于当前 Python 3.12 / Paddle 3.3.1 源码支持。
+
+### 4. DirectML / Python CoreML 源码路径
 
 在另一个干净 Python 3.12 虚拟环境中选择其一：
 

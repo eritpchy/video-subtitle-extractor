@@ -23,18 +23,18 @@ Key features:
 - Support **batch extraction** of video subtitles
 - Multi-language: supports subtitle extraction in **87 languages**, including **Simplified Chinese (Chinese-English bilingual)**, **Traditional Chinese**, **English**, **Japanese**, **Korean**, **Vietnamese**, **Arabic**, **French**, **German**, **Russian**, **Spanish**, **Portuguese**, **Italian**, and more
 - Multiple modes:
-  - **Fast**: (Recommended) Uses a lightweight model for quick subtitle extraction. May miss a small number of subtitles and have minor typos.
-  - **Auto**: (Recommended) Automatically selects the model — uses the lightweight model on CPU and the precise model on GPU. Slower extraction speed, may miss a small number of subtitles, but with almost no typos.
-  - **Precise**: (Not recommended) Uses the precise model with frame-by-frame detection on GPU. No missed subtitles and almost no typos, but **very slow**.
+  - **Fast**: (Recommended) Uses small models for v6-supported languages and the explicit compatibility recognizers for other languages.
+  - **Auto**: Uses medium only with enabled, available Paddle CUDA; CPU, DirectML and Python/Native CoreML use small.
+  - **Accurate**: Uses medium detection/applicable recognition models. Errors remain possible; speed depends on the backend, video and hardware.
 
-> Please use Fast/Auto mode first. Only switch to Precise mode if the first two modes miss too many subtitle lines.
+> Please use Fast/Auto mode first. Only switch to Accurate mode if the first two modes miss too many subtitle lines.
 
 <p style="text-align:center;"><img src="design/demo.png" alt="demo.png"/></p>
 
 **Highlights**:
 
 - Uses local OCR recognition — no need to configure any API or connect to online OCR services such as Baidu or Alibaba
-- Supports GPU acceleration for higher accuracy and faster extraction speed
+- Supports explicit acceleration backends. Measure performance on the actual workload; changing to a GPU does not inherently improve accuracy for the same mode/model.
 
 **Usage Guide**:
 
@@ -67,8 +67,8 @@ Key features:
 
 **Recognition modes**:
 - Fast: PP-OCRv6 small for supported languages, VideoSubFinder frame detection.
-- Auto: small on CPU, medium on an available Paddle CUDA device.
-- Accurate: medium models; CPU retains VideoSubFinder detection, compatible GPU configurations can use frame-by-frame detection.
+- Auto: medium only with enabled, available Paddle CUDA; small on CPU, DirectML and CoreML.
+- Accurate: medium models; CPU/CoreML retain VideoSubFinder detection, while Paddle CUDA/DirectML can use frame-by-frame detection.
 - Unsupported v6 languages retain explicit v5/v3 language recognizers. See [model coverage](docs/PP-OCRv6.md).
 
 Source backends include default Paddle, Windows DirectML and macOS Python CoreML. Native one-click package implementations are separate from source installation. Backend availability is not hardware certification: consult completed CI for the exact commit.
@@ -137,7 +137,20 @@ $env:VSE_MODEL_DIR = "$PWD/build/source-paddle-models"
 python gui.py
 ```
 
-### 3. DirectML / Python CoreML source paths
+### 3. Windows Python CUDA 11.8 / 12.6 source paths
+
+In a fresh Windows x64 / Python 3.12 environment, choose
+`requirements-source-cuda118.txt` **or** `requirements-source-cuda126.txt`.
+Do not co-install CPU Paddle or the other CUDA variant. These paths use full
+PySide6 and ordinary pip, not this project's C++ worker. A compatible NVIDIA
+system driver is still required; CUDA wheels/libraries do not supply that driver.
+See the [complete Windows CUDA source commands](docs/USAGE.md#windows-python-cuda-118-or-126-source-backend)
+for environment creation, installation, `pip check`, device discovery, all 15 models and CLI use.
+Existing Windows Server package checks used explicit CPU inference; they do not
+certify these new source-install recipes or real CUDA hardware execution.
+CUDA 10.2 remains an old 2.2.0 download, not current Python 3.12/Paddle 3.3.1 source support.
+
+### 4. DirectML / Python CoreML source paths
 
 Choose one in another clean Python 3.12 environment:
 
