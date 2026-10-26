@@ -11,7 +11,7 @@ import hashlib
 import importlib.metadata
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import platform
 import re
 import shutil
@@ -30,6 +30,7 @@ POLICY_PATH = ROOT / 'native/qt/macos-qt-overlay.json'
 PLUGIN = Path('PySide6/Qt/plugins/platforms/libqcocoa.dylib')
 RECEIPT = 'vse-qt-ax-overlay.json'
 RECEIPT_SCOPE = 'Library preparation only; not application, external AX or release acceptance'
+NATIVE_LOAD_SCOPE = 'Native load/public activation only, not external AX or VSE GUI acceptance'
 
 
 def sha256(path: Path) -> str:
@@ -316,12 +317,15 @@ def _apply(purelib: Path, receipt_path: Path, resource: VerifiedResource, *, con
             backup.unlink(missing_ok=True)
 
 
-def verify_overlay(purelib: Path, receipt: dict, *, policy: dict | None = None) -> dict:
+def validate_receipt_identity(receipt: dict, *, policy: dict | None = None,
+                              require_native_load: bool = False) -> dict:
+    """Portable pin/schema check, not execution or independent external-AX proof.
+
+Aggregators must also bind original receipt bytes to the originating CI job.
+"""
     policy = policy or load_policy()
-    actual = inspect_target(purelib, policy=policy)
     if (receipt.get('schema') != 1 or receipt.get('status') != 'exact-overlay-applied'
             or receipt.get('plugin_sha256') != policy['plugin']['sha256']
-            or actual['plugin_sha256'] != policy['plugin']['sha256']
             or receipt.get('resource_sha256') != policy['resource']['sha256']
             or receipt.get('source_resource') != policy['source_resource']
             or receipt.get('original_cocoa_sha256') != policy['original_cocoa_sha256']
@@ -332,8 +336,48 @@ def verify_overlay(purelib: Path, receipt: dict, *, policy: dict | None = None) 
             or receipt.get('scope') != RECEIPT_SCOPE
             or any(receipt.get(flag) is not False for flag in (
                 'production_integration_allowed', 'external_ax_client_tested', 'final_application_acceptance_passed'))
-            or receipt.get('official_frameworks') != actual['official_frameworks']
-            or receipt.get('abi_files') != actual['abi_files']
+            or receipt.get('official_frameworks') != policy['official_frameworks']
+            or receipt.get('abi_files') != policy['abi_files']):
+        raise RuntimeError('Qt overlay receipt does not match this exact runtime')
+    records = receipt.get('original_RECORD')
+    if (not isinstance(records, dict) or not records or any(
+            not isinstance(k, str) or len(PurePosixPath(k).parts) != 2
+            or not PurePosixPath(k).parts[0].endswith('.dist-info')
+            or PurePosixPath(k).parts[-1] != 'RECORD'
+            or '\\' in k or PurePosixPath(k).as_posix() != k
+            or not isinstance(v, str) or re.fullmatch('[0-9a-f]{64}', v) is None
+            for k, v in records.items())):
+        raise RuntimeError('Overlay receipt must preserve original vendor RECORD identities')
+    purelib = receipt.get('purelib')
+    if (not isinstance(purelib, str) or not PurePosixPath(purelib).is_absolute()
+            or '..' in PurePosixPath(purelib).parts or '\\' in purelib
+            or PurePosixPath(purelib).as_posix() != purelib):
+        raise RuntimeError('Overlay receipt has no canonical macOS package directory')
+    check_load = require_native_load or receipt.get('native_load_probe_passed') is True
+    if check_load:
+        proof = receipt.get('native_load_probe')
+        expected = {str(PurePosixPath(purelib) / PLUGIN.as_posix())}
+        expected.update(str(PurePosixPath(purelib) / f'PySide6/Qt/lib/{name}.framework/Versions/A/{name}')
+                        for name in ('QtCore', 'QtGui'))
+        if (receipt.get('native_load_probe_passed') is not True or not isinstance(proof, dict)
+                or proof.get('qt') != policy['qt_version'] or proof.get('backend') != 'cocoa'
+                or proof.get('accessibility_active') is not True
+                or proof.get('external_ax_client_tested') is not False
+                or proof.get('scope') != NATIVE_LOAD_SCOPE
+                or not isinstance(proof.get('images'), list) or len(proof['images']) != 3
+                or any(not isinstance(item, str) for item in proof['images'])
+                or set(proof['images']) != expected):
+            raise RuntimeError('Overlay receipt lacks the exact bounded native-load evidence')
+    return {'receipt_identity_verified': True, 'native_load_claim_checked': check_load,
+            'external_ax_client_tested': False, 'final_application_acceptance_passed': False,
+            'scope': 'Receipt identity/schema only; originating job and actual bytes require separate verification'}
+
+
+def verify_overlay(purelib: Path, receipt: dict, *, policy: dict | None = None) -> dict:
+    policy = policy or load_policy()
+    validate_receipt_identity(receipt, policy=policy)
+    actual = inspect_target(purelib, policy=policy)
+    if (actual['plugin_sha256'] != policy['plugin']['sha256']
             or receipt.get('original_RECORD') != actual['original_RECORD']):
         raise RuntimeError('Qt overlay receipt does not match this exact runtime')
     return actual

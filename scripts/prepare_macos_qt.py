@@ -52,7 +52,7 @@ print('VSE_QT_OVERLAY_LOAD='+json.dumps({'qt':QtCore.qVersion(),'backend':app.pl
             or set(observed.get('images', ())) != expected):
         raise RuntimeError('Qt did not load the exact prepared venv with accessibility active')
     return {**observed, 'external_ax_client_tested': False,
-            'scope': 'Native load/public activation only, not external AX or VSE GUI acceptance'}
+            'scope': overlay.NATIVE_LOAD_SCOPE}
 
 
 def main(argv=None) -> int:

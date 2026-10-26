@@ -375,3 +375,46 @@ def test_failed_rollback_preserves_original_recovery_bytes(resource, purelib, mo
     backups = list((purelib / module.PLUGIN).parent.glob('.vse-qt-original-*'))
     assert len(backups) == 1 and backups[0].read_bytes() == b'original'
     assert not (purelib / module.RECEIPT).exists()
+
+
+def native_receipt(receipt, policy):
+    receipt = copy.deepcopy(receipt)
+    root = receipt['purelib']
+    receipt['native_load_probe_passed'] = True
+    receipt['native_load_probe'] = {'qt': policy['qt_version'], 'backend': 'cocoa',
+        'accessibility_active': True, 'external_ax_client_tested': False, 'scope': module.NATIVE_LOAD_SCOPE,
+        'images': [root + '/' + module.PLUGIN.as_posix()] + [
+            root + f'/PySide6/Qt/lib/{name}.framework/Versions/A/{name}' for name in ('QtCore', 'QtGui')]}
+    return receipt
+
+
+def test_aggregate_receipt_validation_needs_no_mac_files_or_execution(resource, purelib, monkeypatch):
+    receipt = module._apply(purelib, purelib / module.RECEIPT, resource, context='explicit-user-venv')
+    with pytest.raises(RuntimeError, match='native-load'):
+        module.validate_receipt_identity(receipt, policy=resource.policy, require_native_load=True)
+    receipt = native_receipt(receipt, resource.policy)
+    shutil.rmtree(purelib)
+    def forbidden(*args, **kwargs):
+        pytest.fail('Portable receipt validation must not run or read a Mac runtime')
+    monkeypatch.setattr(module, 'inspect_target', forbidden)
+    monkeypatch.setattr(module.subprocess, 'check_output', forbidden)
+    result = module.validate_receipt_identity(receipt, policy=resource.policy, require_native_load=True)
+    assert result['receipt_identity_verified'] and result['native_load_claim_checked']
+    assert result['external_ax_client_tested'] is False
+
+
+@pytest.mark.parametrize('case', ['foreign-image', 'duplicate-image', 'false-external-claim', 'inactive',
+                                  'no-records', 'bad-record-path', 'missing-proof', 'relative-purelib'])
+def test_portable_aggregate_rejects_unbound_or_overstated_proof(resource, purelib, case):
+    receipt = native_receipt(module._apply(purelib, purelib / module.RECEIPT,
+                                          resource, context='explicit-user-venv'), resource.policy)
+    if case == 'foreign-image': receipt['native_load_probe']['images'][0] = '/foreign/libqcocoa.dylib'
+    if case == 'duplicate-image': receipt['native_load_probe']['images'].append(receipt['native_load_probe']['images'][0])
+    if case == 'false-external-claim': receipt['native_load_probe']['external_ax_client_tested'] = True
+    if case == 'inactive': receipt['native_load_probe']['accessibility_active'] = False
+    if case == 'no-records': receipt['original_RECORD'] = {}
+    if case == 'bad-record-path': receipt['original_RECORD'] = {'../system/RECORD': 'a' * 64}
+    if case == 'missing-proof': receipt.pop('native_load_probe')
+    if case == 'relative-purelib': receipt['purelib'] = '../site-packages'
+    with pytest.raises(RuntimeError):
+        module.validate_receipt_identity(receipt, policy=resource.policy, require_native_load=True)

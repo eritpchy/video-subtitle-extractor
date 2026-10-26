@@ -37,7 +37,7 @@ recompiling Qt yields identical signed Mach-O bytes. The builder requires the
 fixed original candidate, source archive, patch and historical build files; it
 does not compile, re-sign, download or install anything.
 
-Authoring checks: 313 portable/safety/package-contract tests passed; one native
+Authoring checks: 322 portable/safety/package-contract tests passed; one native
 Windows launcher test was skipped on Linux. All workflows passed actionlint.
 Both real resources passed the consumer's hash/inventory/source validation.
 These results do not imply that the new source-prepare or integrated package
@@ -110,6 +110,16 @@ vendor RECORDs after relocation/extraction. It does not turn preparation into
 release permission. The final CoreML package still needs complete final-ZIP CI
 and user-M5 acceptance with its own source/ZIP/plugin identities. Source GUI
 needs its own real external-AX check; packaged GUI evidence cannot substitute.
+
+For a Linux source-CI aggregate,
+`validate_receipt_identity(receipt, require_native_load=True)` checks receipt
+identity, fixed resource/runtime hashes, preparation-only flags, original RECORD
+hash-map structure and the exact three own-venv native-image paths. It uses only
+stdlib and does not need Mac files or execute Qt. The aggregate must separately
+bind the original receipt bytes/hash and originating source-CI job. This portable
+validator checks a bounded native-load **claim**, not independent execution or
+external-client acceptance. The source command writes the original receipt to
+`<sysconfig.purelib>/vse-qt-ax-overlay.json` for artifact preservation.
 
 ## Still blocked / independent acceptance
 
