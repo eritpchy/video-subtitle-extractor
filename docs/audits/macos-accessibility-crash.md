@@ -9,7 +9,7 @@ build/evidence guards, runtime dependency resolver and Qt runtime tests on Linux
 with Qt 6.12.0. The full 51,220,268-byte QtBase source archive and exact PS6 patch
 were downloaded, SHA256-verified and applied successfully; both modified Cocoa
 source hashes match the committed pins. macOS compilation and runtime gates
-remain **not run** until this manual CI workflow executes.
+remain **not run** until this isolated CI workflow executes.
 
 ## Exact incident and symbol identity
 
@@ -106,10 +106,17 @@ No security exception or old-version production pin is introduced by this work.
 
 ## Bounded server-side candidate
 
-The manual-only workflow
+The independently triggered workflow
 [`macos-accessibility.yml`](../../.github/workflows/macos-accessibility.yml)
-does not run from or feed the release workflow. It uses a GitHub-hosted arm64
-macOS runner; the build/stage script refuses desktops and self-hosted executors.
+does not run from or feed the release workflow. Its push trigger requires both
+the exact `fix/restore-release-matrix` branch and changes to its seven explicitly
+listed AX workflow/script/pin/constraint/test paths. Other branches, tags,
+documentation-only and unrelated release changes do not trigger it. Manual
+dispatch remains declared, but [GitHub requires the workflow on the default
+branch](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch)
+before dispatch can work; this investigation does not change the default branch.
+It uses a GitHub-hosted arm64 macOS runner; the build/stage script refuses
+desktops and self-hosted executors.
 
 1. Pin official QtBase 6.12.0 source archive, its published SHA256, exact Gerrit
    PS6 revision and decoded patch SHA256. Reject changes to either input.

@@ -162,10 +162,33 @@ def test_native_success_requires_selection_activation_and_clean_disposal():
     assert not module.passed_native_probe(-signal.SIGSEGV, [{"event": "closed"}, result])
 
 
-def test_workflow_is_opt_in_read_only_and_never_replaces_release_packages():
+def test_workflow_trigger_is_confined_to_ax_changes_on_the_repair_branch():
+    workflow = (module.ROOT / ".github/workflows/macos-accessibility.yml").read_text()
+    triggers = workflow.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
+    # Exact allowlist deliberately excludes generic scripts/tests/dependency and
+    # release changes, tags, PRs and every other branch. No YAML dependency is
+    # needed by the pre-runtime guard job.
+    lines = [line for line in triggers.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    assert lines == [
+        "  workflow_dispatch:",
+        "  push:",
+        "    branches:",
+        "      - fix/restore-release-matrix",
+        "    paths:",
+        "      - .github/workflows/macos-accessibility.yml",
+        "      - scripts/build_macos_qt_accessibility.py",
+        "      - scripts/macos_accessibility_probe.py",
+        "      - native/qt/constraints-macos-ax.txt",
+        "      - native/qt/macos-accessibility-pins.json",
+        "      - tests/test_macos_qt_accessibility.py",
+        "      - tests/test_macos_accessibility_probe.py",
+    ]
+
+
+def test_workflow_is_read_only_and_never_replaces_release_packages():
     workflow = (module.ROOT / ".github/workflows/macos-accessibility.yml").read_text()
     assert "  workflow_dispatch:" in workflow
-    assert "  push:" not in workflow and "  workflow_call:" not in workflow
+    assert "  workflow_call:" not in workflow
     assert "contents: read" in workflow and "contents: write" not in workflow
     assert "package_release.py" not in workflow and "gh release" not in workflow
     assert "--phase stock" in workflow and "--phase candidate" in workflow

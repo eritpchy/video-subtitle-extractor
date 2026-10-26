@@ -1,9 +1,22 @@
 name: macOS Qt accessibility diagnostic candidate
 
-# Independent opt-in investigation. Never called by release.yml and never
+# Independent branch-scoped investigation. Never called by release.yml and never
 # publishes/replaces a release, package, branch or tag.
 on:
   workflow_dispatch:
+  # Dispatch requires this file on the default branch. Diagnose on the existing
+  # repair branch without changing the default branch or the release workflow.
+  push:
+    branches:
+      - fix/restore-release-matrix
+    paths:
+      - .github/workflows/macos-accessibility.yml
+      - scripts/build_macos_qt_accessibility.py
+      - scripts/macos_accessibility_probe.py
+      - native/qt/constraints-macos-ax.txt
+      - native/qt/macos-accessibility-pins.json
+      - tests/test_macos_qt_accessibility.py
+      - tests/test_macos_accessibility_probe.py
 
 permissions:
   contents: read
