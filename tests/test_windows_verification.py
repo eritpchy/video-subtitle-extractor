@@ -198,8 +198,10 @@ class WorkflowContractTests(unittest.TestCase):
         # slash-containing branches such as release/2.3.0 in the existing CI.
         self.assertIn("    branches: ['**']\n", push)
         self.assertNotRegex(push, r'(?m)^    (?:tags|tags-ignore|branches-ignore):')
-        expected_paths = ['.github/workflows/**', 'native/ocr/**', 'requirements*.txt', 'backend/**', 'ui/**',
-                          'gui.py', 'scripts/**', 'tests/**', 'docs/licenses/**']
+        # Frozen-byte attributes and branding assets affect the built payload
+        # just as source changes do; both must retain automatic matrix coverage.
+        expected_paths = ['.gitattributes', '.github/workflows/**', 'native/ocr/**', 'requirements*.txt', 'backend/**', 'ui/**',
+                          'gui.py', 'design/**', 'scripts/**', 'tests/**', 'docs/licenses/**']
         pull_request = text.split('  pull_request:\n', 1)[1].split('  workflow_dispatch:\n', 1)[0]
         import ast
         for section in (push, pull_request):

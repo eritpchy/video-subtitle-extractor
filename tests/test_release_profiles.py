@@ -68,6 +68,27 @@ class ReleaseProfileTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     archive_name('2.3.0', *target, profile)
 
+    def test_directml_diagnostics_do_not_waive_model_or_full_matrix_gates(self):
+        workflow = (ROOT / '.github/workflows/release.yml').read_text()
+        directml = workflow.split('  windows-directml:\n', 1)[1].split('  candidate-set:\n', 1)[0]
+        self.assertIn('    needs: native\n', directml)
+        self.assertIn('    if: ${{ !cancelled() }}\n', directml)
+        self.assertNotIn('continue-on-error:', directml)
+        download = directml.split('- uses: actions/download-artifact@v4', 1)[1].split('      - ', 1)[0]
+        self.assertIn('name: native-ocr-fp32-models-${{ github.sha }}', download)
+        for override in ('run-id:', 'repository:', 'github-token:', 'pattern:'):
+            self.assertNotIn(override, download)  # Never borrow another run's model artifact.
+        verification = 'python -S native/ocr/verify_model_cache.py build/native-models'
+        self.assertIn(verification, directml)
+        self.assertLess(directml.index(verification), directml.index('scripts/prepare_release_profile.py'))
+        self.assertIn('scripts/package_release.py --verify dist --smoke', directml)
+        self.assertIn('scripts/accept_release_archive.py --archives dist', directml)
+        aggregate = workflow.split('  candidate-set:\n', 1)[1]
+        self.assertIn('    needs: [native, windows-paddle, windows-directml]\n', aggregate)
+        self.assertNotRegex(aggregate, r'(?m)^    if:')  # Keep GitHub's implicit success() gate.
+        self.assertNotIn('continue-on-error:', aggregate)
+        self.assertIn('scripts/release_guard.py --validate-assets', aggregate)
+
     def test_workflow_is_automatic_but_never_publishes(self):
         workflow = (ROOT / '.github/workflows/release.yml').read_text()
         self.assertIn('  push:', workflow)

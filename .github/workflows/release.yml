@@ -119,6 +119,10 @@ jobs:
   windows-directml:
     name: Original DirectML 1.20.1 / ${{ matrix.os }} (explicit CPU acceptance)
     needs: native
+    # Independent profile evidence may proceed after a Native test failure.
+    # The same-run SHA-named model artifact must still exist and verify below;
+    # candidate-set retains its default success gate for the complete matrix.
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:

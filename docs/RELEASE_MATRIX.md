@@ -26,6 +26,12 @@ This is not Windows 10/11 or real GPU certification. Native CPU still runs its
 existing model/worker tests; this workflow does not replace GPU packages with it.
 VSF remains pinned to 6.10.7.
 
+DirectML waits for the Native workflow to finish, but an unrelated Native test
+failure does not suppress its independent diagnostic evidence. Its converted
+models must come from the same workflow run and exact source-SHA artifact, and
+every pinned graph/config must still verify. Missing/corrupt models fail closed.
+The aggregate candidate-set job still requires all profile jobs to succeed.
+
 All packages include their interpreter, selected inference runtime, media tools,
 GUI, and all supported language/model assets. DirectML ships all 15 preconverted
 FP32 models and their configuration/dictionaries, not a first-launch converter.
