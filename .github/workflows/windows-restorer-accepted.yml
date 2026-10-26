@@ -1,0 +1,84 @@
+name: Fixed accepted-306 CUDA restoration experiment
+
+# Independent Server-only baseline experiment. Never a release/publish workflow.
+on:
+  push:
+    branches: [fix/windows-restorer]
+    paths: ['.github/workflows/windows-restorer-accepted.yml', 'native/windows-restorer-accepted/**', 'scripts/run_windows_restorer_accepted_ci.py']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: windows-restorer-accepted-306-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  accepted-server:
+    if: github.ref == 'refs/heads/fix/windows-restorer'
+    name: Accepted 306 / ${{ matrix.profile }} / ${{ matrix.os }} / CPU acceptance only
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+        profile: [paddle-cuda11.8, paddle-cuda12.6]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: restorer-src
+          persist-credentials: false
+      - name: Exact accepted-baseline model fixtures and audit source (not an app substitute)
+        uses: actions/checkout@v4
+        with:
+          ref: 3064320ec74e1aa71f3702c2ea966485f4b31e33
+          path: baseline-src
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Build-side safety tools only
+        run: python -m pip install packaging pytest==8.3.5
+      - name: Exact baseline, artifact, budget and unchanged diagnostic contracts
+        working-directory: restorer-src
+        run: >-
+          python -m pytest native/windows-restorer-accepted/tests/test_accepted_baseline.py
+          native/windows-restorer/tests/test_space_preflight_isolation.py
+          tests/test_windows_restorer_ci.py tests/test_release_volume_transport.py -q
+      - name: Fixed artifact to byte volumes to native restored tree to original launcher
+        working-directory: restorer-src
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python scripts/run_windows_restorer_accepted_ci.py --runner ${{ matrix.os }}
+          --accepted-baseline-pins native/windows-restorer-accepted/accepted-baseline-306.json
+          --accepted-profile ${{ matrix.profile }} --baseline-source ../baseline-src
+          --work-directory build/restorer-accepted --report-directory test-results/restorer-accepted
+      - name: Preserve source, hashes and actual reports only (no client binaries or payloads)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: restorer-accepted-306-${{ matrix.profile }}-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            restorer-src/test-results/restorer-accepted/
+            restorer-src/build/restorer-accepted/*report.json
+            restorer-src/build/restorer-accepted/*.log
+            restorer-src/build/restorer-accepted/original/*.sha256
+            restorer-src/build/restorer-accepted/original/*.acceptance.json
+            restorer-src/build/restorer-accepted/volumes/*.json
+            restorer-src/build/restorer-accepted/native-build/*.json
+            restorer-src/build/restorer-accepted/native-build/*.txt
+            restorer-src/build/restorer-accepted/native-build/*.log
+            restorer-src/build/restorer-accepted/native-build/fixture-source/
+            restorer-src/build/restorer-accepted/native-build/experiment-source/
+            restorer-src/build/restorer-accepted/launcher-evidence/
+          if-no-files-found: error
+          retention-days: 14

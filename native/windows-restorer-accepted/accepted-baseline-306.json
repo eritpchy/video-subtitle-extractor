@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "scope": "accepted-306-baseline-not-final-release",
+  "repository": "eritpchy/video-subtitle-extractor",
+  "commit": "3064320ec74e1aa71f3702c2ea966485f4b31e33",
+  "run_id": 40288916991,
+  "run_attempt": 1,
+  "evidence_zip_sha256": "dc946f39825ed8ebb096a2cb3d56e71fc368690eea89356dd4e7ef020a0f7621",
+  "acceptance_binding": "Original acceptance sidecar must exist inside the exact SHA-pinned artifact and pass release_guard; package-verification.json is not that receipt.",
+  "profiles": [
+    {
+      "profile": "paddle-cuda11.8",
+      "artifact_id": 12637186682,
+      "artifact_name": "release-candidate-windows-x64-paddle-cuda11.8",
+      "artifact_bytes": 2985652178,
+      "artifact_sha256": "3e672108b2b6e4feae093a379942653b36467f3b57a58b9bc7a3c95d3f0d9b65",
+      "archive_name": "vse-2.3.0-windows-x64-cuda11.8.zip",
+      "archive_bytes": 2985646447,
+      "archive_sha256": "e80d5c19f7e67789f67394469e45e253ccb12ed6b5304c63aa5ef8bb0fa5d277",
+      "checksum_sha256": "7c0fa4876db1cdbc3cd00591123749a9117b123a8a29c912d4e603e77812a60b",
+      "expanded_bytes": 5316516832
+    },
+    {
+      "profile": "paddle-cuda12.6",
+      "artifact_id": 12636364950,
+      "artifact_name": "release-candidate-windows-x64-paddle-cuda12.6",
+      "artifact_bytes": 2696638625,
+      "artifact_sha256": "7869dacaff7d30f9022855b012b44354e3a511b41df1f8bc7656c04090715a7e",
+      "archive_name": "vse-2.3.0-windows-x64-cuda12.6.zip",
+      "archive_bytes": 2696632894,
+      "archive_sha256": "2454c10117f819995858514a19ec46457caae69ec38db6e154cde31d92df9680",
+      "checksum_sha256": "887bd2dc54924a3a7463d3f203ffb85ae3c595ffcb8ce379da6f12280fb9a173",
+      "expanded_bytes": 4498964750
+    }
+  ]
+}
