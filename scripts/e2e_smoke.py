@@ -21,6 +21,38 @@ EXPECTED = (("HELLO WORLD", 1000, 3000), ("SECOND LINE", 4000, 6000))
 MODES = ("fast", "accurate", "auto")
 
 
+def _native_evidence_module():
+    """Resolve shared validators from this script's tree, never the caller cwd.
+
+    Direct script execution puts scripts/, not the app root, on sys.path; -I
+    omits both. The package bootstrap still authenticates payload bytes. This
+    only fixes import resolution and refuses cached foreign backend modules.
+    """
+    import importlib
+
+    expected = {'backend': ROOT / 'backend/__init__.py',
+                'backend.tools': ROOT / 'backend/tools/__init__.py',
+                'backend.tools.native_ocr': ROOT / 'backend/tools/native_ocr.py'}
+
+    def check(name, module):
+        path = expected[name]
+        origin = getattr(getattr(module, '__spec__', None), 'origin', None)
+        if (not getattr(module, '__file__', None) or not origin
+                or Path(module.__file__).resolve() != path or Path(origin).resolve() != path):
+            raise RuntimeError('CoreML evidence validator imported outside the trusted source root: ' + name)
+
+    for name, path in expected.items():
+        if path.is_symlink() or not path.is_file() or path.resolve() != path:
+            raise RuntimeError('Missing/unsafe trusted CoreML validator source: ' + name)
+        if name in sys.modules:
+            check(name, sys.modules[name])
+    sys.path[:] = [str(ROOT), *(entry for entry in sys.path if entry != str(ROOT))]
+    module = importlib.import_module('backend.tools.native_ocr')
+    for name in expected:
+        check(name, sys.modules[name])
+    return module
+
+
 def generate_video(path):
     import cv2
     import numpy as np
@@ -69,8 +101,10 @@ def check_srt(path):
 
 def validate_coreml_video_evidence(report, documents):
     """Validate actual per-request worker evidence, not merely CLI switches."""
-    from backend.tools.native_ocr import (validate_execution_evidence, _validated_execution_window,
-                                          validate_coreml_record_sequence)
+    validator = _native_evidence_module()
+    validate_execution_evidence = validator.validate_execution_evidence
+    _validated_execution_window = validator._validated_execution_window
+    validate_coreml_record_sequence = validator.validate_coreml_record_sequence
     if (report.get('requested_provider') != 'coreml' or report.get('cpu_forced') is not False
             or report.get('gpu_inference_verified') is not False or not documents):
         raise ValueError('Missing explicit CoreML video execution evidence')
@@ -112,7 +146,7 @@ def validate_coreml_video_evidence(report, documents):
 
 
 def collect_coreml_video_evidence(directory, report):
-    from backend.tools.native_ocr import _unique_object
+    _unique_object = _native_evidence_module()._unique_object
     documents, records = [], []
     for path in sorted(directory.iterdir()):
         if path.is_symlink() or not path.is_file() or path.suffix != '.json' or path.stat().st_size > 16 * 1024 * 1024:
