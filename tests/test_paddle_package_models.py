@@ -8,8 +8,10 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import traceback
 import unittest
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 from scripts import paddle_package_models as models
 
@@ -93,6 +95,75 @@ class PinnedOriginalModelTests(unittest.TestCase):
         self.assertEqual(get.call_count, 15)
         self.assertEqual(extract.call_count, 15)
         self.assertTrue(all(call.args[2] is False for call in get.call_args_list))
+
+    def test_http_403_preserves_error_and_adds_safe_pinned_identity_without_retry(self):
+        row = self.pins["models"][0]
+        archive = self.cache / (row["archive_sha256"] + ".tar")
+        archive.unlink()
+        error = HTTPError("https://secret-user:secret-password@redirect.invalid/file?secret-token=1#secret-fragment",
+                          403, "Forbidden", {"X-Test": "original-header"}, None)
+        helper = models._build_tools()
+        with patch.object(models, "_build_tools", return_value=helper), \
+             patch.object(helper, "get_archive", wraps=helper.get_archive) as get, \
+             patch.object(helper, "extract_sources") as extract, \
+             patch.object(helper.time, "sleep") as sleep, \
+             patch("urllib.request.urlopen", side_effect=error) as request:
+            try:
+                models.prepare_models(self.output, self.cache, offline=False)
+            except HTTPError as caught:
+                self.assertIs(caught, error)
+                self.assertEqual(caught.code, 403)
+                self.assertEqual(caught.reason, "Forbidden")
+                self.assertEqual(caught.headers, {"X-Test": "original-header"})
+                rendered = "".join(traceback.format_exception(caught))
+                context = json.loads(caught.__notes__[-1].split(": ", 1)[1])
+            else:
+                self.fail("HTTP 403 must still fail preparation")
+        get.assert_called_once_with(row, self.cache, False)
+        request.assert_called_once_with(row["url"], timeout=120)
+        sleep.assert_not_called()
+        extract.assert_not_called()
+        self.assertEqual(context, {"model": row["name"], "archive_sha256": row["archive_sha256"],
+                                   "source_url": row["url"], "cache": "missing", "offline": False})
+        self.assertIn("HTTP Error 403: Forbidden", rendered)
+        self.assertIn(row["archive_sha256"], rendered)
+        for secret in ("secret-user", "secret-password", "redirect.invalid", "secret-token", "secret-fragment"):
+            self.assertNotIn(secret, rendered)
+        self.assertFalse(archive.exists())
+        self.assertFalse(self.output.exists())
+        self.assertFalse(list(self.root.glob(".paddle-models-*")))
+        self.assertFalse(list(self.cache.glob(".download-*")))
+
+    def test_archive_error_notes_describe_cache_presence_not_download_success(self):
+        row = self.pins["models"][0]
+        helper = models._build_tools()
+        error = OSError("synthetic cache read failure")
+        with patch.object(models, "_build_tools", return_value=helper), \
+             patch.object(helper, "get_archive", side_effect=error) as get, \
+             patch("urllib.request.urlopen", side_effect=AssertionError("No network allowed")) as request:
+            with self.assertRaises(OSError) as raised:
+                models.prepare_models(self.output, self.cache, offline=True)
+        self.assertIs(raised.exception, error)
+        get.assert_called_once_with(row, self.cache, True)
+        request.assert_not_called()
+        context = json.loads(error.__notes__[-1].split(": ", 1)[1])
+        self.assertEqual(context["cache"], "present")
+        self.assertIs(context["offline"], True)
+        self.assertNotIn("success", error.__notes__[-1])
+        self.assertFalse(self.output.exists())
+
+    def test_diagnostic_sanitization_does_not_authorize_decorated_download_urls(self):
+        row = self.pins["models"][0]
+        row["url"] = row["url"].replace("https://", "https://user:password@") + "?token=private#fragment"
+        self.pin_path.write_bytes(models._canonical(self.pins))
+        with patch.object(models, "PINNED_SOURCE_SHA256", digest(self.pin_path.read_bytes())), \
+             patch.object(models, "_build_tools") as build_tools, \
+             patch("urllib.request.urlopen", side_effect=AssertionError("No network allowed")) as request:
+            with self.assertRaisesRegex(ValueError, "Unapproved original-model source"):
+                models.prepare_models(self.output, self.cache)
+        build_tools.assert_not_called()
+        request.assert_not_called()
+        self.assertFalse(self.output.exists())
 
     def test_offline_missing_archive_never_downloads_or_publishes(self):
         next(self.cache.iterdir()).unlink()
@@ -283,6 +354,19 @@ class PinnedOriginalModelTests(unittest.TestCase):
 
 
 class CommittedTrustRootTests(unittest.TestCase):
+    def test_diagnostic_url_strips_credentials_query_and_fragment_and_withholds_other_origins(self):
+        _, pins = models._read_pins(models.BUILD_PINS)
+        row = pins["models"][0]
+        original = row["url"]
+        decorated = original.replace("https://", "https://secret-user:secret-password@") + "?secret-token=1#secret-fragment"
+        self.assertEqual(models._diagnostic_source_url(dict(row, url=decorated)), original)
+        for url in (original.replace("https://", "http://"),
+                    original.replace(".bj.bcebos.com/", ".bj.bcebos.com.evil.invalid/"),
+                    original.replace(".com/", ".com:8443/"),
+                    original + "/secret-path", "https://[invalid"):
+            with self.subTest(url=url):
+                self.assertEqual(models._diagnostic_source_url(dict(row, url=url)), "<untrusted source withheld>")
+
     def test_real_committed_pins_match_hardcoded_digest_and_complete_model_set(self):
         data, pins = models._read_pins(models.BUILD_PINS)
         self.assertEqual(digest(data), "db66f8583dd143a21a2949b4a4833da41ce98dcfd5e7837df7c8800f8884c015")

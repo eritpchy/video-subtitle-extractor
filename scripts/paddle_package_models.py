@@ -181,6 +181,21 @@ def _build_tools():
     return module
 
 
+def _diagnostic_source_url(row):
+    """Display only the pinned origin/path, never URL credentials or tokens."""
+    from urllib.parse import urlsplit
+    host = "paddle-model-ecology.bj.bcebos.com"
+    path = "/paddlex/official_inference_model/paddle3.0.0/" + row["name"] + "_infer.tar"
+    try:
+        value = urlsplit(row["url"])
+        if (value.scheme == "https" and value.hostname == host
+                and value.port in (None, 443) and value.path == path):
+            return "https://" + host + path
+    except ValueError:
+        pass
+    return "<untrusted source withheld>"
+
+
 def prepare_models(output: Path, cache: Path, offline=False) -> dict:
     """Atomically export all pinned original sources to a separate build tree."""
     output, cache = _plain_path(output), _plain_path(cache)
@@ -202,7 +217,17 @@ def prepare_models(output: Path, cache: Path, offline=False) -> dict:
         for version in ("V3", "V5", "V6"):
             (stage / version).mkdir()
         for row in pins["models"]:
-            archive = transport.get_archive(row, cache, offline)
+            cached = cache / (row["archive_sha256"] + ".tar")
+            context = {"model": row["name"], "archive_sha256": row["archive_sha256"],
+                       "source_url": _diagnostic_source_url(row), "offline": bool(offline),
+                       "cache": "present" if cached.exists() or cached.is_symlink() else "missing"}
+            try:
+                archive = transport.get_archive(row, cache, offline)
+            except Exception as error:
+                # Preserve the transport exception/status and its existing retry
+                # policy. Never log a response/redirect URL supplied by the error.
+                error.add_note("Original Paddle archive request: " + json.dumps(context, sort_keys=True))
+                raise
             _checked_archive(archive, row)
             transport.extract_sources(archive, row, stage / _model_path(row["name"]))
         (stage / PINS_NAME).write_bytes(pin_bytes)
