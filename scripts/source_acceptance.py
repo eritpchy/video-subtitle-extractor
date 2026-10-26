@@ -44,6 +44,7 @@ def contract_files():
             'backend/tools/subtitle_detect.py', 'backend/tools/paddle_model_config.py',
             'backend/tools/hardware_accelerator.py', 'backend/tools/videosubfinder.py',
             'backend/tools/videosubfinder_release.json', 'backend/main.py', 'backend/cli.py', 'gui.py',
+            'ui/setting_interface.py', 'ui/advanced_setting_interface.py', 'ui/macos_setting_controls.py',
             'requirements-coreml-inference.txt', 'requirements-source-common.txt',
             'requirements-source-cuda118.txt', 'requirements-source-cuda126.txt',
             'docs/audits/source-cuda-wheel-pins.json', 'native/ocr/model-source-pins.json',

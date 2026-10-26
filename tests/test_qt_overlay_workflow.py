@@ -62,3 +62,12 @@ def test_macos_constraints_are_platform_scoped_and_preserve_non_mac_qt():
         text = (ROOT / name).read_text()
         assert '~=6.11 ; sys_platform != "darwin"' in text
         assert '==6.12.0 ; sys_platform == "darwin"' in text
+
+
+def test_same_run_source_identity_includes_actual_mac_controls():
+    from scripts.source_acceptance import contract_files
+    for path in ('ui/setting_interface.py', 'ui/advanced_setting_interface.py', 'ui/macos_setting_controls.py'):
+        assert path in contract_files()
+
+    for workflow in ('native-ocr.yml', 'python-source.yml'):
+        assert 'tests/test_macos_setting_controls.py' in (ROOT / '.github/workflows' / workflow).read_text()

@@ -55,3 +55,7 @@ native/ocr/model_cache_identity.py -text
 /requirements-source-cuda118.txt -text
 /requirements-source-cuda126.txt -text
 /docs/audits/source-cuda-wheel-pins.json -text
+
+/ui/setting_interface.py -text
+/ui/advanced_setting_interface.py -text
+/ui/macos_setting_controls.py -text

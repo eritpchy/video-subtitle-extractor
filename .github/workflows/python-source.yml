@@ -127,7 +127,7 @@ jobs:
         run: >-
           python -m pytest tests/test_python_coreml*.py tests/test_check_python_coreml.py
           tests/test_prepare_source_models.py tests/test_source_ci_steps.py tests/test_source_acceptance.py
-          tests/test_e2e_python_coreml.py tests/test_python_source_workflow.py
+          tests/test_e2e_python_coreml.py tests/test_python_source_workflow.py tests/test_macos_setting_controls.py
           -q --junitxml=test-results/python-source/contracts.xml
       - name: Restore only the exact immutable public model-data archive
         uses: actions/cache@v4
