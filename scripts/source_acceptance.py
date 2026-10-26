@@ -36,6 +36,9 @@ def contract_files():
             'scripts/check_python_coreml.py', 'scripts/e2e_python_coreml.py', 'scripts/check_paddle_models.py',
             'scripts/check_source_cuda_environment.py', 'scripts/e2e_smoke.py', 'scripts/prepare_source_models.py',
             'scripts/paddle_package_models.py', 'scripts/install_videosubfinder.py',
+            'scripts/prepare_macos_qt.py', 'scripts/macos_qt_overlay.py', 'scripts/macos_ax_archive.py',
+            'scripts/build_macos_qt_accessibility.py', 'native/qt/macos-qt-overlay.json',
+            'native/qt/macos-accessibility-pins.json', 'requirements-macos-qt.txt',
             'backend/tools/python_coreml_ocr.py', 'backend/tools/python_coreml_runtime.json',
             'backend/tools/directml_ocr.py', 'backend/tools/native_ocr.py', 'backend/tools/ocr.py',
             'backend/tools/subtitle_detect.py', 'backend/tools/paddle_model_config.py',
@@ -204,7 +207,7 @@ def _steps(root, inventory, expected, profile):
     required = {'venv-create', 'venv-probe', 'pip-install', 'pip-check', 'source-default', 'models-verify',
                 'vsf-verify', 'gui-smoke', 'cli-version', 'cli-help', 'image-cpu', 'video'}
     if profile == 'macos-ort-cpu-coreml':
-        required.add('image-coreml')
+        required.update(('image-coreml', 'qt-overlay'))
     if profile.startswith('windows-'):
         required.add('cuda-environment')
     rows = state.get('steps', [])
@@ -213,6 +216,8 @@ def _steps(root, inventory, expected, profile):
     previous = 0
     for index, row in enumerate(rows):
         name = row['name']
+        if name != 'qt-overlay' and 'qt_overlay' in row:
+            _fail('Qt overlay provenance belongs only to its actual Mac step')
         if (type(row.get('returncode')) is not int or row['returncode'] != 0 or 'error' in row
                 or not _positive(row.get('started_utc_ns')) or not _positive(row.get('ended_utc_ns'))
                 or not previous <= row['started_utc_ns'] <= row['ended_utc_ns']):
@@ -241,6 +246,61 @@ def _steps(root, inventory, expected, profile):
     _equal_fields(default_report, {'source_default': 'paddle', 'custom_worker_files': [],
                                   'interpreter': environment['interpreter']}, 'Source default without worker')
     return state, {row['name']: row for row in rows}
+
+
+def _qt_overlay(root, inventory, state, steps):
+    profile = state['identity']['profile']
+    if profile != 'macos-ort-cpu-coreml':
+        if any(name == 'qt-overlay.json' or name.startswith('qt-overlay.') or name.startswith('qt-overlay-') for name in inventory):
+            _fail('Qt overlay source evidence is only admitted for the Mac profile')
+        return
+    from scripts import macos_qt_overlay as overlay
+    policy = overlay.load_policy()
+    if policy.get('production_integration_allowed') is not False or policy['resource']['name'] != runner.QT_ARCHIVE:
+        _fail('Source Qt overlay policy must remain candidate-only')
+    row = steps['qt-overlay']; binding = row.get('qt_overlay', {})
+    probe = binding.get('purelib_probe', {})
+    environment = state['environment']
+    if (probe.get('name') != 'qt-overlay-purelib' or probe.get('argv') !=
+            [environment['interpreter'], '-I', '-c', runner.QT_PURELIB_PROBE]
+            or type(probe.get('returncode')) is not int or probe['returncode'] != 0 or 'error' in probe
+            or not _positive(probe.get('started_utc_ns')) or not _positive(probe.get('ended_utc_ns'))
+            or not steps['pip-check']['ended_utc_ns'] <= row['started_utc_ns'] <= row['ended_utc_ns']
+                <= probe['started_utc_ns'] <= probe['ended_utc_ns'] <= steps['gui-smoke']['started_utc_ns']):
+        _fail('Qt overlay must run after pip-check and query this venv before GUI startup')
+    # No subsequent recorded command may overlap the query/copy phase.
+    following = [r for r in state['steps'] if r['started_utc_ns'] > row['started_utc_ns']]
+    if not following or probe['ended_utc_ns'] > following[0]['started_utc_ns']:
+        _fail('Qt overlay query overlaps a subsequent source command')
+    for stream in ('stdout', 'stderr'):
+        item = probe.get(stream, {})
+        if item.get('path') != 'qt-overlay-purelib.' + stream + '.log' or inventory.get(item.get('path')) != {k: item.get(k) for k in ('bytes', 'sha256')}:
+            _fail('Qt overlay query log bytes differ')
+    observed = _json(_safe(root, probe['stdout']['path']))
+    _equal_fields(observed, {'interpreter': environment['interpreter'], 'prefix': environment['prefix']}, 'Qt overlay actual venv query')
+    purelib = observed.get('purelib', '')
+    if not _under(state, purelib, environment['prefix']) or _path(state, purelib) == _path(state, environment['prefix']):
+        _fail('Qt overlay package directory is outside this source venv')
+    receipt = _json(_safe(root, 'qt-overlay.json'))
+    original = binding.get('receipt', {})
+    if (original.get('path') != 'qt-overlay.json' or inventory['qt-overlay.json'] != {k: original.get(k) for k in ('bytes', 'sha256')}
+            or original.get('original_path') != str(PurePosixPath(purelib) / overlay.RECEIPT)):
+        _fail('Qt overlay original receipt bytes/path differ')
+    _equal_fields(receipt, {'schema': 1, 'context': 'explicit-user-venv', 'purelib': purelib}, 'Qt overlay source preparation context')
+    try:
+        overlay.validate_receipt_identity(receipt, policy=policy, require_native_load=True)
+    except (RuntimeError, ValueError, KeyError, TypeError) as error:
+        raise ValueError('Qt overlay native-load receipt did not pass: ' + str(error)) from error
+    # The producer prints its actual final JSON before the explicit scope note.
+    # Bind copied purelib bytes to that command's separately hashed stdout too.
+    with _opened(_safe(root, row['stdout']['path'])) as source:
+        output = source.read(MAX_JSON + 1)
+    if len(output) > MAX_JSON:
+        _fail('Oversized Qt preparation stdout')
+    text = output.decode('utf-8').strip()
+    document, end = json.JSONDecoder(object_pairs_hook=runner.unique).raw_decode(text)
+    if document != receipt or text[end:].strip() != runner.QT_PREPARED_MESSAGE:
+        _fail('Qt overlay receipt differs from actual prepare command stdout')
 
 
 def _record_context(record, state, window, seen):
@@ -509,7 +569,7 @@ def checks(profile):
               'verified_models': 'passed', 'vsf_6_10_7': 'passed', 'gui_startup': 'passed',
               'cli_entrypoints': 'passed', 'cpu_168_three_modes': 'passed', 'cpu_three_videos': 'passed'}
     if profile == 'macos-ort-cpu-coreml':
-        result.update(coreml_168_three_modes='passed', coreml_three_videos='passed', cpu_coreml_same_srt='passed')
+        result.update(qt_overlay_native_load='passed', coreml_168_three_modes='passed', coreml_three_videos='passed', cpu_coreml_same_srt='passed')
     if profile.startswith('windows-'):
         result['cuda_build_explicit_cpu'] = 'passed'
     return result
@@ -521,6 +581,7 @@ def validate_evidence(evidence, *, expected, profile):
     root, inventory = _tree(evidence)
     state, steps = _steps(root, inventory, expected, profile)
     _installation(root, state)
+    _qt_overlay(root, inventory, state, steps)
     seen = set()
     cpu = _json(_safe(root, 'cpu-all.json'))
     if profile.startswith('windows-'):

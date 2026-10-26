@@ -107,6 +107,7 @@ def make(root, profile):
         'environment': environment, 'models': str(checkout / 'build/models'), 'steps': [],
         'paths': {'checkout': str(checkout), 'evidence': str(evidence), 'models': str(checkout / 'build/models'), 'venv': str(venv)}}
     names = ['venv-create', 'venv-probe', 'pip-install', 'pip-check', 'source-default', 'models-verify', 'vsf-verify', 'gui-smoke', 'cli-version', 'cli-help']
+    if profile.startswith('macos'): names.insert(4, 'qt-overlay')
     if windows: names.append('cuda-environment')
     names += ['image-cpu'] + (['image-coreml'] if profile.startswith('macos') else []) + ['video']
     default = {'source_default': 'paddle', 'custom_worker_files': [], 'interpreter': environment['interpreter'], 'scope': 'synthetic'}
@@ -119,6 +120,7 @@ def make(root, profile):
             else: path.write_bytes(b'synthetic command log\n')
             row[stream] = {'path': name_log, **inventory(path)}
         state['steps'].append(row)
+    if profile.startswith('macos'): qt_fixture(root, state)
     write(root / 'steps.json', state); write(root / 'source-default.json', default)
     steps = {r['name']: r for r in state['steps']}
     if windows:
@@ -136,6 +138,48 @@ def make(root, profile):
     install(root, state)
     video(root, state, steps['video'])
     return root, state
+
+
+
+def qt_fixture(root, state):
+    # Structurally faithful synthetic receipt; not actual Cocoa/AX evidence.
+    from scripts import macos_qt_overlay as overlay
+    policy = overlay.load_policy()
+    purelib = str(gate.PurePosixPath(state['environment']['prefix']) / 'lib/python3.12/site-packages')
+    receipt = {key: copy.deepcopy(policy[key]) for key in ('qt_version', 'architecture', 'source_resource',
+        'original_cocoa_sha256', 'official_frameworks', 'abi_files', 'minimum_macos_version')}
+    receipt.update(schema=1, status='exact-overlay-applied', context='explicit-user-venv', purelib=purelib,
+        resource_sha256=policy['resource']['sha256'], plugin_sha256=policy['plugin']['sha256'],
+        production_integration_allowed=False, external_ax_client_tested=False,
+        final_application_acceptance_passed=False, scope=overlay.RECEIPT_SCOPE,
+        original_RECORD={'pyside6_essentials-6.12.0.dist-info/RECORD': 'c' * 64},
+        native_load_probe_passed=True, native_load_probe={'qt': '6.12.0', 'backend': 'cocoa',
+            'accessibility_active': True, 'external_ax_client_tested': False, 'scope': overlay.NATIVE_LOAD_SCOPE,
+            'images': [str(gate.PurePosixPath(purelib) / overlay.PLUGIN.as_posix()),
+                *[str(gate.PurePosixPath(purelib) / f'PySide6/Qt/lib/{n}.framework/Versions/A/{n}') for n in ('QtCore','QtGui')]]})
+    write(root / 'qt-overlay.json', receipt)
+    row = next(r for r in state['steps'] if r['name'] == 'qt-overlay')
+    # Leave space inside this step's synthetic time slot for its real query.
+    row['ended_utc_ns'] -= 100
+    probe = {'name': 'qt-overlay-purelib', 'argv': [state['environment']['interpreter'], '-I', '-c', runner.QT_PURELIB_PROBE],
+        'returncode': 0, 'started_utc_ns': row['ended_utc_ns'] + 1, 'ended_utc_ns': row['ended_utc_ns'] + 10}
+    for stream in ('stdout', 'stderr'):
+        path = root / ('qt-overlay-purelib.' + stream + '.log')
+        if stream == 'stdout': write(path, {'interpreter': state['environment']['interpreter'],
+            'prefix': state['environment']['prefix'], 'purelib': purelib})
+        else: path.write_bytes(b'')
+        probe[stream] = {'path': path.name, **inventory(path)}
+    row['qt_overlay'] = {'purelib_probe': probe, 'receipt': {'original_path': purelib + '/' + overlay.RECEIPT,
+        'path': 'qt-overlay.json', **inventory(root / 'qt-overlay.json')}}
+    sync_qt_stdout(root, state)
+
+
+def sync_qt_stdout(root, state):
+    row = next(r for r in state['steps'] if r['name'] == 'qt-overlay')
+    path = root / row['stdout']['path']
+    path.write_text(json.dumps(gate._json(root / 'qt-overlay.json')) + '\n' + runner.QT_PREPARED_MESSAGE + '\n', encoding='utf-8')
+    row['stdout'] = {'path': path.name, **inventory(path)}
+    row['qt_overlay']['receipt'].update(inventory(root / 'qt-overlay.json'))
 
 
 def install(root, state):
@@ -373,3 +417,83 @@ def test_missing_and_extra_profile_directory_fail(tmp_path):
     for profile in gate.PROFILES:(root/profile).mkdir()
     (root/'old-run').mkdir()
     with pytest.raises(ValueError):gate.aggregate(root,expected=EXPECTED,output=tmp_path/'out.json')
+
+
+@pytest.mark.parametrize('mutation', ['missing', 'stage-context', 'outside-venv', 'foreign-original', 'copied-hash',
+    'probe-interpreter', 'probe-failed', 'probe-log', 'probe-after-gui', 'wrong-command', 'printed-different',
+    'production', 'external-ax', 'application', 'native-failed', 'no-native-proof', 'wrong-images', 'inactive-ax',
+    'unknown-plugin', 'changed-resource', 'vendor-records', 'before-pip', 'public-policy'])
+def test_mac_qt_receipt_is_same_job_preparation_not_ax_acceptance(tmp_path, monkeypatch, mutation):
+    root, state = make(tmp_path / 'mac', 'macos-ort-cpu-coreml')
+    row = next(r for r in state['steps'] if r['name'] == 'qt-overlay')
+    receipt = gate._json(root / 'qt-overlay.json'); binding = row['qt_overlay']; probe = binding['purelib_probe']
+    if mutation == 'missing': (root / 'qt-overlay.json').unlink()
+    elif mutation == 'stage-context': receipt['context'] = 'candidate-package-stage'
+    elif mutation == 'outside-venv': receipt['purelib'] = '/another-job/site-packages'
+    elif mutation == 'foreign-original': binding['receipt']['original_path'] = '/another-job/vse-qt-ax-overlay.json'
+    elif mutation == 'copied-hash': binding['receipt']['sha256'] = '0' * 64
+    elif mutation == 'probe-interpreter': probe['argv'][0] = '/host/python'
+    elif mutation == 'probe-failed': probe['returncode'] = 1
+    elif mutation == 'probe-log':
+        path = root / probe['stdout']['path']; path.write_text('{}'); probe['stdout'].update(inventory(path))
+    elif mutation == 'probe-after-gui': probe['ended_utc_ns'] = state['steps'][-1]['ended_utc_ns']
+    elif mutation == 'wrong-command': row['argv'].remove('--candidate-testing')
+    elif mutation == 'printed-different':
+        path = root / row['stdout']['path']; path.write_text('{}'); row['stdout'].update(inventory(path))
+    elif mutation == 'production': receipt['production_integration_allowed'] = True
+    elif mutation == 'external-ax': receipt['external_ax_client_tested'] = True
+    elif mutation == 'application': receipt['final_application_acceptance_passed'] = True
+    elif mutation == 'native-failed': receipt['native_load_probe_passed'] = False
+    elif mutation == 'no-native-proof': receipt.pop('native_load_probe')
+    elif mutation == 'wrong-images': receipt['native_load_probe']['images'][0] = '/other/libqcocoa.dylib'
+    elif mutation == 'inactive-ax': receipt['native_load_probe']['accessibility_active'] = False
+    elif mutation == 'unknown-plugin': receipt['plugin_sha256'] = '1' * 64
+    elif mutation == 'changed-resource': receipt['resource_sha256'] = '2' * 64
+    elif mutation == 'vendor-records': receipt['original_RECORD'] = {}
+    elif mutation == 'before-pip':
+        # Keep command timestamps otherwise monotonic while swapping the slots.
+        a, b = next(r for r in state['steps'] if r['name'] == 'pip-check'), row
+        for key in ('started_utc_ns', 'ended_utc_ns'): a[key], b[key] = b[key], a[key]
+        state['steps'].sort(key=lambda r: r['started_utc_ns'])
+    else:
+        from scripts import macos_qt_overlay as overlay
+        policy = overlay.load_policy(); policy['production_integration_allowed'] = True
+        monkeypatch.setattr(overlay, 'load_policy', lambda: policy)
+    if mutation in ('stage-context','outside-venv','production','external-ax','application','native-failed',
+        'no-native-proof','wrong-images','inactive-ax','unknown-plugin','changed-resource','vendor-records'):
+        write(root / 'qt-overlay.json', receipt); sync_qt_stdout(root, state)
+    write(root / 'steps.json', state)
+    reject(root)
+
+
+@pytest.mark.parametrize('profile', ['linux-ort-cpu', 'windows-cuda11.8', 'windows-cuda12.6'])
+def test_non_mac_profile_cannot_carry_qt_overlay_receipt(tmp_path, profile):
+    root, _ = make(tmp_path / 'evidence', profile)
+    write(root / 'qt-overlay.json', {'synthetic_unit_fixture': True})
+    reject(root)
+
+
+def test_qt_purestdlib_portable_validator_loads_without_gui_or_packaging():
+    code = "import sys;sys.path.insert(0,sys.argv[1]);from scripts.macos_qt_overlay import load_policy,validate_receipt_identity;assert load_policy()['production_integration_allowed'] is False;assert not {'PySide6','numpy','onnxruntime','paddle','packaging'} & set(sys.modules)"
+    result = subprocess.run([sys.executable, '-I', '-S', '-c', code, str(gate.ROOT)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_mac_receipt_cannot_move_query_and_original_together_to_foreign_venv(tmp_path):
+    root, state = make(tmp_path / 'evidence', 'macos-ort-cpu-coreml')
+    row = next(r for r in state['steps'] if r['name'] == 'qt-overlay')
+    receipt = gate._json(root / 'qt-overlay.json')
+    receipt['purelib'] = '/another-job/lib/python3.12/site-packages'
+    write(root / 'qt-overlay.json', receipt); sync_qt_stdout(root, state)
+    binding = row['qt_overlay']; binding['receipt']['original_path'] = receipt['purelib'] + '/vse-qt-ax-overlay.json'
+    probe = binding['purelib_probe']; path = root / probe['stdout']['path']
+    observed = gate._json(path); observed['purelib'] = receipt['purelib']; write(path, observed)
+    probe['stdout'].update(inventory(path)); write(root / 'steps.json', state)
+    reject(root)
+
+
+def test_qt_provenance_cannot_hide_on_a_non_qt_step(linux):
+    state = gate._json(linux / 'steps.json')
+    state['steps'][2]['qt_overlay'] = {'synthetic_unit_fixture': True}
+    write(linux / 'steps.json', state)
+    reject(linux)

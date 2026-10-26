@@ -21,7 +21,7 @@ def test_named_commands_are_fixed_python_entrypoints_without_shell_or_worker(tmp
     for profile in steps.PROFILES:
         value = state(profile)
         for name in steps.STEPS:
-            if name == 'image-coreml' and not profile.startswith('macos'):
+            if name in ('image-coreml', 'qt-overlay') and not profile.startswith('macos'):
                 with pytest.raises(ValueError):
                     steps.command(value, tmp_path, name)
                 continue
@@ -147,3 +147,89 @@ def test_direct_script_help_uses_no_inference_dependencies():
     result = subprocess.run([sys.executable, '-I', '-S', str(Path(steps.__file__)), '--help'],
                             capture_output=True, text=True)
     assert result.returncode == 0 and 'run-step' in result.stdout
+
+
+@pytest.mark.parametrize('profile', steps.PROFILES)
+def test_qt_candidate_command_is_mac_only_and_pip_constraints_are_explicit(tmp_path, profile):
+    value = state(profile)
+    command = steps.command(value, tmp_path, 'pip-install')
+    assert command[command.index('-c') + 1] == 'requirements-macos-qt.txt'
+    if not profile.startswith('macos'):
+        with pytest.raises(ValueError): steps.command(value, tmp_path, 'qt-overlay')
+    else:
+        value['paths']['checkout'] = '/synthetic/source 中文 &!%()'
+        assert steps.command(value, tmp_path, 'qt-overlay') == [sys.executable,
+            'scripts/prepare_macos_qt.py', '--apply', '--candidate-testing', '--archive',
+            '/synthetic/source 中文 &!%()/build/qt-overlay-resources/' + steps.QT_ARCHIVE]
+
+
+@pytest.mark.parametrize('scenario', ['before-pip', 'after-gui', 'gui-before-overlay', 'non-mac'])
+def test_qt_step_order_fails_before_any_command(tmp_path, monkeypatch, scenario):
+    value = state('linux-ort-cpu' if scenario == 'non-mac' else 'macos-ort-cpu-coreml')
+    if scenario == 'after-gui': value['steps'] += [{'name': name, 'returncode': 0} for name in ('pip-check', 'gui-smoke')]
+    monkeypatch.setattr(steps, '_load', lambda root: value)
+    monkeypatch.setattr(steps, '_run', lambda *a, **k: pytest.fail('Order rejection must precede execution'))
+    with pytest.raises(ValueError, match='Qt|GUI'):
+        steps.run_step(tmp_path, 'gui-smoke' if scenario == 'gui-before-overlay' else 'qt-overlay')
+
+
+def test_qt_receipt_uses_real_new_interpreter_sysconfig_and_original_bytes(tmp_path, monkeypatch):
+    # Real stdlib venv/query on the local host; fake receipt is NOT a Mac load test.
+    profile = 'windows-cuda11.8' if os.name == 'nt' else 'linux-ort-cpu'
+    identity = {'commit': '1' * 40, 'profile': profile}
+    monkeypatch.setattr(steps, 'identity', lambda _: identity)
+    monkeypatch.setattr(steps, 'checkout_identity', lambda: {'commit': '1' * 40, 'dirty': False})
+    value = steps.initialize(tmp_path / 'evidence', profile, tmp_path / 'venv', tmp_path / 'models')
+    root = (tmp_path / 'evidence').resolve()
+    query = subprocess.check_output([value['environment']['interpreter'], '-I', '-c', steps.QT_PURELIB_PROBE])
+    purelib = Path(json.loads(query)['purelib'])
+    original = purelib / 'vse-qt-ax-overlay.json'
+    data = b'{"synthetic_unit_fixture":true,"not_mac_native_load":true}\n'
+    original.write_bytes(data)
+    row = {}
+    steps._qt_receipt(root, value, row, steps.clean_environment())
+    assert (root / 'qt-overlay.json').read_bytes() == data
+    assert original.read_bytes() == data
+    proof = row['qt_overlay']
+    assert proof['receipt'] == {'original_path': str(original), 'path': 'qt-overlay.json',
+        'bytes': len(data), 'sha256': steps.sha(original)}
+    assert proof['purelib_probe']['returncode'] == 0
+    assert proof['purelib_probe']['argv'][0] == value['environment']['interpreter']
+
+
+@pytest.mark.parametrize('case', ['outside', 'symlink', 'query-failed'])
+def test_qt_copy_rejects_foreign_or_symlinked_receipt_and_query_failure(tmp_path, monkeypatch, case):
+    root = tmp_path.resolve(); venv = root / 'venv'; venv.mkdir()
+    purelib = root / 'outside' if case == 'outside' else venv / 'odd-site-location'
+    purelib.mkdir()
+    original = purelib / 'vse-qt-ax-overlay.json'
+    original.write_text('{}')
+    if case == 'symlink':
+        outside = root / 'other'; outside.write_text('{}'); original.unlink()
+        try: original.symlink_to(outside)
+        except OSError: pytest.skip('Symlink unavailable')
+    value = state('macos-ort-cpu-coreml'); value['environment']['prefix'] = str(venv)
+    def query(*args, **kwargs):
+        assert args[2] == [sys.executable, '-I', '-c', steps.QT_PURELIB_PROBE]
+        (root / 'query.json').write_text(json.dumps({'interpreter': sys.executable, 'prefix': str(venv), 'purelib': str(purelib)}))
+        return {'returncode': int(case == 'query-failed'), 'stdout': {'path': 'query.json'}}
+    monkeypatch.setattr(steps, '_run', query)
+    with pytest.raises((ValueError, RuntimeError)):
+        steps._qt_receipt(root, value, {}, steps.clean_environment())
+    assert not (root / 'qt-overlay.json').exists()
+
+
+def test_qt_postprocessing_failure_cannot_be_resumed_as_success(tmp_path, monkeypatch):
+    value = state('macos-ort-cpu-coreml')
+    value['steps'].append({'name': 'pip-check', 'returncode': 0})
+    monkeypatch.setattr(steps, '_load', lambda root: value)
+    monkeypatch.setattr(steps, 'command', lambda *a: [sys.executable, '-I', '-c', 'pass'])
+    def fail(*args): raise ValueError('Synthetic missing original receipt')
+    monkeypatch.setattr(steps, '_qt_receipt', fail)
+    with pytest.raises(ValueError, match='missing original receipt'):
+        steps.run_step(tmp_path, 'qt-overlay')
+    stored = json.loads((tmp_path / 'steps.json').read_bytes())
+    assert stored['steps'][-1]['returncode'] == 0  # Actual command succeeded, copy did not.
+    assert 'missing original receipt' in stored['steps'][-1]['error']
+    with pytest.raises(ValueError, match='failed source run'):
+        steps.run_step(tmp_path, 'gui-smoke')

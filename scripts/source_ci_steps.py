@@ -11,7 +11,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
@@ -27,7 +27,7 @@ PROFILES = {
     'windows-cuda11.8': ('Windows', 'X64', 'windows-2022', 'requirements-source-cuda118.txt'),
     'windows-cuda12.6': ('Windows', 'X64', 'windows-2022', 'requirements-source-cuda126.txt'),
 }
-STEPS = ('pip-install', 'pip-check', 'source-default', 'models-verify', 'vsf-verify', 'gui-smoke',
+STEPS = ('pip-install', 'pip-check', 'qt-overlay', 'source-default', 'models-verify', 'vsf-verify', 'gui-smoke',
          'cli-version', 'cli-help', 'image-cpu', 'image-coreml', 'video', 'cuda-environment')
 
 
@@ -220,7 +220,7 @@ def command(state, root, step):
     windows = profile.startswith('windows-')
     report = str(root / 'cpu-all.json')
     commands = {
-        'pip-install': ['-m', 'pip', 'install', '-r', PROFILES[profile][3], 'pytest==8.3.5', '--report', str(root / 'pip-install.json')],
+        'pip-install': ['-m', 'pip', 'install', '-r', PROFILES[profile][3], '-c', 'requirements-macos-qt.txt', 'pytest==8.3.5', '--report', str(root / 'pip-install.json')],
         'pip-check': ['-m', 'pip', 'check'],
         'source-default': ['-I', '-S', '-c', DEFAULT_PROBE, state['paths']['checkout']],
         'models-verify': ['-S', 'scripts/prepare_source_models.py', 'verify', '--format', 'paddle' if windows else 'onnx', models],
@@ -234,6 +234,8 @@ def command(state, root, step):
                   ['scripts/e2e_python_coreml.py', '--models', models, '--provider', 'both' if profile == 'macos-ort-cpu-coreml' else 'cpu', '--output', str(root / 'video')]),
     }
     if profile == 'macos-ort-cpu-coreml':
+        commands['qt-overlay'] = ['scripts/prepare_macos_qt.py', '--apply', '--candidate-testing',
+                                  '--archive', str(PurePosixPath(state['paths']['checkout']) / 'build/qt-overlay-resources' / QT_ARCHIVE)]
         commands['image-coreml'] = ['scripts/check_python_coreml.py', '--models', models, '--fixtures', 'native/ocr/tests/evidence', '--provider', 'coreml', '--case-set', 'all', '--report', str(root / 'coreml-all.json')]
     if windows:
         commands['cuda-environment'] = ['scripts/check_source_cuda_environment.py', '--cuda', profile.removeprefix('windows-cuda'), '--pip-report', str(root / 'pip-install.json'), '--report', str(root / 'environment.json')]
@@ -242,12 +244,60 @@ def command(state, root, step):
     return [python, *commands[step]]
 
 
+QT_ARCHIVE = 'vse-qt6.12.0-macos-arm64-ax772484-ps6.zip'
+QT_PREPARED_MESSAGE = 'Prepared only this venv. External AX, VSE GUI, OCR and release acceptance are separate checks.'
+QT_PURELIB_PROBE = """import json,sys,sysconfig
+from pathlib import Path
+print(json.dumps({'interpreter':sys.executable,'prefix':str(Path(sys.prefix).resolve()),'purelib':str(Path(sysconfig.get_path('purelib')).resolve())}))
+"""
+
+
+def _qt_receipt(root, state, row, env):
+    # Ask the very same fresh interpreter; never infer a site-packages layout.
+    python = state['environment']['interpreter']
+    probe = _run(root, 'qt-overlay-purelib', [python, '-I', '-c', QT_PURELIB_PROBE], env, timeout=60)
+    row['qt_overlay'] = {'purelib_probe': probe}
+    if probe['returncode']:
+        raise RuntimeError('Actual Qt overlay purelib query failed')
+    observed = json.loads((root / probe['stdout']['path']).read_bytes(), object_pairs_hook=unique)
+    prefix = Path(state['environment']['prefix']).resolve(strict=True)
+    purelib = Path(observed['purelib'])
+    if (observed.get('interpreter') != python or observed.get('prefix') != str(prefix)
+            or not purelib.is_absolute() or '..' in purelib.parts or purelib == prefix
+            or not purelib.is_relative_to(prefix)):
+        raise ValueError('Qt overlay query is outside the actual fresh source venv')
+    source, target = purelib / 'vse-qt-ax-overlay.json', root / 'qt-overlay.json'
+    for path in (source, *source.parents):
+        if path == prefix:
+            break
+        if path.is_symlink() or getattr(path.lstat(), 'st_file_attributes', 0) & 0x400:
+            raise ValueError('Unsafe Qt overlay receipt path')
+    # Reuse the gate's bounded no-follow regular-file reader and mutation check;
+    # runtime import avoids the runner/gate definition-time import cycle.
+    from scripts.source_acceptance import _opened
+    with _opened(source) as stream:
+        data = stream.read(8 * 1024 * 1024 + 1)
+    if len(data) > 8 * 1024 * 1024:
+        raise ValueError('Oversized Qt overlay receipt')
+    with target.open('xb') as output:
+        output.write(data)
+    row['qt_overlay']['receipt'] = {'original_path': str(source), 'path': target.name,
+        'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+
+
 def run_step(evidence, step):
     root = _root(evidence)
     state = _load(root)
-    if (state.get('environment') is None or any(row.get('returncode') != 0 for row in state['steps'])
+    if (state.get('environment') is None or any(row.get('returncode') != 0 or 'error' in row for row in state['steps'])
             or any(row.get('name') == step for row in state['steps'])):
         raise ValueError('Cannot reuse a completed step or continue a failed source run')
+    if (step == 'gui-smoke' and state['identity']['profile'] == 'macos-ort-cpu-coreml'
+            and not any(r.get('name') == 'qt-overlay' for r in state['steps'])):
+        raise ValueError('Mac source GUI startup requires its actual Qt overlay step first')
+    if step == 'qt-overlay' and (state['identity']['profile'] != 'macos-ort-cpu-coreml'
+            or not any(r.get('name') == 'pip-check' for r in state['steps'])
+            or any(r.get('name') == 'gui-smoke' for r in state['steps'])):
+        raise ValueError('Qt overlay requires this Mac source pip-check before GUI startup')
     env = {key: value for key, value in clean_environment().items() if not key.startswith('VSE_')}
     profile = state['identity']['profile']
     windows = profile.startswith('windows-')
@@ -260,7 +310,15 @@ def run_step(evidence, step):
     _save(root, state)
     if row['returncode']:
         raise RuntimeError('Actual source check failed: ' + step)
-    if step == 'vsf-verify':
+    if step == 'qt-overlay':
+        try:
+            _qt_receipt(root, state, row, env)
+        except Exception as error:
+            row['error'] = type(error).__name__ + ': ' + str(error)
+            raise
+        finally:
+            _save(root, state)
+    elif step == 'vsf-verify':
         platform, arch = ('windows', 'x64') if windows else ('macos', 'arm64') if profile.startswith('macos') else ('linux', 'x64')
         source = ROOT / 'backend/subfinder' / platform / arch / 'install.json'
         target = root / 'vsf-install.json'
