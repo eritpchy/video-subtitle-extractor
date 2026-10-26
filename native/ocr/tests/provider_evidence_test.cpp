@@ -54,6 +54,28 @@ int main() {
         J::array({event("CoreMLExecutionProvider")}), "detector");
     expect(coreml["cpu_ep_executed"] == false && coreml["cpu_kernel_events"] == 0,
            "CPU fallback invented");
+    mixed["request_run_count"] = 2;
+    mixed["evidence_reused"] = false;
+    mixed["shape_session_id"] = 1;
+    auto later_shape = mixed;
+    later_shape["request_run_count"] = 1;
+    later_shape["evidence_reused"] = true;
+    later_shape["shape_session_id"] = 2;
+    auto aggregate = native_provider::summarize_shape_sessions(
+        "recognizer", J::array({mixed, later_shape}), 9, 3);
+    expect(aggregate["coreml_kernel_events"] == 4 && aggregate["cpu_kernel_events"] == 2,
+           "shape profile counts were multiplied by request runs");
+    expect(aggregate["shape_sessions"].size() == 2 && aggregate["evidence_reused"] == true,
+           "per-shape evidence or reuse lost");
+    expect(!aggregate.contains("profile_window"), "aggregate invented a single profile window");
+    auto fresh = native_provider::summarize_shape_sessions(
+        "recognizer", J::array({mixed}), 50, 2);
+    expect(fresh["evidence_reused"] == false,
+           "old evicted shapes were incorrectly counted as reused evidence");
+    auto blank = native_provider::summarize_shape_sessions("recognizer", J::array(), 50, 0);
+    expect(blank["status"] == "not_run" && blank["shape_sessions"].empty() &&
+           blank["coreml_kernel_events"] == 0 && blank["evidence_reused"] == false,
+           "blank request inherited an earlier shape profile");
     std::cout << "provider evidence unit tests passed\n";
     return 0;
   } catch (const std::exception &error) {
