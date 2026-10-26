@@ -38,6 +38,14 @@ def validate_phase(rows, ids, worker_sha256, models, goldens, seen):
     return executed
 
 
+
+def _validate_request_sequence(rows):
+    # Independent replay must not accept a first-run profile relabeled for a
+    # different width, even if each isolated response looks self-consistent.
+    from backend.tools.native_ocr import validate_coreml_record_sequence
+    validate_coreml_record_sequence([row['request_evidence'] for row in rows])
+
+
 def verify_report(path, native, consumer_commit):
     path, native = Path(path), Path(native).resolve(strict=True)
     if not path.is_file() or path.stat().st_size > 16 * 1024 * 1024:
@@ -74,6 +82,7 @@ def verify_report(path, native, consumer_commit):
             if any(row.get(key) != value for key, value in expected.items()):
                 raise ValueError('Compatibility case differs from fixed input/reference')
         covered |= validate_phase(rows, ids, report['worker_sha256'], models, goldens, seen)
+    _validate_request_sequence(report['early'] + report['compatibility'])
     if covered != gate.frozen.ALL_MODELS or report.get('covered_models') != sorted(covered):
         raise ValueError('Real successful compatibility coverage is incomplete')
     return report
@@ -128,6 +137,7 @@ def run(output):
                 covered |= validate_phase(report[phase], ids, report['worker_sha256'], models, goldens, seen)
                 report['covered_models'] = sorted(covered)
                 gate.frozen._write_report(report_path, report)
+            _validate_request_sequence(report['early'] + report['compatibility'])
             if covered != gate.frozen.ALL_MODELS:
                 raise ValueError('Successful responses did not actually execute all 15 fixed models')
         if guard.attempts:

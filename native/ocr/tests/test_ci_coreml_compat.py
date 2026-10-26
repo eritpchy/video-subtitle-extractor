@@ -82,6 +82,7 @@ def successful_report(tmp_path, monkeypatch):
     assets = {'files': {'fixed-test-file': 'b' * 64},
               'models': {name: {'sha256': 'c' * 64} for name in compat.gate.frozen.ALL_MODELS}}
     monkeypatch.setattr(compat.gate, 'verify_native_model_assets', lambda _: copy.deepcopy(assets))
+    monkeypatch.setattr(compat, '_validate_request_sequence', lambda _: None)
     monkeypatch.setattr(compat.gate, '_request_evidence', lambda row, *args: set(row['executed_models']))
     monkeypatch.setattr(compat.gate, 'request_identity', lambda doc: doc['unique'])
     cases = compat.gate.frozen.load_cases(compat.ROOT / 'native/ocr/tests/evidence')
@@ -126,3 +127,26 @@ def test_independent_report_gate_refuses_false_success(successful_report, change
     path.write_text(json.dumps(report), encoding='utf-8')
     with pytest.raises(ValueError):
         compat.verify_report(path, native, 'a' * 40)
+
+
+def test_independent_gate_checks_both_phases_as_one_cross_request_sequence(successful_report, monkeypatch):
+    path, native, report = successful_report
+    expected = report['early'] + report['compatibility']
+    observed = []
+    def reject_replayed_shape(rows):
+        observed.append(rows)
+        raise ValueError('shape/profile reused for a different width')
+    monkeypatch.setattr(compat, '_validate_request_sequence', reject_replayed_shape)
+    path.write_text(json.dumps(report), encoding='utf-8')
+    with pytest.raises(ValueError, match='different width'):
+        compat.verify_report(path, native, 'a' * 40)
+    assert observed == [expected]
+
+
+def test_request_sequence_delegates_actual_documents_to_strict_shared_validator(monkeypatch):
+    from backend.tools import native_ocr
+    documents = [{'request': {'id': 1}}, {'request': {'id': 2}}]
+    observed = []
+    monkeypatch.setattr(native_ocr, 'validate_coreml_record_sequence', lambda rows: observed.append(rows))
+    compat._validate_request_sequence([{'request_evidence': value} for value in documents])
+    assert observed == [documents]
