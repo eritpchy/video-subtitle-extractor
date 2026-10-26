@@ -97,3 +97,37 @@ resolve mask, current group, platform and Qt backend in
 Any assigned display-color or brush mismatch still fails. Product palette code
 is unchanged. Native rerun and M5 appearance checks remain required; this test
 correction alone does not establish the cause of the earlier Cocoa difference.
+
+## b012 Server focus-test precondition correction
+
+The original standard Mac run 40345271680/job 121651122119 failed only
+`test_tab_focus_includes_the_standard_combo` (`hasFocus() == False`, 0.054 s).
+Its raw JUnit did not record activation, starting focus, or the platform Tab
+policy, so it cannot establish the precise Cocoa cause. The same test passed
+on Windows 2022/2025. All 23 new preview lifecycle tests passed, without skips,
+on each of those three platforms. The evidence archive is 1,027,921 bytes,
+SHA-256 `f308d334a71d79ddd2bf9a8aa6a7fef10b70f7505f6343586687c77cf5f21734`.
+
+The fixture previously requested activation, processed events once, called
+`before.setFocus()`, then immediately sent Tab without verifying either starting
+condition. Qt explicitly provides
+[`qWaitForWindowActive`](https://doc.qt.io/qt-6/qtest.html#qWaitForWindowActive)
+for tests requiring asynchronous window activation. Its
+[6.12 focus traversal](https://github.com/qt/qtbase/blob/v6.12.0/src/widgets/kernel/qapplication.cpp#L1829-L1858)
+uses either the TabFocus or StrongFocus mask according to the platform Tab
+policy. The production combo already has StrongFocus, satisfying both masks;
+there is no evidence here justifying a system keyboard-setting override.
+
+The test-only correction waits once, with a bound, for the actual active window
+and initial field focus. Each single Tab/Shift+Tab event must then reach the
+expected real widget, forward and backward, without directly focusing the combo
+or changing a configuration value. Every stage records UTC/elapsed time,
+application/window activity, focus window/widget, focus policies, and the
+platform Tab behavior in `macos-setting-controls/focus-states.json`, including
+on failure. It does not retry the navigation until green, skip an assertion,
+change OS keyboard preferences, or modify production controls. A delayed-focus
+regression verifies the wait helper cannot succeed for the wrong widget.
+
+Local offscreen success verifies the fixture and real Qt event contract only.
+A new Cocoa run and final exact-package M5 keyboard/AX checks are still required;
+this change does not retroactively classify b012's failure as harmless.

@@ -2,9 +2,11 @@
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
 import sys
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -20,6 +22,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 COLOR_GROUPS = (QtGui.QPalette.ColorGroup.Active, QtGui.QPalette.ColorGroup.Inactive,
                 QtGui.QPalette.ColorGroup.Disabled)
+
+
+def wait_for_focus(widget, timeout=1000):
+    """Wait for real focus delivery, without setting or fabricating focus."""
+    deadline = QtCore.QDeadlineTimer(timeout)
+    while not widget.hasFocus() and not deadline.hasExpired():
+        QtTest.QTest.qWait(10)
+    return widget.hasFocus()
 
 
 def palette_snapshot(palette):
@@ -234,12 +244,82 @@ class MacSettingControlsTests(ThemeTestCase):
         layout.addWidget(before)
         layout.addWidget(card)
         layout.addWidget(after)
+        for name, widget in (("tab-window", window), ("before", before),
+                             ("setting-combo", card.comboBox), ("after", after)):
+            widget.setObjectName(name)
         window.setTabOrder(before, card.comboBox)
         window.setTabOrder(card.comboBox, after)
+        records = []
+        started = time.monotonic()
+        def describe(obj):
+            return None if obj is None else {
+                "class": obj.metaObject().className(), "name": obj.objectName()}
+        def record(stage):
+            records.append({
+                "stage": stage, "platform": sys.platform, "qt_version": QtCore.qVersion(),
+                "recorded_at_utc": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+                "elapsed_ms": round((time.monotonic() - started) * 1000, 3),
+                "qpa": self.app.platformName(), "application_state": self.app.applicationState().name,
+                "tab_focus_behavior": self.app.styleHints().tabFocusBehavior().name,
+                "active_window": describe(self.app.activeWindow()),
+                "focus_window": describe(self.app.focusWindow()),
+                "focus_widget": describe(self.app.focusWidget()),
+                "window_active": window.isActiveWindow(), "window_visible": window.isVisible(),
+                "window_exposed": bool(window.windowHandle() and window.windowHandle().isExposed()),
+                "widgets": {widget.objectName(): {
+                    "has_focus": widget.hasFocus(), "focus_policy": widget.focusPolicy().name,
+                    "enabled": widget.isEnabled(), "visible": widget.isVisible(),
+                    "next_in_focus_chain": describe(widget.nextInFocusChain()),
+                } for widget in (before, card.comboBox, after)},
+            })
+            return json.dumps(records[-1], sort_keys=True)
+        initial_value = config.mode.value
+        try:
+            self.show(window)
+            record("after-show-request")
+            # Cocoa activation is asynchronous. processEvents() once is not a
+            # guarantee that the source field can receive keyboard focus.
+            active = QtTest.QTest.qWaitForWindowActive(window, 5000)
+            self.assertTrue(active, record("after-window-activation-wait"))
+            before.setFocus(QtCore.Qt.FocusReason.OtherFocusReason)
+            self.assertTrue(wait_for_focus(before), record("before-first-tab"))
+            for source, target, modifiers in (
+                    (before, card.comboBox, QtCore.Qt.KeyboardModifier.NoModifier),
+                    (card.comboBox, after, QtCore.Qt.KeyboardModifier.NoModifier),
+                    (after, card.comboBox, QtCore.Qt.KeyboardModifier.ShiftModifier),
+                    (card.comboBox, before, QtCore.Qt.KeyboardModifier.ShiftModifier)):
+                self.assertTrue(source.hasFocus(), record("source-" + source.objectName()))
+                # No direct setFocus on the combo: real Tab/Shift+Tab must
+                # traverse the standard Qt focus chain in both directions.
+                QtTest.QTest.keyClick(source, QtCore.Qt.Key.Key_Tab, modifiers)
+                record("after-key-toward-" + target.objectName())
+                focused = wait_for_focus(target)
+                self.assertTrue(focused, record("target-" + target.objectName()))
+            self.assertEqual(config.mode.value, initial_value)
+            self.assertFalse(config.file.exists(), "focus navigation must not persist a new value")
+        finally:
+            evidence = ROOT / "test-results/macos-setting-controls"
+            evidence.mkdir(parents=True, exist_ok=True)
+            (evidence / "focus-states.json").write_text(json.dumps({
+                "scope": "real Qt focus/Tab events; not external AX or physical-keyboard acceptance",
+                "system_keyboard_preferences_changed": False, "states": records,
+            }, indent=2), encoding="utf-8")
+
+    def test_focus_wait_does_not_pass_until_expected_widget_really_has_focus(self):
+        window = QtWidgets.QWidget()
+        self.widgets.append(window)
+        layout = QtWidgets.QVBoxLayout(window)
+        before, after = QtWidgets.QLineEdit(window), QtWidgets.QLineEdit(window)
+        layout.addWidget(before)
+        layout.addWidget(after)
         self.show(window)
+        self.assertTrue(QtTest.QTest.qWaitForWindowActive(window, 5000))
         before.setFocus()
-        QtTest.QTest.keyClick(before, QtCore.Qt.Key.Key_Tab)
-        self.assertTrue(card.comboBox.hasFocus())
+        self.assertTrue(wait_for_focus(before))
+        self.assertFalse(wait_for_focus(after, timeout=20))
+        QtCore.QTimer.singleShot(30, after.setFocus)
+        self.assertTrue(wait_for_focus(after))
+        self.assertIs(self.app.focusWidget(), after)
 
     def test_scrolling_unfocused_combo_does_not_change_configuration(self):
         config.mode.value = "auto"
