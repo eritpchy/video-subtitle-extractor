@@ -1,5 +1,6 @@
 """Quick CoreML phases are genuine execution gates, not full/GPU acceptance."""
 import copy
+import json
 from pathlib import Path
 
 import pytest
@@ -61,3 +62,67 @@ def test_evidence_cannot_be_written_inside_model_inputs(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match='must not modify'):
         compat.run(models / 'evidence')
     assert list(models.iterdir()) == []
+
+
+def test_independent_report_gate_rejects_the_observed_four_failed_case_result(tmp_path):
+    report = tmp_path / 'failed.json'
+    report.write_text(json.dumps({'schema': 1, 'scope': 'source-early-coreml-compatibility-only',
+                                 'result': 'failed', 'early': [{'id': index, 'passed': False} for index in compat.EARLY_IDS],
+                                 'compatibility': []}), encoding='utf-8')
+    with pytest.raises(ValueError, match='did not pass: result'):
+        compat.verify_report(report, tmp_path, 'a' * 40)
+
+
+@pytest.fixture
+def successful_report(tmp_path, monkeypatch):
+    native = tmp_path / 'native'
+    native.mkdir()
+    (native / 'native-ocr').write_bytes(b'worker')
+    (native / 'libonnxruntime.1.dylib').write_bytes(b'runtime')
+    assets = {'files': {'fixed-test-file': 'b' * 64},
+              'models': {name: {'sha256': 'c' * 64} for name in compat.gate.frozen.ALL_MODELS}}
+    monkeypatch.setattr(compat.gate, 'verify_native_model_assets', lambda _: copy.deepcopy(assets))
+    monkeypatch.setattr(compat.gate, '_request_evidence', lambda row, *args: set(row['executed_models']))
+    monkeypatch.setattr(compat.gate, 'request_identity', lambda doc: doc['unique'])
+    cases = compat.gate.frozen.load_cases(compat.ROOT / 'native/ocr/tests/evidence')
+    report = {'schema': 1, 'scope': 'source-early-coreml-compatibility-only', 'result': 'passed',
+              'consumer_commit': 'a' * 40, 'requested_provider': 'coreml', 'network_attempts': [],
+              'gpu_inference_verified': False, 'internal_coreml_precision_verified': False,
+              'timing_is_benchmark': False, 'final_package_accepted': False, 'production_modules_unchanged': True,
+              'model_files': assets['files'],
+              'worker_sha256': compat.gate.frozen.sha256(native / 'native-ocr'),
+              'runtime_sha256': compat.gate.frozen.sha256(native / 'libonnxruntime.1.dylib'),
+              'production_modules': {str((compat.ROOT / name).resolve()): compat.gate.frozen.sha256(compat.ROOT / name)
+                                     for name in compat.gate.PRODUCTION_FILES},
+              'covered_models': sorted(compat.gate.frozen.ALL_MODELS)}
+    for phase, ids in (('early', compat.EARLY_IDS), ('compatibility', compat.COMPAT_IDS)):
+        report[phase] = [{**row, 'passed': True, 'executed_models': [row['det_model'], row['rec_model']],
+                          'request_evidence': {'unique': row['id']}}
+                         for row in compat.select_cases(cases, ids)]
+    return tmp_path / 'report.json', native, report
+
+
+def test_independent_report_gate_rechecks_actual_coverage_and_fixed_identity(successful_report):
+    path, native, report = successful_report
+    path.write_text(json.dumps(report), encoding='utf-8')
+    assert compat.verify_report(path, native, 'a' * 40)['result'] == 'passed'
+    report['compatibility'][0]['executed_models'] = []
+    path.write_text(json.dumps(report), encoding='utf-8')
+    with pytest.raises(ValueError, match='coverage is incomplete'):
+        compat.verify_report(path, native, 'a' * 40)
+
+
+@pytest.mark.parametrize('change', ('consumer', 'worker', 'modules', 'models', 'failed', 'missing', 'expected', 'gpu'))
+def test_independent_report_gate_refuses_false_success(successful_report, change):
+    path, native, report = successful_report
+    if change == 'consumer': report['consumer_commit'] = 'd' * 40
+    elif change == 'worker': (native / 'native-ocr').write_bytes(b'changed')
+    elif change == 'modules': report['production_modules'] = {}
+    elif change == 'models': report['model_files'] = {}
+    elif change == 'failed': report['early'][0]['passed'] = False
+    elif change == 'missing': report['compatibility'].pop()
+    elif change == 'expected': report['early'][0]['expected'] = []
+    elif change == 'gpu': report['gpu_inference_verified'] = True
+    path.write_text(json.dumps(report), encoding='utf-8')
+    with pytest.raises(ValueError):
+        compat.verify_report(path, native, 'a' * 40)
