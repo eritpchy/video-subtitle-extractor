@@ -45,7 +45,8 @@ def test_independent_report_source_hashes_are_inside_the_checkout_contract():
 
 def test_gui_completion_runtime_is_part_of_the_source_identity():
     assert {'gui.py', 'ui/home_interface.py',
-            'backend/tools/subtitle_extractor_remote_call.py'} <= set(contract_files())
+            'backend/tools/subtitle_extractor_remote_call.py',
+            'backend/tools/process_manager.py'} <= set(contract_files())
 
 
 def test_source_byte_attributes_are_narrow_and_cover_the_complete_contract():

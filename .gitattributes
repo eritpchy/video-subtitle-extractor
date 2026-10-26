@@ -64,3 +64,4 @@ tests/fixtures/qt-overlay/artifact-12624219589.json -text
 /ui/macos_setting_controls.py -text
 /ui/home_interface.py -text
 /backend/tools/subtitle_extractor_remote_call.py -text
+/backend/tools/process_manager.py -text
