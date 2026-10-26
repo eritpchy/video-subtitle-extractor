@@ -194,15 +194,67 @@ def test_native_gpu_control_is_off_without_changing_saved_preference(monkeypatch
     parent.deleteLater();app.processEvents()
 
 
-@pytest.mark.parametrize('profile,minimum',[('paddle','13.0'),('native','14.0')])
-def test_macos_minimum_matches_native_sdk(tmp_path,profile,minimum):
+def _macos_image(minimum, kind=6):
+    import struct
+    encoded = (minimum[0] << 16) | (minimum[1] << 8) | (minimum[2] if len(minimum) > 2 else 0)
+    return (struct.pack('<8I', 0xfeedfacf, 0x100000c, 0, kind, 1, 24, 0, 0)
+            + struct.pack('<6I', 0x32, 24, 1, encoded, 26 << 16, 0))
+
+
+def _macos_stage(tmp_path, qt_minimum=(14, 4)):
+    stage = tmp_path / 'Video Subtitle Extractor.app/Contents/Resources'
+    (stage / 'runtime/bin').mkdir(parents=True)
+    (stage / 'runtime/bin/python3.12').write_bytes(_macos_image((13, 0), 2))
+    (stage / 'runtime/QtCocoa.dylib').write_bytes(_macos_image(qt_minimum))
+    return stage
+
+
+@pytest.mark.parametrize('profile,qt_minimum,expected',
+                         [('paddle', (14, 4), '14.4'), ('native', (15, 2, 1), '15.2.1')])
+def test_macos_minimum_comes_from_all_actual_images_not_profile(tmp_path, profile, qt_minimum, expected):
     import plistlib
+    from scripts.package_release import portable_launchers, verify_macos_deployment
+    stage = _macos_stage(tmp_path, qt_minimum)
+    report = portable_launchers(stage, 'macos', 'arm64', 'runtime/bin/python3.12', profile)
+    plist = plistlib.loads((stage.parent / 'Info.plist').read_bytes())
+    assert plist['LSMinimumSystemVersion'] == expected
+    assert report['limiting_files'] == ['runtime/QtCocoa.dylib']
+    # The final manifest and launcher/icon files add regular files; they are
+    # not new Mach-O deployment requirements and must not corrupt this gate.
+    (stage / 'bundle-manifest.json').write_text('{}')
+    actual = verify_macos_deployment(stage, {'arch': 'arm64', 'macos_deployment': report})
+    assert actual['minimum_macos_version'] == expected
+    assert actual['scanned_regular_files'] > report['scanned_regular_files']
+
+
+@pytest.mark.parametrize('change', ['plist', 'record', 'new-higher-image', 'hash', 'missing-report'])
+def test_final_macos_minimum_rejects_inconsistent_declared_or_actual_payload(tmp_path, change):
+    import plistlib
+    from scripts.package_release import portable_launchers, verify_macos_deployment
+    stage = _macos_stage(tmp_path)
+    report = portable_launchers(stage, 'macos', 'arm64', 'runtime/bin/python3.12')
+    manifest = {'arch': 'arm64', 'macos_deployment': report}
+    if change == 'plist':
+        path = stage.parent / 'Info.plist'
+        info = plistlib.loads(path.read_bytes()); info['LSMinimumSystemVersion'] = '14.0'
+        path.write_bytes(plistlib.dumps(info))
+    elif change == 'record':
+        report['minimum_macos_version'] = '14.0'
+    elif change == 'new-higher-image':
+        (stage / 'runtime/higher.dylib').write_bytes(_macos_image((16, 0)))
+    elif change == 'hash':
+        report['file_sha256']['runtime/QtCocoa.dylib'] = '0' * 64
+    else:
+        del manifest['macos_deployment']
+    with pytest.raises(RuntimeError):
+        verify_macos_deployment(stage, manifest)
+
+
+def test_macos_empty_stage_never_falls_back_to_old_sdk_baseline(tmp_path):
     from scripts.package_release import portable_launchers
-    stage=tmp_path/'Video Subtitle Extractor.app/Contents/Resources'
-    stage.mkdir(parents=True)
-    portable_launchers(stage,'macos','arm64','runtime/bin/python3.12',profile)
-    plist=plistlib.loads((stage.parent/'Info.plist').read_bytes())
-    assert plist['LSMinimumSystemVersion']==minimum
+    stage = tmp_path / 'empty'; stage.mkdir()
+    with pytest.raises(RuntimeError, match='No runtime Mach-O'):
+        portable_launchers(stage, 'macos', 'arm64', 'runtime/bin/python3.12', 'native')
 
 
 def test_runner_test_only_artifact_cannot_be_packaged(tmp_path):
@@ -211,3 +263,8 @@ def test_runner_test_only_artifact_cannot_be_packaged(tmp_path):
     with pytest.raises(ValueError,match='Runner-test-only'):
         stage_native_artifact(source,tmp_path/'output','windows')
     assert not (tmp_path/'output').exists()
+
+
+def test_native_server_workflow_includes_macos_deployment_parser_regressions():
+    workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/native-ocr.yml').read_text()
+    assert 'tests/test_macos_minimum_version.py' in workflow

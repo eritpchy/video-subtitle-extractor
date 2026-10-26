@@ -59,8 +59,14 @@ coverage from Windows 10/11 client and ARM/emulation execution outside the chose
 Server CI-only scope. It uploads test
 candidates only, never tags or releases. All adapter parity fixture variables are
 set so legacy/detector/Kannada checks cannot silently skip for missing evidence.
-Native macOS bundles advertise **macOS 14.0 minimum**, matching the ORT SDK;
-the existing Paddle bundle keeps its 13.0 default.
+The ORT SDK's own 14.0 target is not the full application's minimum.
+Both Native and Paddle macOS bundles now scan every runtime-loadable Mach-O
+slice after staging, write the highest declared requirement to Info.plist, and
+bind the image/hash report in the bundle manifest. Final ZIP verification
+rescans the extracted payload and rejects a stale or understated declaration.
+The official Qt 6.12.0 Cocoa image already declares 14.4; wheel filename tags
+must not be used to claim full-package 14.0 support. The scanner's metadata
+bound does not establish execution on the oldest permitted OS.
 
 Windows redistribution is not silently assumed: the builder requires an explicit
 acknowledgment of applicable Microsoft Visual C++ redistributable rights. The

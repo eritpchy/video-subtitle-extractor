@@ -188,12 +188,50 @@ def build_runtime(stage: Path, wheels: list[Path], runtime_requirements: list[st
     return info
 
 
-def portable_launchers(stage: Path, target_platform: str, target_arch: str, runtime_python: str, profile: str = "paddle") -> None:
+def portable_launchers(stage: Path, target_platform: str, target_arch: str, runtime_python: str, profile: str = "paddle") -> dict | None:
     try:
         from .portable_python import write_launchers
     except ImportError:
         from portable_python import write_launchers
-    write_launchers(stage, target_platform, target_arch, runtime_python, minimum_macos_version="14.0" if profile == "native" else "13.0")
+    deployment = None
+    options = {}
+    if target_platform == 'macos':
+        from scripts.macos_minimum_version import audit_minimum_system
+        deployment = audit_minimum_system(stage, expected_arches=(target_arch,))
+        options['minimum_macos_version'] = deployment['minimum_macos_version']
+    write_launchers(stage, target_platform, target_arch, runtime_python, **options)
+    return deployment
+
+
+def verify_macos_deployment(root: Path, manifest: dict) -> dict:
+    """Recheck actual extracted ZIP images, not wheel tags or an SDK baseline."""
+    import plistlib
+    from scripts.macos_minimum_version import audit_minimum_system
+    recorded = manifest.get('macos_deployment')
+    if not isinstance(recorded, dict) or recorded.get('schema') != 1:
+        raise RuntimeError('Missing complete macOS deployment audit')
+    actual = audit_minimum_system(root, expected_arches=(manifest['arch'],))
+    for key in ('minimum_encoded', 'minimum_macos_version'):
+        if (recorded.get(key) != actual[key]
+                or type(recorded.get(key)) is not type(actual[key])):
+            raise RuntimeError('macOS deployment declaration differs from the final ZIP: ' + key)
+    # ZIP creation can materialize internal runtime aliases and adds non-Mach-O
+    # launcher/icon/manifest files. Do not confuse those topology/count changes
+    # with the deployment bound. Every originally recorded image must still
+    # match; every final image, including materialized aliases, was rescanned.
+    images, hashes = recorded.get('images'), recorded.get('file_sha256')
+    if not isinstance(images, dict) or not images or not isinstance(hashes, dict) or set(images) != set(hashes):
+        raise RuntimeError('Incomplete recorded macOS image identities')
+    for path, slices in images.items():
+        if actual['images'].get(path) != slices or actual['file_sha256'].get(path) != hashes[path]:
+            raise RuntimeError('macOS deployment image differs from the built payload: ' + path)
+    if root.name != 'Resources' or root.parent.name != 'Contents' or root.parent.parent.suffix != '.app':
+        raise RuntimeError('macOS deployment audit requires the actual app bundle')
+    with (root.parent / 'Info.plist').open('rb') as stream:
+        info = plistlib.load(stream)
+    if info.get('LSMinimumSystemVersion') != actual['minimum_macos_version']:
+        raise RuntimeError('Info.plist understates or misstates the actual macOS deployment minimum')
+    return actual
 
 
 def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT, *, profile: str = "paddle", native_ocr: Path | None = None,
@@ -286,12 +324,13 @@ def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT, *, profile:
             except ImportError:
                 from bundle_linux_runtime_libs import bundle_linux_libraries
             runtime_info['native_libraries'] = bundle_linux_libraries(stage, stage / runtime_info['python'], profile=profile)
-        portable_launchers(stage, target_platform, target_arch, runtime_info["python"], profile)
+        deployment = portable_launchers(stage, target_platform, target_arch, runtime_info["python"], profile)
         app_files = {}
         if target_platform == 'macos':
             app_root = stage.parent.parent
             app_files = {path.relative_to(app_root).as_posix(): sha256(path) for path in app_root.rglob('*') if path.is_file() and not path.is_relative_to(stage)}
         manifest = {"ocr_backend": profile, "accelerator": identity['accelerator'], "build_profile": build_profile,
+                    "macos_deployment": deployment if target_platform == 'macos' else None,
                     "gpu_inference_verified": False, "directml_models": directml_info, "paddle_models": paddle_info,
                     "native_ocr": native_info, "app_files": app_files, "format": 2, "version": version, "commit": revision, "platform": target_platform, "arch": target_arch, "python": "3.12", "distribution": BUNDLE_DISTRIBUTION, "runtime_python": runtime_info["python"], "runtime_provenance": runtime_info, "runtime_requirements": runtime_requirements, "files": {path.relative_to(stage).as_posix(): sha256(path) for path in sorted(stage.rglob("*")) if path.is_file()}}
         (stage / "bundle-manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -369,9 +408,12 @@ def verify_bundle(archive_path: Path, smoke: bool) -> None:
             root = app_payload
         manifest = json.loads((root / "bundle-manifest.json").read_text(encoding="utf-8"))
         verify_payload(root, manifest)
+        macos_deployment = verify_macos_deployment(root, manifest) if manifest['platform'] == 'macos' else None
         if smoke:
             evidence = Path(temporary) / "verification-evidence"
             evidence.mkdir()
+            if macos_deployment is not None:
+                (evidence / 'macos-deployment.json').write_text(json.dumps(macos_deployment, indent=2) + '\n', encoding='utf-8')
             verification_passed = False
             try:
                 import os

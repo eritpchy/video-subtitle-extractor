@@ -587,9 +587,15 @@ def test_final_archive_smoke_requires_worker_evidence_only_for_windows_native(tm
     monkeypatch.setattr(portable_python, 'launcher_command', lambda *args: ['fixture-launcher'])
     monkeypatch.setattr(standalone_runtime_probe, 'audit_windows_executables', lambda *args: None)
     monkeypatch.setattr(standalone_runtime_probe, 'audit_macos_executables', lambda *args: None)
+    deployment_calls = []
+    # This fixture has no real executable/ZIP. Actual Mach-O/plist consistency
+    # is exercised separately by test_native_package and the parser tests.
+    monkeypatch.setattr(package_release, 'verify_macos_deployment',
+                        lambda *args: deployment_calls.append(args) or {'scope': 'unit-routing-only'})
     calls = []
     monkeypatch.setattr(standalone_runtime_probe, 'summarize_reports', lambda *args, **kwargs: calls.append(kwargs))
     package_release.verify_bundle(archive, True)
+    assert len(deployment_calls) == int(target == 'macos')
     assert len(calls) == 1
     assert calls[0]['require_native_workers'] is required
     assert calls[0]['require_isolated'] is (target == 'windows')
