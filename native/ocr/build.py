@@ -269,6 +269,7 @@ def build(a):
                       'onnxruntime': {'version': sdk_manifest['version'], 'target': target, **sdk_record},
                       'build_inputs': {'worker_sha256': sha256(ROOT / 'worker.cpp'),
                                        'provider_evidence_sha256': sha256(ROOT / 'provider_evidence.hpp'),
+                                       'protocol_output_sha256': sha256(ROOT / 'protocol_output.hpp'),
                                        'metal_capture_sources_sha256': {
                                            name: sha256(ROOT / name) for name in
                                            ('metal_capture.hpp', 'metal_capture.mm', 'metal_capture_stub.cpp')},

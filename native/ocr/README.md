@@ -138,6 +138,16 @@ request 65,536 bytes. Request fields: `id`, `tier` (`small`/`medium`), `path`, o
 `cpu_threads` (1..128), `timeout_ms` (1..120000), and exact `rec_model` without `_infer`.
 Unknown fields/providers are rejected; GPU requests never silently fall back to CPU.
 
+Before its first ORT API call, the worker reserves the original stdout as a
+private, non-inheritable protocol channel and permanently routes ordinary fd 1
+to stderr. Dependency `printf`, C++ streams and raw stdout writes therefore stay
+in diagnostic logs, not binary framing. Capabilities JSON and IPC frames use only
+the private channel with complete-write/EINTR handling. Teardown never restores
+stdout; compiler subprocesses cannot inherit the private channel. The 16 MiB
+response limit remains unchanged and is also enforced by the sender. This is a
+transport safeguard, not proof of the cause of a particular rejected header or
+of CoreML model compatibility; real Mac acceptance still applies.
+
 The process launcher must set `ORT_DISABLE_TELEMETRY=1` **before process creation**;
 the worker rejects a missing/different inherited value before using ORT APIs and
 also calls `DisableTelemetryEvents` after creating its environment. `--capabilities`

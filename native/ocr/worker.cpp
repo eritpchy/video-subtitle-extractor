@@ -5,6 +5,7 @@
 #include "json.hpp"
 #include "onnxruntime_c_api.h"
 #include "provider_evidence.hpp"
+#include "protocol_output.hpp"
 #include "metal_capture.hpp"
 #include <algorithm>
 #include <array>
@@ -951,6 +952,7 @@ int main(int argc, char **argv) {
   _setmode(_fileno(stdout), _O_BINARY);
 #endif
   try {
+    native_protocol::Output protocol;
     auto argument_is = [&](int index, const char *name) {
       return index < argc && fs::path(argv[index]) == fs::path(name);
     };
@@ -976,7 +978,7 @@ int main(int argc, char **argv) {
         capabilities["diagnostic_only"] = true;
         capabilities["timing_eligible"] = false;
       }
-      std::cout << capabilities.dump() << '\n';
+      protocol.capabilities(capabilities.dump());
       return 0;
     }
     ParentGuard parent_guard;
@@ -1147,14 +1149,7 @@ int main(int argc, char **argv) {
       }
       std::string out =
           result.dump(-1, ' ', false, J::error_handler_t::replace);
-      uint32_t n = out.size();
-      unsigned char h[4] = {(unsigned char)n, (unsigned char)(n >> 8),
-                            (unsigned char)(n >> 16), (unsigned char)(n >> 24)};
-      std::cout.write((char *)h, 4);
-      std::cout.write(out.data(), out.size());
-      std::cout.flush();
-      if (!std::cout)
-        return metal_capture ? 2 : 0;
+      protocol.frame(out);
       if (metal_capture)
         return result.value("ok", false) ? 0 : 2;
     }
