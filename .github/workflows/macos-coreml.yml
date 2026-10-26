@@ -1,0 +1,119 @@
+name: Isolated production Mac CoreML compatibility
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: macos-coreml-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  compatibility:
+    name: Same production worker / macOS 26 / fixed previous model artifact
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      ORT_DISABLE_TELEMETRY: '1'
+      POLYGRAPHY_AUTOINSTALL_DEPS: '0'
+      QT_QPA_PLATFORM: cocoa
+      VSE_OFFLINE: '1'
+      VSE_OCR_BACKEND: native
+      VSE_NATIVE_OCR_PROVIDER: coreml
+      VSE_NATIVE_OCR_ROOT: ${{ github.workspace }}/build/native-ocr
+      VSE_OCR_CPU_THREADS: '2'
+      MODEL_SOURCE_REPOSITORY: eritpchy/video-subtitle-extractor
+      MODEL_SOURCE_RUN: '40270545872'
+      MODEL_SOURCE_ATTEMPT: '1'
+      MODEL_SOURCE_COMMIT: 840634db3381f805ee91073c6c0c9192660da356
+      MODEL_SOURCE_JOB: '121402484190'
+      MODEL_SOURCE_ARTIFACT: '12628531578'
+      MODEL_SOURCE_BYTES: '263730435'
+      MODEL_SOURCE_DIGEST: 4cce5e9e5e0ab6956164cd1e24b326c0ab8e4511c08808890e35f78cf82c2897
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: arm64
+      - name: Install the same pinned native build tools (no model converter)
+        run: |
+          python -m pip install --only-binary=:all: --require-hashes -r native/ocr/requirements-build.txt
+          python -m pip install packaging pytest==8.3.5
+      - name: Test exact artifact trust and phased compatibility contracts
+        run: >-
+          python -m pytest native/ocr/tests/test_ci_model_artifact.py
+          native/ocr/tests/test_ci_coreml_compat.py native/ocr/tests/test_model_cache_identity.py
+          native/ocr/tests/test_ci_coreml_workflow.py
+          -q --junitxml=test-results/early-safety.xml
+      - name: Read official metadata and exact previously successful model artifact (one attempt)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p build/coreml-source test-results
+          gh api "repos/$MODEL_SOURCE_REPOSITORY/actions/artifacts/$MODEL_SOURCE_ARTIFACT" > build/coreml-source/artifact.json
+          gh api "repos/$MODEL_SOURCE_REPOSITORY/actions/runs/$MODEL_SOURCE_RUN/attempts/$MODEL_SOURCE_ATTEMPT" > build/coreml-source/run.json
+          gh api "repos/$MODEL_SOURCE_REPOSITORY/actions/jobs/$MODEL_SOURCE_JOB" > build/coreml-source/job.json
+          gh api "repos/$MODEL_SOURCE_REPOSITORY/actions/artifacts/$MODEL_SOURCE_ARTIFACT/zip" > build/coreml-source/models.zip
+      - name: Verify original producer and complete fixed bytes without claiming a new conversion
+        run: >-
+          python -S native/ocr/ci_model_artifact.py
+          --archive build/coreml-source/models.zip
+          --artifact-metadata build/coreml-source/artifact.json
+          --run-metadata build/coreml-source/run.json
+          --job-metadata build/coreml-source/job.json
+          --repository "$MODEL_SOURCE_REPOSITORY"
+          --source-run-id "$MODEL_SOURCE_RUN" --source-run-attempt "$MODEL_SOURCE_ATTEMPT"
+          --source-commit "$MODEL_SOURCE_COMMIT" --source-job-id "$MODEL_SOURCE_JOB"
+          --artifact-id "$MODEL_SOURCE_ARTIFACT" --artifact-sha256 "$MODEL_SOURCE_DIGEST"
+          --artifact-bytes "$MODEL_SOURCE_BYTES" --consumer-commit "${{ github.sha }}"
+          --output build/coreml-verified-source
+      - name: Build exact production worker and pinned runtime
+        id: native-build
+        run: |
+          python native/ocr/build.py --platform macos --arch arm64 \
+            --models build/coreml-verified-source/model-cache --output build/native-ocr \
+            2>&1 | tee test-results/native-build.log
+      - name: Install native application dependencies only (no Paddle or Python ORT)
+        run: |
+          python -m pip install -r requirements-native-inference.txt
+          python -m pip check
+      - name: Install unchanged pinned VideoSubFinder for production configuration
+        run: python scripts/install_videosubfinder.py --version 6.10.7
+      - name: Execute four small/medium CoreML cases then eleven real compatibility recognizers
+        run: |
+          python native/ocr/ci_coreml_compat.py --output test-results/coreml-compatibility \
+            2>&1 | tee test-results/coreml-compatibility.log
+      - name: Preserve actual production binary/runtime and original failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-coreml-worker-${{ github.sha }}
+          path: |
+            build/native-ocr/native-ocr
+            build/native-ocr/*.dylib
+            build/native-ocr/*.json
+            build/native-ocr/notices/
+            build/native-build/worker-build/native-ocr
+            build/native-build/worker-build/CMakeCache.txt
+            build/native-build/worker-build/compile_commands.json
+            native/ocr/ort-sdk-manifest.json
+            native/ocr/source_manifest.json
+            build/coreml-verified-source/source-artifact-receipt.json
+            build/coreml-source/artifact.json
+            build/coreml-source/run.json
+            build/coreml-source/job.json
+            test-results/
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 7
+      - name: Keep the diagnostic boundary explicit
+        if: always()
+        run: |
+          echo 'Source compatibility only: same production worker and exact prior model artifact; not a final ZIP or full 336-case/video/GUI acceptance.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'CoreML EP execution is not physical GPU dispatch or internal precision evidence. Full publication remains blocked.' >> "$GITHUB_STEP_SUMMARY"
