@@ -1,0 +1,106 @@
+name: Accepted-306 Windows 2025 CUDA 12.6 OS diagnostic
+
+# One previously failing configuration only. No release or original-gate edits.
+on:
+  push:
+    branches: [fix/windows-restorer]
+    paths: ['.github/workflows/windows-restorer-os-diagnostic.yml', 'native/windows-restorer-os-diagnostic/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: windows-restorer-os-diagnostic-306-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  accepted-server-os-diagnostic:
+    if: github.ref == 'refs/heads/fix/windows-restorer'
+    name: Accepted 306 / paddle-cuda12.6 / windows-2025 / post-acceptance OS diagnostic
+    runs-on: windows-2025
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: restorer-src
+          persist-credentials: false
+      - name: Exact accepted-baseline model fixtures and audit source (not an app substitute)
+        uses: actions/checkout@v4
+        with:
+          ref: 3064320ec74e1aa71f3702c2ea966485f4b31e33
+          path: baseline-src
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Build-side safety tools only
+        run: python -m pip install packaging pytest==8.3.5
+      - name: Unchanged accepted contracts and separate OS diagnostic tests
+        working-directory: restorer-src
+        run: >-
+          python -m pytest native/windows-restorer-accepted/tests/test_accepted_baseline.py
+          native/windows-restorer/tests/test_space_preflight_isolation.py
+          tests/test_windows_restorer_ci.py tests/test_release_volume_transport.py
+          native/windows-restorer-os-diagnostic/tests -q
+      - name: Unchanged original acceptance first (no added OS probe prewarming)
+        working-directory: restorer-src
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python scripts/run_windows_restorer_accepted_ci.py --runner windows-2025
+          --accepted-baseline-pins native/windows-restorer-accepted/accepted-baseline-306.json
+          --accepted-profile paddle-cuda12.6 --baseline-source ../baseline-src
+          --work-directory build/restorer-accepted --report-directory test-results/restorer-accepted
+      - name: Freeze original outcome, then run separate bounded OS probes and integrity rechecks
+        if: always()
+        working-directory: restorer-src
+        run: >-
+          python native/windows-restorer-os-diagnostic/post_probe.py
+          --work-directory build/restorer-accepted --report-directory test-results/restorer-accepted
+          --baseline-source ../baseline-src --output build/restorer-os-diagnostic
+      - name: Preserve complete acceptance evidence and separate diagnostic streams (no client payloads)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: restorer-os-diagnostic-306-paddle-cuda12.6-windows-2025-${{ github.sha }}
+          path: |
+            restorer-src/test-results/restorer-accepted/
+            restorer-src/build/restorer-accepted/*report.json
+            restorer-src/build/restorer-accepted/*.log
+            restorer-src/build/restorer-accepted/original/*.sha256
+            restorer-src/build/restorer-accepted/original/*.acceptance.json
+            restorer-src/build/restorer-accepted/volumes/*.json
+            restorer-src/build/restorer-accepted/native-build/*.json
+            restorer-src/build/restorer-accepted/native-build/*.txt
+            restorer-src/build/restorer-accepted/native-build/*.log
+            restorer-src/build/restorer-accepted/native-build/fixture-source/
+            restorer-src/build/restorer-accepted/native-build/experiment-source/
+            restorer-src/build/restorer-accepted/launcher-evidence/
+            restorer-src/build/restorer-os-diagnostic/workflow-source.yml
+            restorer-src/build/restorer-os-diagnostic/**/*.json
+            restorer-src/build/restorer-os-diagnostic/**/*.log
+            restorer-src/build/restorer-os-diagnostic/**/*.txt
+            restorer-src/build/restorer-os-diagnostic/**/*.sha256
+            restorer-src/build/restorer-os-diagnostic/**/*.py
+            restorer-src/build/restorer-os-diagnostic/**/*.md
+            restorer-src/build/restorer-os-diagnostic/**/stdout.bin
+            restorer-src/build/restorer-os-diagnostic/**/stderr.bin
+            restorer-src/native/windows-restorer-os-diagnostic/**/*.py
+            restorer-src/native/windows-restorer-os-diagnostic/README.md
+            restorer-src/.github/workflows/windows-restorer-os-diagnostic.yml
+            !**/*.exe
+            !**/*.dll
+            !**/*.obj
+            !**/*.lib
+            !**/*.pdb
+            !**/*.zip
+            !**/*.part*
+          if-no-files-found: error
+          retention-days: 14
