@@ -17,12 +17,16 @@ foreach(required "${ORT_INCLUDE_DIR}/onnxruntime_c_api.h" "${ORT_LIBRARY}" "${OC
 endforeach()
 add_executable(vse-provider-diagnostic runner.cpp "${OCR_DEPS_DIR}/clipper.cpp")
 if(APPLE)
+  set_target_properties(vse-provider-diagnostic PROPERTIES
+    BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "@loader_path")
   enable_language(OBJCXX)
   set_target_properties(vse-provider-diagnostic PROPERTIES OBJCXX_STANDARD 17 OBJCXX_STANDARD_REQUIRED ON)
   target_sources(vse-provider-diagnostic PRIVATE ../../native/ocr/metal_capture.mm)
   set_source_files_properties(../../native/ocr/metal_capture.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
   target_link_libraries(vse-provider-diagnostic PRIVATE "-framework Foundation" "-framework Metal")
 else()
+  set_target_properties(vse-provider-diagnostic PROPERTIES
+    BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "$ORIGIN")
   target_sources(vse-provider-diagnostic PRIVATE ../../native/ocr/metal_capture_stub.cpp)
 endif()
 target_include_directories(vse-provider-diagnostic PRIVATE "${ORT_INCLUDE_DIR}" "${OCR_DEPS_DIR}" ${OpenCV_INCLUDE_DIRS})

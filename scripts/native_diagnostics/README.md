@@ -80,6 +80,13 @@ JSON/Clipper against committed hashes. Existing OpenCV archive hashes and its
 actual build string are recorded; callers must additionally establish whether
 their OpenCV build matches the release they want to compare. No automatic install
 or missing-input download is attempted. This builds only the small frontend.
+The build also copies the already verified runtime beside it. Transfer the
+executable, its `libonnxruntime*` sidecars, pinned `ort-notices/` and
+`build-inputs.json` together. macOS
+uses `@loader_path` (Linux uses `$ORIGIN`), not a CI SDK path. Before reporting a
+successful build, a capability-only probe runs from a copy outside the build
+tree with loader-injection variables removed and confirms the exact loaded
+runtime hash. This proves relocatable loading, not CoreML or GPU inference.
 
 ```sh
 python scripts/native_diagnostics/benchmark.py build \
