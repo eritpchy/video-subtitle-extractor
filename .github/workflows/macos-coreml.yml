@@ -89,6 +89,10 @@ jobs:
         run: |
           python -m pip install -r requirements-native-inference.txt
           python -m pip check
+      - name: Check strict production shape-evidence contracts with installed native dependencies
+        run: >-
+          python -m pytest tests/test_native_shape_evidence.py tests/test_native_coreml_adapter.py
+          -q --junitxml=test-results/shape-evidence-contracts.xml
       - name: Install unchanged pinned VideoSubFinder for production configuration
         run: python scripts/install_videosubfinder.py --version 6.10.7
       - name: Execute four small/medium CoreML cases then eleven real compatibility recognizers
