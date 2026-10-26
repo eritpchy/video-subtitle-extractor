@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from PySide6 import QtCore, QtGui, QtTest, QtWidgets
-from qfluentwidgets import ComboBox, ComboBoxSettingCard, FluentIcon, Theme, qconfig
+from qfluentwidgets import ComboBox, ComboBoxSettingCard, FluentIcon, Theme, qconfig, themeColor
 
 from backend.config import config
 from test_theme import ThemeTestCase
@@ -18,8 +18,54 @@ from ui.macos_setting_controls import MacSettingComboBox, adapt_macos_setting_co
 
 ROOT = Path(__file__).resolve().parents[1]
 
+COLOR_GROUPS = (QtGui.QPalette.ColorGroup.Active, QtGui.QPalette.ColorGroup.Inactive,
+                QtGui.QPalette.ColorGroup.Disabled)
+
+
+def palette_snapshot(palette):
+    """Include inherited roles too; Qt's repr prints only explicit resolve bits."""
+    return {
+        "current_group": palette.currentColorGroup().name,
+        "resolve_mask": palette.resolveMask(),
+        "groups": {group.name: {
+            role.name: {"rgba": palette.color(group, role).name(QtGui.QColor.NameFormat.HexArgb),
+                        "color_spec": palette.color(group, role).spec().name,
+                        "rgba_f": palette.color(group, role).getRgbF(),
+                        "brush_style": palette.brush(group, role).style().name,
+                        "explicit": palette.isBrushSet(group, role)}
+            for role in QtGui.QPalette.ColorRole
+            if role not in (QtGui.QPalette.ColorRole.NColorRoles, QtGui.QPalette.ColorRole.NoRole)
+        } for group in COLOR_GROUPS},
+    }
+
 
 class MacSettingControlsTests(ThemeTestCase):
+    def assert_theme_palette(self, palette, theme, label):
+        """Check every group of every role promised by the adapter, exactly.
+
+        QWidget resolves *other* roles from its class/ancestor platform palette.
+        A combo and its item view need not inherit identical Link/Shadow/etc.
+        """
+        dark = theme == Theme.DARK
+        for group in COLOR_GROUPS:
+            foreground = ("#999999" if dark else "#777777") if group == QtGui.QPalette.ColorGroup.Disabled \
+                else ("#ffffff" if dark else "#1b1b1b")
+            expected = {"Text": foreground, "ButtonText": foreground, "WindowText": foreground,
+                        "Base": "#323232" if dark else "#ffffff",
+                        "Button": "#323232" if dark else "#ffffff",
+                        "Window": "#323232" if dark else "#ffffff",
+                        "Highlight": themeColor().name(), "HighlightedText": "#ffffff"}
+            for role_name, color in expected.items():
+                role = getattr(QtGui.QPalette.ColorRole, role_name)
+                with self.subTest(widget=label, theme=theme.value, group=group.name, role=role_name):
+                    brush = palette.brush(group, role)
+                    details = json.dumps(palette_snapshot(palette), sort_keys=True)
+                    # QColor equality also compares RGB vs HSV representation;
+                    # exact display RGBA plus solid brush semantics is intended.
+                    self.assertEqual(brush.color().rgba(), QtGui.QColor(color).rgba(), details)
+                    self.assertEqual(brush.style(), QtCore.Qt.BrushStyle.SolidPattern, details)
+                    self.assertTrue(brush.transform().isIdentity(), details)
+
     def card(self, item=None, adapt=True):
         item = config.mode if item is None else item
         card = ComboBoxSettingCard(item, FluentIcon.SETTING, "OCR mode / 识别模式",
@@ -222,15 +268,27 @@ class MacSettingControlsTests(ThemeTestCase):
             self.assertEqual(config.themeMode.value, expected)
             self.assertEqual(json.loads(config.file.read_text())["QFluentWidgets"]["ThemeMode"], expected.value)
         before = config.file.read_bytes()
+        records = []
+        evidence = ROOT / "test-results/macos-setting-controls"
+        evidence.mkdir(parents=True, exist_ok=True)
         for theme in (Theme.DARK, Theme.LIGHT, Theme.DARK):
             listener._onThemeChanged(theme)
             self.app.processEvents()
             self.assertEqual(combo.currentData(), Theme.AUTO)
             self.assertEqual(config.file.read_bytes(), before)
             palette = combo.palette()
+            view_palette = combo.view().palette()
+            records.append({"platform": sys.platform, "qt_version": QtCore.qVersion(),
+                            "qpa": self.app.platformName(), "theme": theme.value,
+                            "scope": "Qt palette API state only; not native popup rendering or external AX acceptance",
+                            "combo": palette_snapshot(palette),
+                            "popup_view": palette_snapshot(view_palette)})
+            # Save before assertions so a native failure retains all raw colors.
+            (evidence / "palette-states.json").write_text(json.dumps(records, indent=2), encoding="utf-8")
             dark = palette.color(QtGui.QPalette.ColorRole.Base).lightness() < 128
             self.assertEqual(dark, theme == Theme.DARK)
-            self.assertEqual(combo.view().palette(), palette)
+            self.assert_theme_palette(palette, theme, "combo")
+            self.assert_theme_palette(view_palette, theme, "popup_view")
         # A fresh process reads the file written by real key input, not test setup.
         result = subprocess.run([sys.executable, "-c",
             "from backend.config import config; print('SAVED=' + config.themeMode.value.value)"],
@@ -238,6 +296,37 @@ class MacSettingControlsTests(ThemeTestCase):
             capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("SAVED=Auto", result.stdout)
+
+    def test_unset_platform_palette_roles_can_differ_without_breaking_theme_contract(self):
+        listener = self.listener(Theme.LIGHT)
+        card = self.card(config.themeMode)
+        for theme in (Theme.DARK, Theme.LIGHT):
+            listener._applyTheme(theme, force=True)
+            requested = QtGui.QPalette(card.comboBox.palette())
+            # Real Qt resolution, modelling distinct native class defaults.
+            combo_native, view_native = QtGui.QPalette(), QtGui.QPalette()
+            combo_native.setColor(QtGui.QPalette.ColorRole.Link, QtGui.QColor("#ff0000"))
+            view_native.setColor(QtGui.QPalette.ColorRole.Link, QtGui.QColor("#00ff00"))
+            combo_palette = requested.resolve(combo_native)
+            view_palette = requested.resolve(view_native)
+            self.assertNotEqual(combo_palette, view_palette)
+            self.assert_theme_palette(combo_palette, theme, "combo-with-native-defaults")
+            self.assert_theme_palette(view_palette, theme, "view-with-other-native-defaults")
+
+    def test_equivalent_rgb_and_hsv_brush_representations_keep_exact_display_colors(self):
+        listener = self.listener(Theme.LIGHT)
+        card = self.card(config.themeMode)
+        listener._applyTheme(Theme.LIGHT, force=True)
+        original = QtGui.QPalette(card.comboBox.palette())
+        converted = QtGui.QPalette(original)
+        role = QtGui.QPalette.ColorRole.Highlight
+        # Fluent's accent is HSV; Cocoa/style code may represent colors as RGB.
+        # This illustrates the equality boundary, not proof of the native cause.
+        for group in COLOR_GROUPS:
+            converted.setColor(group, role, original.color(group, role).toRgb())
+        self.assertNotEqual(original, converted)
+        self.assert_theme_palette(original, Theme.LIGHT, "hsv-original")
+        self.assert_theme_palette(converted, Theme.LIGHT, "equivalent-rgb")
 
     def test_only_mode_and_theme_call_sites_are_adapted(self):
         from ui.setting_interface import SettingInterface

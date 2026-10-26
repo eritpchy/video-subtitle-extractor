@@ -69,3 +69,31 @@ user's Mac with external AX, real mouse/keyboard selection, light/dark/system
 appearance and restart persistence. These tests do not waive the Qt overlay's
 blocked production admission or promote the old CPU diagnostic into a CoreML
 production package.
+
+## First native CI palette assertion
+
+Run 40311353293 / job 121533546794 passed 11 control tests, explicitly skipped
+the non-Cocoa popup test, and failed whole-QPalette equality on macOS.
+The saved XML's abbreviated repr
+does not identify the differing roles; the preceding Base/lightness check passed.
+Do not infer a particular native color mismatch from that abbreviated output.
+
+The pinned QtBase 6.12.0 source clarifies the contract:
+`src/gui/kernel/qpalette.cpp` compares all brushes (not currentColorGroup), but
+its debug representation prints only explicitly resolved roles.
+`src/widgets/kernel/qwidget.cpp` resolves unspecified roles against class/parent
+palettes. `src/gui/painting/qcolor.cpp` also distinguishes HSV/RGB encodings even
+where display RGBA matches. These are not interchangeable with an appearance
+contract for two different widget classes.
+
+The regression now checks exact display RGBA, solid brush and identity transform
+for all eight application-assigned roles in **Active, Inactive and Disabled**,
+independently against their expected light/dark colors. It checks both combo and
+popup view, not just the combo. Real Qt resolution/HSV-to-RGB examples demonstrate
+why whole-palette identity is not required. Every native run saves all roles,
+RGBA, floating components, color specification, brush style, explicit bits,
+resolve mask, current group, platform and Qt backend in
+`test-results/macos-setting-controls/palette-states.json` before asserting.
+Any assigned display-color or brush mismatch still fails. Product palette code
+is unchanged. Native rerun and M5 appearance checks remain required; this test
+correction alone does not establish the cause of the earlier Cocoa difference.
