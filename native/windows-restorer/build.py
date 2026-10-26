@@ -59,11 +59,22 @@ def assert_pe_dependency_policy(executable: Path) -> dict:
     """
     if executable.is_symlink() or not executable.is_file():
         raise RuntimeError('Missing or linked PE executable')
+
+    def identity(info):
+        # Windows CPython 3.12 stat(path).ctime is creation time, whereas
+        # fstat(fd).ctime is ChangeTime. Compare ctime only within one API;
+        # never discard either API's before/after mutation check.
+        # https://github.com/python/cpython/issues/157671
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
+                getattr(info, 'st_birthtime_ns', None))
+
+    def snapshot(info):
+        return (*identity(info), info.st_ctime_ns)
+
     before = executable.stat()
     with executable.open('rb') as stream:
         opened = os.fstat(stream.fileno())
-        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
-                opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns):
+        if identity(before) != identity(opened):
             raise RuntimeError('PE executable changed while opening')
         size = opened.st_size
 
@@ -132,10 +143,14 @@ def assert_pe_dependency_policy(executable: Path) -> dict:
         flags = struct.unpack_from('<H', configuration, 0x4e)[0]
         if flags != 0x0800:
             raise RuntimeError(f'System32-only static dependency load flag not established in PE: 0x{flags:04x}')
+        finished = os.fstat(stream.fileno())
         after = executable.stat()
-        if executable.is_symlink() or (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns) != (
-                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
-            raise RuntimeError('PE executable changed during policy verification')
+        if (executable.is_symlink() or snapshot(before) != snapshot(after)
+                or snapshot(opened) != snapshot(finished)
+                or identity(finished) != identity(after)):
+            raise RuntimeError('PE executable changed during policy verification '
+                               f'(path before/after: {snapshot(before)!r}/{snapshot(after)!r}; '
+                               f'fd before/after: {snapshot(opened)!r}/{snapshot(finished)!r})')
     return {'source': 'PE binary LoadConfig, not dumpbin text', 'machine': machine,
             'optional_header_magic': 0x20b, 'data_directory_index': 10,
             'load_config_rva': rva, 'load_config_file_offset': offset,

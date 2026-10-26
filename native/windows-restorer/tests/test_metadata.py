@@ -13,7 +13,7 @@ import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 HERE = Path(__file__).resolve().parents[1]
 ROOT = HERE.parents[1]
@@ -160,6 +160,58 @@ class PeDependencyPolicyTests(unittest.TestCase):
         self.assertEqual(report['load_config_structure_size'], 0x140)
         self.assertEqual(report['dependent_load_flags_offset'], 78)
         self.assertEqual(report['dependent_load_flags'], 0x800)
+
+    def inspect_stat_snapshots(self, *, path_after=None, fd_after=None, fd_before=None):
+        # Model CPython's Windows API difference explicitly on every host.
+        # The synthetic stat fields are not a claim of native Windows testing;
+        # the PE bytes still come from a real open file and strict parser.
+        self.executable.write_bytes(synthetic_x64_pe())
+        common = {'st_dev': 7, 'st_ino': 11, 'st_size': 0x800,
+                  'st_mtime_ns': 1000, 'st_birthtime_ns': 100}
+        path_initial = {**common, 'st_ctime_ns': 100}
+        fd_initial = {**common, 'st_ctime_ns': 900, **(fd_before or {})}
+        path_final = {**path_initial, **(path_after or {})}
+        fd_final = {**fd_initial, **(fd_after or {})}
+        path = SimpleNamespace(is_symlink=Mock(return_value=False),
+                               is_file=Mock(return_value=True),
+                               open=self.executable.open,
+                               stat=Mock(side_effect=[SimpleNamespace(**path_initial),
+                                                      SimpleNamespace(**path_final)]))
+        fstat = Mock(side_effect=[SimpleNamespace(**fd_initial), SimpleNamespace(**fd_final)])
+        with patch.object(builder, 'os', SimpleNamespace(fstat=fstat)):
+            return builder.assert_pe_dependency_policy(path)
+
+    def test_distinct_path_and_fd_ctime_semantics_do_not_fake_a_mutation(self):
+        self.assertEqual(self.inspect_stat_snapshots()['dependent_load_flags'], 0x800)
+
+    def test_same_api_path_and_fd_ctime_changes_still_fail_closed(self):
+        # ctime must not simply be removed to make the Windows test pass.
+        for mutation in ({'path_after': {'st_ctime_ns': 101}},
+                         {'fd_after': {'st_ctime_ns': 901}}):
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(
+                    RuntimeError, 'changed during policy verification'):
+                self.inspect_stat_snapshots(**mutation)
+
+    def test_opening_cross_api_identity_mismatch_is_rejected(self):
+        for field in ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_birthtime_ns'):
+            with self.subTest(field=field), self.assertRaisesRegex(RuntimeError, 'changed while opening'):
+                self.inspect_stat_snapshots(fd_before={field: 9999})
+
+    def test_same_api_identity_size_or_write_time_changes_are_rejected(self):
+        for scope in ('path_after', 'fd_after'):
+            for field in ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_birthtime_ns'):
+                with self.subTest(scope=scope, field=field), self.assertRaisesRegex(
+                        RuntimeError, 'changed during policy verification'):
+                    self.inspect_stat_snapshots(**{scope: {field: 9999}})
+
+    def test_rewritten_existing_pe_is_stable_during_each_verification(self):
+        # Reuse the same path, just like the failing Windows compile subtests.
+        # Do not hide the cross-API issue by allocating a fresh file each time.
+        for value in (0x1234, 0x2345, 0x3456, 0x4567):
+            data = synthetic_x64_pe()
+            struct.pack_into('<H', data, 0x500 + 76, value)
+            with self.subTest(csd_version=value):
+                self.assertEqual(self.inspect(data)['dependent_load_flags'], 0x800)
 
     def test_flag_must_equal_system32_only_not_merely_contain_its_bit(self):
         for flags in (0, 0x8, 0x80, 0x100, 0x900, 0x1800, 0xffff):
