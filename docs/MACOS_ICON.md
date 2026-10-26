@@ -20,6 +20,28 @@ standard/Retina representations, including true 16px and 32px images. The
 transparent margin is retained at every size; no round-corner redraw, shadows,
 artwork crop, color adjustment, or Windows/Linux icon change is performed.
 
+The two small @1x images use native planar RGB (`is32`, `il32`) plus complete
+8-bit alpha masks (`s8mk`, `l8mk`). The other eight images use PNG. Literal-only
+ICNS PackBits packets preserve each RGB byte and avoid raw-pixel layout ambiguity.
+The optional table-of-contents member is omitted: Qt otherwise emits a
+corrupt-table warning even when reading Pillow's own ICNS export. All member
+types/lengths and the complete file length are independently verified.
+
+### Native-only regression caught in the first Server run
+
+The initial export stored the small images as PNG inside `icp4`/`icp5`. Pillow
+and Qt accepted those, but macOS Server CI run `40252263584` on `b12124b` caught
+Apple `iconutil` decoding the 16px representation as opaque garbage (first RGBA
+byte `0x50`, all alpha bytes 255). That was a real format bug, not a pixel
+tolerance issue. The RGB-plus-mask export fixes the encoding while retaining
+the strict, byte-for-byte native RGBA gate and all original alpha/geometry tests.
+
+This decoder distinction is independently documented in the
+[icon-format compatibility research](https://github.com/relikd/icns-analysis)
+and a [first-party exporter regression fix](https://github.com/electron-userland/electron-builder-binaries/pull/220).
+The latter used newer ARGB slots; this exporter uses the long-supported
+RGB-plus-mask slots, which are also readable by the existing Pillow/Qt versions.
+
 `ui/app_icon.py` uses the same packaged ICNS for the running Mac application.
 Source checkouts render the same frames in memory without writing to the source
 tree or touching system caches. Windows/Linux continue using `design/vse.ico`.

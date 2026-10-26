@@ -20,16 +20,18 @@ CANVAS_SIZE = 1024
 CONTENT_SIZE = 824
 INSET = (CANVAS_SIZE - CONTENT_SIZE) // 2
 PIXEL_SIZES = (16, 32, 64, 128, 256, 512, 1024)
-# Complete standard/@2x iconset. PNG-backed ICNS representations support the
-# minimum macOS 13 target. In particular, do not omit 16/32-point @1x images as
-# Pillow's default ICNS exporter does: Finder lists deserve their own samples.
+# Complete standard/@2x iconset. The 16/32-point @1x representations MUST use
+# planar RGB plus separate alpha masks: Apple's app-icon decoder interprets
+# icp4/icp5 payloads as RGB, not PNG, even though Pillow/Qt accept PNG there.
+# The remaining eight representations support PNG on our macOS 13+ target.
 REPRESENTATIONS = (
-    (b"icp4", 16, 1), (b"ic11", 16, 2),
-    (b"icp5", 32, 1), (b"ic12", 32, 2),
+    (b"is32", 16, 1), (b"ic11", 16, 2),
+    (b"il32", 32, 1), (b"ic12", 32, 2),
     (b"ic07", 128, 1), (b"ic13", 128, 2),
     (b"ic08", 256, 1), (b"ic14", 256, 2),
     (b"ic09", 512, 1), (b"ic10", 512, 2),
 )
+RGB_MASKS = {b"is32": b"s8mk", b"il32": b"l8mk"}
 
 
 def render_macos_frames(source: Path) -> dict[int, Image.Image]:
@@ -78,8 +80,26 @@ def _png_bytes(frame: Image.Image) -> bytes:
     return output.getvalue()
 
 
+def _rgb_bytes(frame: Image.Image) -> bytes:
+    """Encode ICNS planar RGB with literal PackBits packets, not raw pixels.
+
+    Each channel is a separate stream: control 0..127 precedes 1..128 literal
+    bytes. Literal-only packets avoid both the raw-ARGB length ambiguity and
+    native decoders' end-of-stream repeat-run quirks. The small-size overhead
+    is only 6/24 bytes. Alpha is stored losslessly in s8mk/l8mk, never discarded.
+    """
+    output = bytearray()
+    for channel in ("R", "G", "B"):
+        data = frame.getchannel(channel).tobytes()
+        for start in range(0, len(data), 128):
+            packet = data[start:start + 128]
+            output.append(len(packet) - 1)
+            output.extend(packet)
+    return bytes(output)
+
+
 def export_macos_icon(source: Path, output: Path) -> None:
-    """Write all ten PNG-backed ICNS members, including explicit 16px artwork.
+    """Write ten ICNS representations with native-compatible small RGB masks.
 
     ICNS is a big-endian length-delimited container. Keeping the small members
     explicit prevents the OS/Qt from inventing a small icon from a 1024px one.
@@ -87,10 +107,18 @@ def export_macos_icon(source: Path, output: Path) -> None:
     """
     frames = render_macos_frames(source)
     pngs = {size: _png_bytes(frame) for size, frame in frames.items()}
-    members = [(kind, pngs[points * scale]) for kind, points, scale in REPRESENTATIONS]
-    toc = b"".join(kind + struct.pack(">I", len(data) + 8) for kind, data in members)
-    body = b"TOC " + struct.pack(">I", len(toc) + 8) + toc
-    body += b"".join(kind + struct.pack(">I", len(data) + 8) + data for kind, data in members)
+    members = []
+    for kind, points, scale in REPRESENTATIONS:
+        frame = frames[points * scale]
+        if kind in RGB_MASKS:
+            members.append((kind, _rgb_bytes(frame)))
+            members.append((RGB_MASKS[kind], frame.getchannel("A").tobytes()))
+        else:
+            members.append((kind, pngs[points * scale]))
+    # TOC is optional. Qt reports a corrupt-TOC warning even for Pillow's own
+    # conforming TOC output; omit it instead of relying on a warning-and-recover
+    # path. Every member remains independently type/length-delimited.
+    body = b"".join(kind + struct.pack(">I", len(data) + 8) + data for kind, data in members)
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(b"icns" + struct.pack(">I", len(body) + 8) + body)

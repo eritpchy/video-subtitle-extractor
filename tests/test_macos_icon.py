@@ -11,7 +11,7 @@ from PIL import Image, ImageChops
 import pytest
 
 from scripts.build_macos_icon import (
-    CANVAS_SIZE, CONTENT_SIZE, INSET, PIXEL_SIZES, REPRESENTATIONS,
+    CANVAS_SIZE, CONTENT_SIZE, INSET, PIXEL_SIZES, REPRESENTATIONS, RGB_MASKS,
     export_macos_icon, export_macos_iconset, render_macos_frames,
 )
 from scripts.portable_python import write_launchers
@@ -86,6 +86,37 @@ def test_icns_roundtrip_has_all_ten_exact_native_and_retina_representations(tmp_
             assert image.tobytes() == frames[size].tobytes()
 
 
+def test_small_icns_members_are_planar_rgb_with_lossless_masks_not_png(tmp_path, frames):
+    output = tmp_path / "vse.icns"
+    export_macos_icon(SOURCE, output)
+    data = output.read_bytes()
+    members = {}
+    offset = 8
+    while offset < len(data):
+        kind = data[offset:offset + 4]
+        length = struct.unpack(">I", data[offset + 4:offset + 8])[0]
+        assert length >= 8 and offset + length <= len(data)
+        assert kind not in members
+        members[kind] = data[offset + 8:offset + length]
+        offset += length
+    assert offset == len(data)
+    assert set(members) == {kind for kind, _, _ in REPRESENTATIONS} | set(RGB_MASKS.values())
+    assert not {b"icp4", b"icp5", b"icp6"} & members.keys()
+    for kind, size in ((b"is32", 16), (b"il32", 32)):
+        assert members[RGB_MASKS[kind]] == frames[size].getchannel("A").tobytes()
+        # Independent literal-packet decoder: test channel order and boundaries,
+        # not just what our own encoder or PNG-tolerant Qt/Pillow will accept.
+        stream = iter(members[kind])
+        for channel in ("R", "G", "B"):
+            decoded = bytearray()
+            while len(decoded) < size * size:
+                count = next(stream) + 1
+                assert 1 <= count <= 128
+                decoded.extend(next(stream) for _ in range(count))
+            assert bytes(decoded) == frames[size].getchannel(channel).tobytes()
+        assert next(stream, None) is None
+
+
 def test_iconset_matches_icns_frames_and_apple_naming(tmp_path, frames):
     output = tmp_path / "vse.iconset"
     export_macos_iconset(SOURCE, output)
@@ -111,7 +142,14 @@ def test_native_iconutil_decodes_every_exported_representation(tmp_path, frames)
     for _, points, scale in REPRESENTATIONS:
         suffix = "@2x" if scale == 2 else ""
         with Image.open(decoded / f"icon_{points}x{points}{suffix}.png") as image:
-            assert image.convert("RGBA").tobytes() == frames[points * scale].tobytes()
+            actual = image.convert("RGBA")
+            expected = frames[points * scale]
+            assert actual.size == expected.size
+            assert actual.tobytes() == expected.tobytes(), (
+                f"icon_{points}x{points}{suffix}.png",
+                actual.getchannel("A").getextrema(), expected.getchannel("A").getextrema(),
+                ImageChops.difference(actual, expected).getextrema(),
+            )
 
 
 @pytest.mark.parametrize("shape,color", [((512, 512), (1, 2, 3, 0)),
@@ -168,6 +206,23 @@ def test_running_mac_qt_icon_matches_finder_at_every_pixel_size(tmp_path, frames
         assert bytes(image.pixelColor(x, y).alpha() for y in range(size) for x in range(size)) == expected.tobytes()
     if not packaged:
         assert not (root / "vse.icns").exists()
+
+
+def test_qt_icns_decoder_does_not_warn_and_recover_from_a_bad_table(tmp_path, qt_app):
+    from PySide6.QtCore import qInstallMessageHandler
+    from PySide6.QtGui import QIcon
+    output = tmp_path / "vse.icns"
+    export_macos_icon(SOURCE, output)
+    messages = []
+    previous = qInstallMessageHandler(lambda _kind, _context, text: messages.append(text))
+    try:
+        icon = QIcon(str(output))
+        assert len(icon.availableSizes()) == len(PIXEL_SIZES)
+        for size in PIXEL_SIZES:
+            assert not icon.pixmap(size, size).isNull()
+    finally:
+        qInstallMessageHandler(previous)
+    assert not [message for message in messages if "ICNS" in message.upper()]
 
 
 @pytest.mark.parametrize("target", ("win32", "linux"))
