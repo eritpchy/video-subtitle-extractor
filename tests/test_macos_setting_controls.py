@@ -314,19 +314,22 @@ class MacSettingControlsTests(ThemeTestCase):
             self.assert_theme_palette(view_palette, theme, "view-with-other-native-defaults")
 
     def test_equivalent_rgb_and_hsv_brush_representations_keep_exact_display_colors(self):
-        listener = self.listener(Theme.LIGHT)
-        card = self.card(config.themeMode)
-        listener._applyTheme(Theme.LIGHT, force=True)
-        original = QtGui.QPalette(card.comboBox.palette())
-        converted = QtGui.QPalette(original)
+        # Isolate the equality example from native widget palette normalization.
+        original = QtGui.QPalette()
+        accent = themeColor().toHsv()
         role = QtGui.QPalette.ColorRole.Highlight
-        # Fluent's accent is HSV; Cocoa/style code may represent colors as RGB.
-        # This illustrates the equality boundary, not proof of the native cause.
         for group in COLOR_GROUPS:
+            original.setColor(group, role, accent)
+        converted = QtGui.QPalette(original)
+        for group in COLOR_GROUPS:
+            self.assertEqual(original.color(group, role).spec(), QtGui.QColor.Spec.Hsv)
             converted.setColor(group, role, original.color(group, role).toRgb())
+            self.assertEqual(converted.color(group, role).spec(), QtGui.QColor.Spec.Rgb)
+            self.assertEqual(converted.color(group, role).rgba(), original.color(group, role).rgba())
+            self.assertEqual(converted.brush(group, role).style(), original.brush(group, role).style())
+            self.assertEqual(converted.brush(group, role).transform(), original.brush(group, role).transform())
+        # This illustrates the equality boundary, not proof of the native cause.
         self.assertNotEqual(original, converted)
-        self.assert_theme_palette(original, Theme.LIGHT, "hsv-original")
-        self.assert_theme_palette(converted, Theme.LIGHT, "equivalent-rgb")
 
     def test_only_mode_and_theme_call_sites_are_adapted(self):
         from ui.setting_interface import SettingInterface
