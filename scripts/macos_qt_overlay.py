@@ -421,12 +421,12 @@ def _venv_notices(prefix: Path, resource: VerifiedResource) -> Path:
         raise RuntimeError('Venv notices escape their environment')
     source_notice = ('Complete corresponding source (exact pinned bytes):\n' + resource.policy['source_url'] + '\n'
                      + json.dumps(resource.policy['source_resource'], indent=2) + '\n'
-                     'Prepublication candidate testing does not claim this URL is already public.\n')
+                     'Prepublication candidate testing does not claim this URL is already public.\n').encode('utf-8')
     expected = archives.inventory(resource.root)
     expected.pop('libqcocoa.dylib')
     expected['original-resource-manifest.json'] = expected.pop('resource-manifest.json')
     expected[resource.policy['resource']['name']] = resource.policy['resource']['sha256']
-    expected['CORRESPONDING-SOURCE.txt'] = hashlib.sha256(source_notice.encode()).hexdigest()
+    expected['CORRESPONDING-SOURCE.txt'] = hashlib.sha256(source_notice).hexdigest()
     if target.exists() or target.is_symlink():
         if target.is_symlink() or not target.is_dir():
             raise RuntimeError('Unsafe existing overlay notice directory')
@@ -441,7 +441,8 @@ def _venv_notices(prefix: Path, resource: VerifiedResource) -> Path:
         (staging / 'libqcocoa.dylib').unlink()
         (staging / 'resource-manifest.json').rename(staging / 'original-resource-manifest.json')
         shutil.copy2(resource.archive, staging / resource.policy['resource']['name'])
-        (staging / 'CORRESPONDING-SOURCE.txt').write_text(source_notice, encoding='utf-8')
+        # Hash and persist the same bytes; text mode may translate LF to CRLF.
+        (staging / 'CORRESPONDING-SOURCE.txt').write_bytes(source_notice)
         _atomic_json(staging / 'notice-inventory.json', archives.inventory(staging))
         staging.rename(target)
     return target

@@ -15,6 +15,10 @@ def make_zip(path, members):
         for member in members:
             name, data, *mode = member
             info = zipfile.ZipInfo(name)
+            # ZipInfo normalizes backslashes on Windows. These are deliberately
+            # raw unsafe fixtures, so preserve the requested on-disk name in
+            # both headers instead of accidentally writing a safe slash path.
+            info.filename = name
             info.create_system = 3
             info.external_attr = (mode[0] if mode else
                                   (stat.S_IFDIR | 0o755 if name.endswith("/") else stat.S_IFREG | 0o644)) << 16
@@ -84,6 +88,24 @@ def test_raw_nul_name_is_rejected_before_zipfile_truncation_can_hide_it(tmp_path
     with pytest.raises(ValueError, match="Unsafe archive member"):
         module.extract_archive(archive, tmp_path / "output")
     assert not (tmp_path / "output").exists()
+
+
+def test_raw_backslash_fixture_survives_windows_constructor_normalization(tmp_path, monkeypatch):
+    original = zipfile.ZipInfo
+    class WindowsNormalizedZipInfo(original):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.filename = self.filename.replace("\\", "/")
+    with monkeypatch.context() as context:
+        context.setattr(zipfile, "ZipInfo", WindowsNormalizedZipInfo)
+        archive = make_zip(tmp_path / "raw-backslash.zip", [("root\\file", b"payload")])
+    # Local and central names really contain the invalid byte, on every host.
+    assert archive.read_bytes().count(b"root\\file") == 2
+    with zipfile.ZipFile(archive) as source:
+        assert source.infolist()[0].orig_filename == "root\\file"
+    with pytest.raises(ValueError, match="Unsafe archive member"):
+        module.extract_archive(archive, tmp_path / "never-published")
+    assert not (tmp_path / "never-published").exists()
 
 
 @pytest.mark.parametrize("names", [

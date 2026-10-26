@@ -348,6 +348,23 @@ def test_venv_license_notices_survive_resource_cleanup_and_reject_tamper(resourc
         module._venv_notices(prefix, resource)
 
 
+def test_source_notice_hash_uses_the_same_utf8_bytes_as_disk_on_crlf_hosts(resource, tmp_path, monkeypatch):
+    original = Path.write_text
+    def windows_text_newlines(path, data, *args, **kwargs):
+        if path.name == 'CORRESPONDING-SOURCE.txt':
+            # Reproduce Windows text-mode newline translation on any test host.
+            return path.write_bytes(data.replace('\n', '\r\n').encode('utf-8'))
+        return original(path, data, *args, **kwargs)
+    monkeypatch.setattr(Path, 'write_text', windows_text_newlines)
+    prefix = tmp_path / 'own-venv';prefix.mkdir()
+    notice = module._venv_notices(prefix, resource)
+    raw = (notice / 'CORRESPONDING-SOURCE.txt').read_bytes()
+    assert b'\r' not in raw
+    assert raw.endswith(b'\n')
+    assert digest(raw) == module.read_json(notice / 'notice-inventory.json')['CORRESPONDING-SOURCE.txt']
+    assert module._venv_notices(prefix, resource) == notice
+
+
 @pytest.mark.parametrize('field,value', [
     ('production_integration_allowed', True), ('external_ax_client_tested', True),
     ('final_application_acceptance_passed', True), ('source_resource', {}),
