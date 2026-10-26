@@ -91,6 +91,48 @@ def compile_closure(source_directory, output, compiler, dumpbin, environment):
                      'scope': 'restricted-source-closure-not-a-claim-of-no-unknown-vulnerabilities'}
 
 
+def synthetic_space_symbol_evidence(text, *, enabled):
+    """Classify the exact test API and its observed MSVC x64 unwind metadata.
+
+    Linker group ranges/classes and defining object must agree; a matching name
+    alone is never sufficient. The production scope rejects every such symbol.
+    """
+    lines = [line for line in text.splitlines() if 'vsesynthetic' in line.lower()]
+    if not enabled:
+        if lines: raise RuntimeError('Synthetic space symbols forbidden in production')
+        return []
+    function = 'VseSyntheticGetDiskFreeSpaceExW'
+    expected = {function: ('.text$mn', 'CODE', ['f', 'synthetic-space-api.obj'], 'function'),
+                '$unwind$' + function: ('.xdata', 'DATA', ['synthetic-space-api.obj'], 'unwind_metadata')}
+    groups = []
+    for match in re.finditer(r'^[ \t]*([0-9A-Fa-f]+):([0-9A-Fa-f]+)[ \t]+([0-9A-Fa-f]+)H[ \t]+(\S+)[ \t]+(\S+)[ \t]*$', text, re.MULTILINE):
+        section, offset, length, name, kind = match.groups()
+        groups.append((int(section, 16), int(offset, 16), int(length, 16), name, kind))
+    evidence = {}
+    for line in lines:
+        match = re.fullmatch(r'[ \t]*([0-9A-Fa-f]+):([0-9A-Fa-f]+)[ \t]+(\S+)[ \t]+([0-9A-Fa-f]+)[ \t]+(.+?)\s*', line)
+        if not match: raise RuntimeError('Malformed synthetic space symbol row')
+        section, offset, name, address, tail = match.groups()
+        if name not in expected or name in evidence:
+            raise RuntimeError('Synthetic space symbols differ from the declared build scope')
+        group_name, group_class, suffix, role = expected[name]
+        if tail.split() != suffix:
+            raise RuntimeError('Synthetic space symbol function flag/object mismatch')
+        containing = [group for group in groups if group[0] == int(section, 16)
+                      and group[1] <= int(offset, 16) < group[1] + group[2]]
+        if len(containing) != 1 or containing[0][3:] != (group_name, group_class):
+            raise RuntimeError('Synthetic space symbol section/class/range mismatch')
+        group = containing[0]
+        evidence[name] = {'symbol': name, 'role': role, 'section': int(section, 16),
+                          'offset': int(offset, 16), 'address': int(address, 16),
+                          'group_name': group_name, 'group_class': group_class,
+                          'group_start': group[1], 'group_length': group[2],
+                          'object': 'synthetic-space-api.obj', 'map_row': line}
+    if set(evidence) != set(expected):
+        raise RuntimeError('Synthetic space symbols differ from the declared build scope')
+    return [evidence[name] for name in expected]
+
+
 def inspect_link_map(path, *, synthetic_space_fixture=False):
     if type(synthetic_space_fixture) is not bool: raise RuntimeError('Invalid link-map build scope')
     text = Path(path).read_text(encoding='utf-8', errors='replace')
@@ -98,9 +140,8 @@ def inspect_link_map(path, *, synthetic_space_fixture=False):
     if not {'inflateInit2_', 'inflate', 'inflateEnd'} <= symbols:
         raise RuntimeError('Final link map does not prove required raw-inflate entry points')
     assert_no_excluded_symbols(symbols)
-    synthetic = {symbol for symbol in symbols if 'vsesynthetic' in symbol.lower()}
-    expected = {'VseSyntheticGetDiskFreeSpaceExW'} if synthetic_space_fixture else set()
-    if synthetic != expected: raise RuntimeError('Synthetic space symbols differ from the declared build scope')
-    return {'synthetic_space_shim_present': bool(synthetic), 'sha256': digest(Path(path)), 'bytes': Path(path).stat().st_size,
+    synthetic = synthetic_space_symbol_evidence(text, enabled=synthetic_space_fixture)
+    return {'synthetic_space_shim_present': bool(synthetic), 'synthetic_space_symbol_evidence': synthetic,
+            'sha256': digest(Path(path)), 'bytes': Path(path).stat().st_size,
             'excluded_gzwrite_deflate_crc_archive_symbols_absent': True,
             'required_inflate_symbols_present': True}

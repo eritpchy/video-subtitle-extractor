@@ -229,6 +229,26 @@ The observations are consistent with optimization of an always-rejected invalid
 header, not missing inflate source. Neither a map exception nor `/OPT:NOREF` is
 used to make that invalid fixture appear to represent a normal package.
 
+Run `40289193558` at `f6879d7` retained 18/19 on both Servers. The corrected
+space fixture now retained all three required raw-inflate functions in the final
+map, but the test-scope symbol check rejected MSVC's additional
+`$unwind$VseSyntheticGetDiskFreeSpaceExW` data symbol. The two machines' original
+map rows bind the function to `.text$mn` / `CODE`, an `f` flag and
+`synthetic-space-api.obj`, and the exact unwind symbol to `.xdata` / `DATA` in
+that same object, without an `f` flag. The narrow classifier now requires these
+exact two names, their unique containing group ranges, classes and object/flag
+bindings. It does not whitelist arbitrary unwind names or synthetic functions.
+Production still rejects **every** synthetic symbol; required inflate, excluded
+compression-symbol and PE gates are unchanged. The next Server run must still
+execute the space refusal and pass all 19 cases; a metadata correction is not
+itself successful restoration. The independent probe's 32 strict API cases and
+16 safe invalid-input observations already met their separate gates in that run.
+
+This distinction follows Microsoft's [map group/symbol description](https://learn.microsoft.com/en-us/cpp/build/reference/map-generate-mapfile)
+and [x64 unwind-data contract](https://learn.microsoft.com/en-us/cpp/build/exception-handling-x64),
+with the precise names/flags/object layout bound to the observed MSVC output,
+not inferred as a universal linker-format guarantee.
+
 The corrected space case uses a **real, internally consistent 8-MiB DEFLATE
 ZIP**. Only the independently marked synthetic test entry includes the unchanged
 production `restorer.cpp` with a redirected Win32 free-space function name. Its

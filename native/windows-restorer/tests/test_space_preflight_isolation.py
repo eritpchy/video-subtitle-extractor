@@ -24,6 +24,19 @@ policy = load('space_isolation_policy', HERE / 'zlib_build.py')
 server = load('space_isolation_server', HERE / 'tests/windows_server_tests.py')
 
 
+# Exact four raw map rows relayed from both Server artifacts for f6879d7,
+# run 40289193558. These are excerpts, not fabricated full native build evidence.
+SYNTHETIC_MAP_ROWS = """ 0001:00000000 000217c0H .text$mn                CODE
+ 0002:0000f388 000021f8H .xdata                  DATA
+ 0001:0000b5f8       VseSyntheticGetDiskFreeSpaceExW 000000014000c5f8 f   synthetic-space-api.obj
+ 0002:0000f3b4       $unwind$VseSyntheticGetDiskFreeSpaceExW 00000001400343b4     synthetic-space-api.obj
+"""
+
+
+def inflate_rows(names=('inflateInit2_', 'inflate', 'inflateEnd')):
+    return '\n'.join(f' 0001:00000000 {name} 0000000140001000 f zlib-inflate.obj' for name in names) + '\n'
+
+
 class SpaceIsolationTests(unittest.TestCase):
     def source_pair(self, directory):
         root = Path(directory)
@@ -77,26 +90,82 @@ class SpaceIsolationTests(unittest.TestCase):
                 builder._compile_fixed_impl(root, root, root, synthetic_space_fixture='true')
 
     def test_complete_inflate_map_is_required_in_both_scopes_and_production_forbids_test_symbol(self):
-        def rows(names):
-            return '\n'.join(f' 0001:00000000 {name} 0000000140001000 f source.obj' for name in names)
         required = ['inflateInit2_', 'inflate', 'inflateEnd']
-        seam = 'VseSyntheticGetDiskFreeSpaceExW'
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'link-map.txt'
-            path.write_text(rows(required))
+            path.write_text(inflate_rows())
             self.assertFalse(policy.inspect_link_map(path)['synthetic_space_shim_present'])
             with self.assertRaises(RuntimeError): policy.inspect_link_map(path, synthetic_space_fixture=True)
-            path.write_text(rows(required + [seam]))
+            path.write_text(inflate_rows() + SYNTHETIC_MAP_ROWS)
             with self.assertRaisesRegex(RuntimeError, 'Synthetic space symbols'):
                 policy.inspect_link_map(path)
-            self.assertTrue(policy.inspect_link_map(path, synthetic_space_fixture=True)['required_inflate_symbols_present'])
+            record = policy.inspect_link_map(path, synthetic_space_fixture=True)
+            self.assertTrue(record['required_inflate_symbols_present'])
+            self.assertTrue(record['synthetic_space_shim_present'])
+            self.assertEqual([row['role'] for row in record['synthetic_space_symbol_evidence']], ['function', 'unwind_metadata'])
             for missing in required:
-                path.write_text(rows([name for name in required if name != missing] + [seam]))
+                path.write_text(inflate_rows([name for name in required if name != missing]) + SYNTHETIC_MAP_ROWS)
                 with self.assertRaisesRegex(RuntimeError, 'raw-inflate'):
                     policy.inspect_link_map(path, synthetic_space_fixture=True)
-            path.write_text(rows(required + [seam, 'gzwrite']))
+            path.write_text(inflate_rows(required + ['gzwrite']) + SYNTHETIC_MAP_ROWS)
             with self.assertRaisesRegex(RuntimeError, 'Excluded'):
                 policy.inspect_link_map(path, synthetic_space_fixture=True)
+
+    def test_exact_native_metadata_is_classified_separately_and_bound_to_its_object_group(self):
+        result = policy.synthetic_space_symbol_evidence(SYNTHETIC_MAP_ROWS, enabled=True)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]['group_name'], '.text$mn')
+        self.assertEqual(result[0]['group_class'], 'CODE')
+        self.assertEqual(result[0]['offset'], 0xb5f8)
+        self.assertEqual(result[1]['group_name'], '.xdata')
+        self.assertEqual(result[1]['group_class'], 'DATA')
+        self.assertEqual(result[1]['offset'], 0xf3b4)
+        self.assertEqual(result[1]['group_start'], 0xf388)
+        self.assertEqual(result[1]['group_length'], 0x21f8)
+        self.assertTrue(all(row['object'] == 'synthetic-space-api.obj' for row in result))
+        self.assertEqual([row['map_row'] for row in result], SYNTHETIC_MAP_ROWS.splitlines()[2:])
+
+    def test_other_synthetic_unwind_functions_objects_duplicates_or_malformed_rows_are_rejected(self):
+        extra = [
+            ' 0002:0000f3b8 $unwind$VseSyntheticOther 00000001400343b8 synthetic-space-api.obj',
+            ' 0001:0000b600 VseSyntheticOther 000000014000c600 f synthetic-space-api.obj',
+            ' 0002:0000f3b8 $unwind$VseSyntheticGetDiskFreeSpaceExW_extra 00000001400343b8 synthetic-space-api.obj',
+            ' VseSyntheticUnparsed',
+            SYNTHETIC_MAP_ROWS.splitlines()[2],
+            SYNTHETIC_MAP_ROWS.splitlines()[3],
+        ]
+        for row in extra:
+            with self.subTest(row=row), self.assertRaises(RuntimeError):
+                policy.synthetic_space_symbol_evidence(SYNTHETIC_MAP_ROWS + row + '\n', enabled=True)
+        for replacement in ('other.obj', 'other.lib:synthetic-space-api.obj', 'VseSyntheticOther.obj'):
+            with self.subTest(replacement=replacement), self.assertRaises(RuntimeError):
+                policy.synthetic_space_symbol_evidence(SYNTHETIC_MAP_ROWS.replace('synthetic-space-api.obj', replacement), enabled=True)
+        for line in SYNTHETIC_MAP_ROWS.splitlines()[2:]:
+            with self.subTest(line=line), self.assertRaises(RuntimeError):
+                policy.synthetic_space_symbol_evidence(SYNTHETIC_MAP_ROWS.replace(line + '\n', ''), enabled=True)
+        # Production rejects the shim, metadata-only, and malformed seam names.
+        for text in (SYNTHETIC_MAP_ROWS, SYNTHETIC_MAP_ROWS.splitlines()[3], 'VseSyntheticUnparsed'):
+            with self.subTest(text=text), self.assertRaisesRegex(RuntimeError, 'forbidden in production'):
+                policy.synthetic_space_symbol_evidence(text, enabled=False)
+
+    def test_metadata_cannot_masquerade_as_code_or_escape_the_unique_xdata_range(self):
+        cases = [
+            SYNTHETIC_MAP_ROWS.replace(' f   synthetic-space-api.obj', '     synthetic-space-api.obj'),
+            SYNTHETIC_MAP_ROWS.replace('00000001400343b4     synthetic-space-api.obj', '00000001400343b4 f   synthetic-space-api.obj'),
+            SYNTHETIC_MAP_ROWS.replace('.xdata                  DATA', '.text                   CODE'),
+            SYNTHETIC_MAP_ROWS.replace('.xdata                  DATA', '.xdata                  CODE'),
+            SYNTHETIC_MAP_ROWS.replace('.text$mn                CODE', '.text$mn                DATA'),
+            SYNTHETIC_MAP_ROWS.replace('0002:0000f3b4', '0001:0000f3b4'),
+            SYNTHETIC_MAP_ROWS.replace('0002:0000f3b4', '0002:0000f387'),
+            SYNTHETIC_MAP_ROWS.replace('0002:0000f3b4', '0002:00011580'),  # exact end, excluded
+            SYNTHETIC_MAP_ROWS.replace('000021f8H', '00000000H'),
+            SYNTHETIC_MAP_ROWS + SYNTHETIC_MAP_ROWS.splitlines()[1] + '\n',
+            SYNTHETIC_MAP_ROWS + ' 0002:0000f3b4 00000004H .xdata DATA\n',
+            '\n'.join(SYNTHETIC_MAP_ROWS.splitlines()[1:]),
+        ]
+        for index, text in enumerate(cases):
+            with self.subTest(index=index), self.assertRaises(RuntimeError):
+                policy.synthetic_space_symbol_evidence(text, enabled=True)
 
     def test_space_zip_remains_small_real_and_internally_consistent(self):
         with tempfile.TemporaryDirectory() as directory:
