@@ -10,6 +10,7 @@ import logging
 import atexit
 import subprocess
 import concurrent.futures
+from multiprocessing.process import BaseProcess
 
 class ProcessManager:
     """
@@ -62,8 +63,7 @@ class ProcessManager:
         Args:
             process_id: 进程ID或名称
         """
-        if process_id in self.processes:
-            del self.processes[process_id]
+        if self.processes.pop(process_id, None) is not None:
             print(f"Removed process: {process_id}")
             return True
         return False
@@ -99,14 +99,27 @@ class ProcessManager:
         # 清空进程字典
         self.processes.clear()
     
+    @staticmethod
+    def _has_exited(process):
+        if isinstance(process, BaseProcess):
+            try:
+                return process.exitcode is not None
+            except ValueError:
+                # A closed multiprocessing handle cannot own a live process.
+                # Do not recover a numeric PID from an invalidated handle.
+                return True
+        return hasattr(process, 'poll') and process.poll() is not None
+
     def terminate_by_process(self, process):
         if process is None:
             return
         try:
-            print(f"Terminating process: pid: {process.pid}")
-            if hasattr(process, 'poll') and process.poll() is not None:
+            if self._has_exited(process):
                 # 进程已经结束，直接返回
                 return
+            if isinstance(process, BaseProcess) and process.pid is None:
+                return  # Never started: there is no child to signal.
+            print(f"Terminating process: pid: {process.pid}")
                 
             # 进程还在运行
             process.terminate()
@@ -121,15 +134,21 @@ class ProcessManager:
                 except:
                     pass
             # wait() may have reaped the child; its numeric PID can now be reused.
-            if hasattr(process, 'poll') and process.poll() is not None:
+            if self._has_exited(process):
                 return
             # 进程未能正常终止，尝试强制终止
             if hasattr(process, 'kill'):
                 process.kill()
+                if isinstance(process, BaseProcess):
+                    process.join(timeout=3)
         except Exception as e:
             # print(f"Error terminating process: {str(e)}")
             pass
-        if hasattr(process, 'poll') and process.poll() is not None:
+        if self._has_exited(process):
+            return
+        if isinstance(process, BaseProcess):
+            # Its owned handle already supplied terminate/kill. Converting it
+            # to a later numeric-PID shell command can target a reused PID.
             return
         self.terminate_by_pid(process.pid)
 

@@ -94,3 +94,38 @@ ZIP's M5 GUI run. Final CPU/CoreML modes, finish/close/reopen continuity, native
 file Open→immediate external AX, theme choices and persistence still require
 fresh acceptance on the exact rebuilt candidate. Historical failed or false
 acceptance records must not be rewritten.
+
+## Separate ended-process shutdown safety review
+
+A subsequent source review found an existing, different lifecycle risk:
+`ProcessManager` recognized only `Popen.poll()`, not
+`multiprocessing.Process.exitcode`. Consequently a joined multiprocessing child
+could still reach a shell command using its old numeric PID. Completed GUI jobs
+also retained process/PID registrations until application shutdown. A PID might
+be reused by then; **no actual M5 collateral termination has been observed**.
+This is not the native preview seek/release crash described above.
+
+The bounded follow-up recognizes ended/closed/unstarted multiprocessing objects,
+rechecks exit after join, and uses only their owned terminate/kill operations—no
+later numeric-PID shell fallback. It removes the confirmed-reaped main process
+registration. Only zero exit plus drained FINISH, no child ERROR and no
+cancellation removes the completed job's descendant registrations. Those names
+use a per-job UUID (not reusable Python object IDs); unrelated jobs, even with
+the same numeric PID, remain untouched. Failed/cancelled/unconfirmed jobs retain
+unresolved descendant cleanup responsibility.
+
+Tests include real spawned processes, joined zero/nonzero exits with controlled
+PID reuse pointing at a real unrelated live child, live-child termination,
+closed/unstarted handles, actual process/descendant IPC completion, and negative
+cases preserving live descendant registrations after failure/cancellation.
+All live controls are children created by the tests themselves; raw PID signaling
+is mocked/spied in the reuse and registration tests. They never signal an
+existing user process or another task's process.
+Existing Popen behavior remains covered by `test_timeline_sync.py`.
+
+This removes the identified historical-registration/owned-handle fallback paths;
+it does **not** add birth-time identity to all existing raw PID notifications or
+claim that an active/aborted job's numeric-PID protocol is universally reuse-safe.
+The [Python 3.12 process contract](https://docs.python.org/3.12/library/multiprocessing.html#multiprocessing.Process.exitcode)
+defines exitcode after termination; process termination does not itself imply
+that all descendants have exited.

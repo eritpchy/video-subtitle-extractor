@@ -1,5 +1,6 @@
 """Real Qt event-loop ownership tests; not a substitute for final Mac GUI QA."""
 import os
+import atexit
 import multiprocessing
 import subprocess
 from pathlib import Path
@@ -8,7 +9,7 @@ import threading
 import time
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, PropertyMock
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'cocoa' if sys.platform == 'darwin' else 'offscreen')
 import cv2
@@ -16,6 +17,7 @@ import numpy as np
 from PySide6 import QtCore, QtTest
 from backend.config import config
 from backend.tools.subtitle_extractor_remote_call import SubtitleExtractorRemoteCall
+from backend.tools.process_manager import ProcessManager
 from test_theme import ThemeTestCase
 from ui.home_interface import HomeInterface
 from ui.component.task_list_component import TaskStatus
@@ -27,6 +29,25 @@ def _large_callback_producer(queue):
     for _ in range(16):
         SubtitleExtractorRemoteCall.remote_call_append_log(queue, 'x' * 65536)
     SubtitleExtractorRemoteCall.remote_call_finish(queue)
+
+
+def _ready_waiting_child(ready):
+    ready.set()
+    threading.Event().wait(30)
+
+
+def _successful_registration_producer(queue, video_path, output_path, options):
+    """Real process/descendant IPC lifecycle, without OCR or model downloads."""
+    child = subprocess.Popen([sys.executable, '-c', 'pass'])
+    try:
+        SubtitleExtractorRemoteCall.remote_call_manage_process(queue, child.pid)
+        if child.wait(timeout=15) != 0:
+            raise RuntimeError('controlled descendant failed')
+        SubtitleExtractorRemoteCall.remote_call_finish(queue)
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=15)
 
 
 class RecordingCapture:
@@ -391,17 +412,22 @@ class HomePreviewLifecycleTests(ThemeTestCase):
         self.assertEqual(cap.release_count, 1)
         self.assertNotIn('set', [row[0] for row in cap.calls])
 
-    def run_process_pipeline(self, *, child_error=False, missing_finish=False, delivery_error=False):
+    def run_process_pipeline(self, *, child_error=False, missing_finish=False,
+                             delivery_error=False, nonzero_exit=False,
+                             cancelled=False, join_error=False, registered_pid=424243):
         widget, _ = self.widget()
-        observed = []
+        observed, jobs = [], []
+        registered = threading.Event()
+        orchestration_done = threading.Event()
         class Process:
-            exitcode = 0
+            exitcode = None
             pid = 424242
             def __init__(process, *, target, args):
                 process.queue = args[0]
                 observed.append(('input_snapshot', args[1:]))
             def start(process):
                 observed.append(('start', threading.get_ident()))
+                SubtitleExtractorRemoteCall.remote_call_manage_process(process.queue, registered_pid)
                 SubtitleExtractorRemoteCall.remote_call_append_log(process.queue, ('last child log',))
                 SubtitleExtractorRemoteCall.remote_call_update_progress(process.queue, 100, 100, 100, True, 100)
                 if child_error:
@@ -410,7 +436,27 @@ class HomePreviewLifecycleTests(ThemeTestCase):
                     SubtitleExtractorRemoteCall.remote_call_finish(process.queue)
             def join(process):
                 observed.append(('join', threading.get_ident()))
-        manager = SimpleNamespace(add_process=lambda process: None)
+                if not registered.wait(3):
+                    raise RuntimeError('child registration callback did not drain')
+                if join_error:
+                    raise RuntimeError('join failed before exit was confirmed')
+                process.exitcode = 1 if nonzero_exit else 0
+                if cancelled:
+                    jobs[0].cancelled.set()
+        manager = ProcessManager()
+        atexit.unregister(manager._shutdown)
+        manager.add_pid(registered_pid, name='other-job-same-pid')
+        add_pid = manager.add_pid
+        def register(*args, **kwargs):
+            result = add_pid(*args, **kwargs)
+            registered.set()
+            return result
+        def run(job):
+            jobs.append(job)
+            try:
+                return HomeInterface.run_subtitle_extractor_process(widget, job)
+            finally:
+                orchestration_done.set()
         emit = widget._emit_worker_event
         def delivered(job, kind, payload):
             if delivery_error and kind == 'error':
@@ -418,8 +464,9 @@ class HomePreviewLifecycleTests(ThemeTestCase):
             emit(job, kind, payload)
         patches = [patch('ui.home_interface.multiprocessing.Process', Process),
                    patch('ui.home_interface.ProcessManager.instance', return_value=manager),
-                   patch.object(widget, 'run_subtitle_extractor_process',
-                                HomeInterface.run_subtitle_extractor_process.__get__(widget)),
+                   patch.object(manager, 'add_pid', side_effect=register),
+                   patch.object(manager, 'terminate_by_pid'),
+                   patch.object(widget, 'run_subtitle_extractor_process', run),
                    patch.object(widget, '_emit_worker_event', delivered)]
         if missing_finish:
             patches.append(patch.object(SubtitleExtractorRemoteCall, 'wait', return_value=False))
@@ -427,12 +474,27 @@ class HomePreviewLifecycleTests(ThemeTestCase):
         try:
             widget.run_button_clicked()
             task = widget.task_list_component.get_task(0)
-            self.pump(lambda: widget._active_job is None)
+            self.pump(orchestration_done.is_set)
+            if not cancelled:
+                self.pump(lambda: widget._active_job is None)
+            # Cancellation intentionally discards the completion event.
             widget._next_task_timer.stop()
             self.assertTrue(all(thread != self.gui_ident for name, thread in observed if name in ('start', 'join')))
             self.assertEqual(len([row for row in observed if row[0] == 'start']), 1)
+            expected_cleanup = not any((child_error, missing_finish, delivery_error,
+                                        nonzero_exit, cancelled, join_error))
+            own = [key for key in manager.processes if key.startswith('ExtractionJob:')]
+            self.assertEqual(len(own), 0 if expected_cleanup else 1)
+            self.assertEqual(manager.processes['other-job-same-pid'], registered_pid)
+            self.assertEqual(bool([key for key in manager.processes if key.startswith('Process:')]),
+                             join_error)
+            self.assertEqual(jobs[0].subprocess_pids, [] if expected_cleanup else [registered_pid])
             return task.status, widget.output_text.toPlainText()
         finally:
+            manager.processes.clear()  # Synthetic PIDs must never reach atexit.
+            if jobs:
+                jobs[0].subprocess_pids.clear()
+                jobs[0].process = None
             for item in reversed(patches): item.stop()
 
     def test_process_pipeline_drains_successful_terminal_messages(self):
@@ -454,6 +516,64 @@ class HomePreviewLifecycleTests(ThemeTestCase):
         status, log = self.run_process_pipeline(child_error=True, delivery_error=True)
         self.assertEqual(status, TaskStatus.FAILED)
         self.assertIn('callback stream did not finish', log)
+
+    def test_nonzero_exit_keeps_descendant_cleanup_but_removes_reaped_process(self):
+        status, _ = self.run_process_pipeline(nonzero_exit=True)
+        self.assertEqual(status, TaskStatus.FAILED)
+
+    def test_cancelled_job_keeps_descendant_cleanup_but_removes_reaped_process(self):
+        self.run_process_pipeline(cancelled=True)
+
+    def test_unconfirmed_join_keeps_owned_process_and_descendant_registrations(self):
+        status, log = self.run_process_pipeline(join_error=True)
+        self.assertEqual(status, TaskStatus.FAILED)
+        self.assertIn('join failed', log)
+
+    def test_failed_or_cancelled_job_does_not_forget_actual_live_descendant(self):
+        descendant = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])
+        try:
+            for flags in ({'child_error': True}, {'cancelled': True}, {'join_error': True}):
+                with self.subTest(flags=flags):
+                    self.run_process_pipeline(registered_pid=descendant.pid, **flags)
+                    self.assertIsNone(descendant.poll())
+        finally:
+            descendant.kill()
+            descendant.wait(timeout=10)
+
+    def test_real_child_completion_unregisters_only_its_job_after_finish_drain(self):
+        widget, _ = self.widget()
+        manager = ProcessManager()
+        atexit.unregister(manager._shutdown)
+        manager.add_pid(424243, name='other-job')
+        context = multiprocessing.get_context('spawn')
+        children = []
+        def process_factory(*, target, args):
+            process = context.Process(target=_successful_registration_producer, args=args)
+            children.append(process)
+            return process
+        try:
+            with patch('ui.home_interface.ProcessManager.instance', return_value=manager), \
+                 patch.object(manager, 'terminate_by_pid') as raw_signal, \
+                 patch('ui.home_interface.multiprocessing.Process', process_factory), \
+                 patch('backend.tools.subtitle_extractor_remote_call.multiprocessing.Queue', context.Queue), \
+                 patch.object(widget, 'run_subtitle_extractor_process',
+                              HomeInterface.run_subtitle_extractor_process.__get__(widget)):
+                widget.run_button_clicked()
+                self.pump(lambda: widget._active_job is None, timeout=25)
+                widget._next_task_timer.stop()
+                self.assertEqual(widget.task_list_component.get_task(0).status, TaskStatus.COMPLETED)
+                self.assertEqual(manager.processes, {'other-job': 424243})
+                self.assertEqual(len(children), 1)
+                self.assertEqual(children[0].exitcode, 0)
+                manager.remove_process('other-job')
+                manager.terminate_all()
+                raw_signal.assert_not_called()
+        finally:
+            manager.processes.clear()
+            for child in children:
+                if child.is_alive():
+                    child.kill()
+                child.join(timeout=10)
 
     def test_real_opencv_video_repeated_seek_complete_and_reload(self):
         video = str(Path(self.temp.name) / 'real preview.avi')
@@ -545,3 +665,118 @@ class RemoteCallbackDrainTests(unittest.TestCase):
         caller.stop()
         self.assertFalse(caller.thread.is_alive())
         self.assertFalse(caller.wait(0))
+
+
+class ProcessManagerOwnershipTests(unittest.TestCase):
+    def setUp(self):
+        self.manager = ProcessManager()
+        atexit.unregister(self.manager._shutdown)
+        self.context = multiprocessing.get_context('spawn')
+        self.children = []
+
+    def tearDown(self):
+        self.manager.processes.clear()
+        for child in self.children:
+            try:
+                if child.is_alive():
+                    child.kill()
+                if child.pid is not None:
+                    child.join(timeout=10)
+                child.close()
+            except ValueError:  # Already closed as part of a regression.
+                pass
+
+    def exited_child(self, code):
+        child = self.context.Process(target=sys.exit, args=(code,))
+        self.children.append(child)
+        child.start()
+        child.join(timeout=20)
+        self.assertFalse(child.is_alive())
+        self.assertEqual(child.exitcode, code)
+        return child
+
+    def test_real_joined_process_never_signals_reused_pid_of_unrelated_live_child(self):
+        victim = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])
+        try:
+            for code in (0, 3):
+                child = self.exited_child(code)
+                # Controlled PID reuse, backed by an actually joined process
+                # and an actually live unrelated child. No signal is sent to
+                # that victim even if the regression reappears.
+                with self.subTest(exitcode=code), \
+                     patch.object(type(child), 'pid', new_callable=PropertyMock,
+                                  return_value=victim.pid), \
+                     patch.object(child, 'terminate') as terminate, \
+                     patch.object(child, 'kill') as kill, \
+                     patch.object(self.manager, 'terminate_by_pid') as raw_signal:
+                    for synchronous in (False, True):
+                        self.manager.add_process(child)
+                        self.manager.terminate_all(synchronous=synchronous)
+                    terminate.assert_not_called()
+                    kill.assert_not_called()
+                    raw_signal.assert_not_called()
+                    self.assertIsNone(victim.poll())
+        finally:
+            victim.kill()
+            victim.wait(timeout=10)
+
+    def test_real_live_multiprocessing_child_is_reaped_without_raw_pid_fallback(self):
+        ready = self.context.Event()
+        child = self.context.Process(target=_ready_waiting_child, args=(ready,))
+        self.children.append(child)
+        child.start()
+        self.assertTrue(ready.wait(20))
+        self.assertTrue(child.is_alive())
+        with patch.object(child, 'kill', wraps=child.kill) as kill, \
+             patch.object(self.manager, 'terminate_by_pid') as raw_signal:
+            self.manager.add_process(child)
+            self.manager.terminate_all()
+            self.assertFalse(child.is_alive())
+            self.assertIsNotNone(child.exitcode)
+            # Normal SIGTERM/TerminateProcess exit is observed after join.
+            kill.assert_not_called()
+            raw_signal.assert_not_called()
+
+    def test_closed_and_unstarted_multiprocessing_handles_are_not_signalled(self):
+        child = self.context.Process(target=sys.exit)
+        self.children.append(child)
+        with patch.object(self.manager, 'terminate_by_pid') as raw_signal:
+            self.manager.terminate_by_process(child)
+            child.close()
+            self.manager.terminate_by_process(child)
+            raw_signal.assert_not_called()
+
+    def test_owned_handle_signal_failure_never_falls_back_to_numeric_pid(self):
+        from multiprocessing.process import BaseProcess
+        class UnavailableHandle(BaseProcess):
+            @property
+            def exitcode(self): return None
+            @property
+            def pid(self): return 424244
+            def terminate(self): raise OSError('handle unavailable')
+        with patch.object(self.manager, 'terminate_by_pid') as raw_signal:
+            self.manager.terminate_by_process(UnavailableHandle())
+            raw_signal.assert_not_called()
+
+    def test_owned_handle_kill_is_joined_without_numeric_fallback(self):
+        from multiprocessing.process import BaseProcess
+        class SlowHandle(BaseProcess):
+            result = None
+            calls = None
+            @property
+            def exitcode(self): return self.result
+            @property
+            def pid(self): return 424244
+            def terminate(self): self.calls.append('terminate')
+            def join(self, timeout):
+                self.calls.append(('join', timeout))
+                if 'kill' in self.calls:
+                    self.result = -9
+            def kill(self): self.calls.append('kill')
+        child = SlowHandle()
+        child.calls = []
+        with patch.object(self.manager, 'terminate_by_pid') as raw_signal:
+            self.manager.terminate_by_process(child)
+            self.assertEqual(child.calls, ['terminate', ('join', 3), 'kill', ('join', 3)])
+            self.assertEqual(child.exitcode, -9)
+            raw_signal.assert_not_called()

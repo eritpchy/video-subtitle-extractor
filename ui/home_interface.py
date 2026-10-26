@@ -3,6 +3,7 @@ import cv2
 import threading
 import multiprocessing
 import traceback
+import uuid
 from copy import deepcopy
 from dataclasses import dataclass, field
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout
@@ -26,10 +27,12 @@ class _ExtractionJob:
     video_path: str
     output_path: str
     options: dict
+    registry_token: str = field(default_factory=lambda: uuid.uuid4().hex)
     cancelled: threading.Event = field(default_factory=threading.Event)
     lock: object = field(default_factory=threading.Lock)
     process: object = None
     subprocess_pids: list = field(default_factory=list)
+    subprocess_registrations: list = field(default_factory=list)
     last_progress: int = 0
 
 
@@ -502,19 +505,30 @@ class HomeInterface(QWidget):
     def run_subtitle_extractor_process(self, job):
         """Worker-only process management; no preview or widget access."""
         caller = SubtitleExtractorRemoteCall()
+        manager = ProcessManager.instance()
+        child_failed = threading.Event()
+        process_id = None
+        joined = False
+        callbacks_drained = False
         caller.register_update_progress_callback(
             lambda *args: self._emit_worker_event(job, 'progress', args))
         caller.register_log_callback(lambda args: self._emit_worker_event(job, 'log', args))
-        caller.register_error_callback(lambda error: self._emit_worker_event(job, 'error', error))
+        def child_error(error):
+            child_failed.set()
+            self._emit_worker_event(job, 'error', error)
+
+        caller.register_error_callback(child_error)
 
         def manage_process(pid):
             with job.lock:
                 cancelled = job.cancelled.is_set()
                 if not cancelled:
-                    ProcessManager.instance().add_pid(pid)
+                    registration = manager.add_pid(
+                        pid, name=f"ExtractionJob:{job.registry_token}:Pid:{pid}")
+                    job.subprocess_registrations.append(registration)
                     job.subprocess_pids.append(pid)
             if cancelled:
-                ProcessManager.instance().terminate_by_pid(pid)
+                manager.terminate_by_pid(pid)
 
         caller.register_manage_process_callback(manage_process)
         process = multiprocessing.Process(
@@ -526,15 +540,34 @@ class HomeInterface(QWidget):
                     return None
                 process.start()
                 job.process = process
-                ProcessManager.instance().add_process(process)
+                process_id = manager.add_process(process)
             process.join()
+            joined = True
             # The child sends FINISH after its final ERROR/progress/logs. A
             # successful exit alone does not prove those messages were handled.
-            if process.exitcode == 0 and not job.cancelled.is_set() and not caller.wait(5):
-                raise RuntimeError("Extractor callback stream did not finish")
+            if process.exitcode == 0 and not job.cancelled.is_set():
+                callbacks_drained = caller.wait(5)
+                if not callbacks_drained:
+                    raise RuntimeError("Extractor callback stream did not finish")
             print(f"Process exited with code {process.exitcode}")
         finally:
             caller.stop()
+            with job.lock:
+                if joined and process.exitcode is not None:
+                    # The owned process is reaped even if its task failed.
+                    # Never retain that old PID for later window shutdown.
+                    if process_id is not None:
+                        manager.remove_process(process_id)
+                    job.process = None
+                    if (process.exitcode == 0 and callbacks_drained
+                            and not child_failed.is_set() and not job.cancelled.is_set()):
+                        # Only a normal, drained completion proves the child's
+                        # cleanup path ran. Aborted/failed jobs keep descendant
+                        # cleanup responsibility; never clear another job's IDs.
+                        for registration in job.subprocess_registrations:
+                            manager.remove_process(registration)
+                        job.subprocess_registrations.clear()
+                        job.subprocess_pids.clear()
         return process
 
     @Slot()
