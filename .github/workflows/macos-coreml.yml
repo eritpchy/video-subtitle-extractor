@@ -7,6 +7,10 @@ permissions:
   contents: read
   actions: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: macos-coreml-diagnostic-${{ github.ref }}
   cancel-in-progress: false
@@ -50,6 +54,7 @@ jobs:
           python -m pytest native/ocr/tests/test_ci_model_artifact.py
           native/ocr/tests/test_ci_coreml_compat.py native/ocr/tests/test_model_cache_identity.py
           native/ocr/tests/test_ci_coreml_workflow.py
+          native/ocr/tests/test_workflow_pipefail.py
           -q --junitxml=test-results/early-safety.xml
       - name: Read official metadata and exact previously successful model artifact (one attempt)
         env:
@@ -76,6 +81,7 @@ jobs:
       - name: Build exact production worker and pinned runtime
         id: native-build
         run: |
+          set -euo pipefail
           python native/ocr/build.py --platform macos --arch arm64 \
             --models build/coreml-verified-source/model-cache --output build/native-ocr \
             2>&1 | tee test-results/native-build.log
@@ -87,8 +93,14 @@ jobs:
         run: python scripts/install_videosubfinder.py --version 6.10.7
       - name: Execute four small/medium CoreML cases then eleven real compatibility recognizers
         run: |
+          set -euo pipefail
           python native/ocr/ci_coreml_compat.py --output test-results/coreml-compatibility \
             2>&1 | tee test-results/coreml-compatibility.log
+      - name: Independently require successful real compatibility evidence
+        run: >-
+          python native/ocr/ci_coreml_compat.py
+          --verify-report test-results/coreml-compatibility/report.json
+          --consumer-commit "${{ github.sha }}"
       - name: Preserve actual production binary/runtime and original failure evidence
         if: always()
         uses: actions/upload-artifact@v4

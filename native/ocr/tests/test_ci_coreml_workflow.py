@@ -27,6 +27,8 @@ def test_quick_mac_has_exact_source_and_no_conversion_or_publication():
         assert forbidden not in value
     assert 'ci_model_artifact.py' in value and '--source-job-id' in value
     assert 'ci_coreml_compat.py' in value
+    assert '--verify-report test-results/coreml-compatibility/report.json' in value
+    assert 'defaults:\n  run:\n    shell: bash' in value
     assert 'python native/ocr/build.py --platform macos --arch arm64' in value
 
 

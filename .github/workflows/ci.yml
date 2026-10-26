@@ -97,6 +97,7 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p test-results
           python scripts/diagnose_qt_linux.py 2>&1 | tee test-results/qt-linux-dependencies.log
       - name: Linux X11 GUI backend smoke
@@ -106,6 +107,7 @@ jobs:
           VSE_SMOKE_SCREENSHOT_DIR: test-results/gui-native
           QT_DEBUG_PLUGINS: '1'
         run: |
+          set -euo pipefail
           xvfb-run -a -s "-screen 0 1280x1024x24" -e test-results/xvfb.log \
             env QT_QPA_PLATFORM=xcb python gui.py --smoke-test 2>&1 | tee test-results/gui-native.log
       - name: Windows or macOS native GUI backend smoke

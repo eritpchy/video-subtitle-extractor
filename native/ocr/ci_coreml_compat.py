@@ -38,6 +38,47 @@ def validate_phase(rows, ids, worker_sha256, models, goldens, seen):
     return executed
 
 
+def verify_report(path, native, consumer_commit):
+    path, native = Path(path), Path(native).resolve(strict=True)
+    if not path.is_file() or path.stat().st_size > 16 * 1024 * 1024:
+        raise ValueError('Missing or oversized compatibility report')
+    report = json.loads(path.read_bytes())
+    required = {'schema': 1, 'scope': 'source-early-coreml-compatibility-only',
+                'result': 'passed', 'consumer_commit': consumer_commit,
+                'requested_provider': 'coreml', 'network_attempts': [],
+                'gpu_inference_verified': False, 'internal_coreml_precision_verified': False,
+                'timing_is_benchmark': False, 'final_package_accepted': False,
+                'production_modules_unchanged': True}
+    for key, expected in required.items():
+        if report.get(key) != expected or type(report.get(key)) is not type(expected):
+            raise ValueError('Compatibility evidence did not pass: ' + key)
+    verified = gate.verify_native_model_assets(native)
+    if report.get('model_files') != verified['files']:
+        raise ValueError('Compatibility model inventory differs from actual fixed bytes')
+    for key, name in (('worker_sha256', 'native-ocr'), ('runtime_sha256', 'libonnxruntime.1.dylib')):
+        if report.get(key) != gate.frozen.sha256(native / name):
+            raise ValueError('Compatibility executable/runtime identity mismatch')
+    modules = {str((ROOT / name).resolve()): gate.frozen.sha256(ROOT / name) for name in gate.PRODUCTION_FILES}
+    if report.get('production_modules') != modules:
+        raise ValueError('Compatibility production modules changed or are missing')
+    fixtures = ROOT / 'native/ocr/tests/evidence'
+    cases = gate.frozen.load_cases(fixtures)
+    goldens = gate._raw_goldens({'native_golden_utf8': (fixtures.parent / 'goldens/smoke.json').read_text(encoding='utf-8')})
+    models = {name: value['sha256'] for name, value in verified['models'].items()}
+    seen, covered = set(), set()
+    for phase, ids in (('early', EARLY_IDS), ('compatibility', COMPAT_IDS)):
+        rows = report.get(phase)
+        if not isinstance(rows, list) or len(rows) != len(ids):
+            raise ValueError('Incomplete compatibility phase')
+        for row, expected in zip(rows, select_cases(cases, ids)):
+            if any(row.get(key) != value for key, value in expected.items()):
+                raise ValueError('Compatibility case differs from fixed input/reference')
+        covered |= validate_phase(rows, ids, report['worker_sha256'], models, goldens, seen)
+    if covered != gate.frozen.ALL_MODELS or report.get('covered_models') != sorted(covered):
+        raise ValueError('Real successful compatibility coverage is incomplete')
+    return report
+
+
 def run(output):
     output = Path(output).resolve()
     protected = [ROOT / 'native/ocr/tests']
@@ -110,8 +151,17 @@ def run(output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, required=True)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--output', type=Path)
+    group.add_argument('--verify-report', type=Path)
+    parser.add_argument('--consumer-commit')
     args = parser.parse_args()
+    if args.verify_report is not None:
+        if not args.consumer_commit:
+            parser.error('--verify-report requires --consumer-commit')
+        verify_report(args.verify_report, os.environ['VSE_NATIVE_OCR_ROOT'], args.consumer_commit)
+        print('Independent compatibility evidence validation passed; not GPU or final package acceptance.')
+        return 0
     report = run(args.output)
     print(json.dumps({key: report.get(key) for key in ('result', 'covered_models', 'error')}, ensure_ascii=True))
     return 0 if report['result'] == 'passed' else 1
