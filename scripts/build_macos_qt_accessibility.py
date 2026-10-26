@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import importlib.metadata
 import json
 import os
 from pathlib import Path
@@ -181,21 +182,46 @@ def configure_command(source: Path, install: Path) -> list[str]:
             "-DFEATURE_accessibility=ON"]
 
 
+def build_tool_identity(name: str) -> dict:
+    """Bind the PATH command to the hash-pinned wheel installed by this Python."""
+    executable = shutil.which(name)
+    selected = Path(executable).resolve() if executable else None
+    try:
+        distribution = importlib.metadata.distribution(name)
+    except importlib.metadata.PackageNotFoundError:
+        return {"package_version": None, "executable": executable, "owned_by_package": False}
+    owned = selected is not None and any(
+        Path(distribution.locate_file(file)).resolve() == selected
+        for file in distribution.files or ()
+    )
+    return {"package_version": distribution.version, "executable": executable,
+            "resolved_executable": str(selected) if selected else None,
+            "owned_by_package": owned,
+            "sha256": sha256(selected) if selected and selected.is_file() else None}
+
+
 def check_toolchain(settings: dict, reports: Path) -> dict:
     observed = {"xcode": run(["xcodebuild", "-version"]).strip(),
                 "sdk": run(["xcrun", "--sdk", "macosx", "--show-sdk-version"]).strip(),
                 "clang": run(["xcrun", "clang++", "--version"]).strip(),
                 "cmake": run(["cmake", "--version"]).strip(),
                 "ninja": run(["ninja", "--version"]).strip(),
-                "os": run(["sw_vers"]).strip(), "machine": platform.machine()}
+                "os": run(["sw_vers"]).strip(), "machine": platform.machine(),
+                "python": sys.executable,
+                "build_tools": {name: build_tool_identity(name) for name in ("cmake", "ninja")}}
     write_json(reports / "toolchain.json", observed)
     expected_xcode = f"Xcode {settings['xcode_version']}\nBuild version {settings['xcode_build']}"
     if observed["xcode"] != expected_xcode or observed["sdk"] != settings["sdk_version"]:
         raise RuntimeError("Pinned Xcode/SDK is not installed/selected; do not silently use another toolchain")
+    for name, identity in observed["build_tools"].items():
+        if identity["package_version"] != settings[name] or not identity["owned_by_package"]:
+            raise RuntimeError(f"{name} PATH command does not belong to the pinned Python build package: {identity}")
     if not observed["cmake"].startswith("cmake version " + settings["cmake"] + "\n"):
         raise RuntimeError("CMake version differs from pinned build tools")
-    if observed["ninja"] != settings["ninja"]:
-        raise RuntimeError("Ninja version differs from pinned build tools")
+    # The distribution's PEP 440 version is not the embedded Kitware binary's
+    # version. Pin both exactly; never accept arbitrary suffixes/prefix matches.
+    if observed["ninja"] != settings["ninja_binary"]:
+        raise RuntimeError(f"Ninja binary version differs from pin: expected {settings['ninja_binary']!r}, got {observed['ninja']!r}")
     return observed
 
 

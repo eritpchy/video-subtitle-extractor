@@ -28,7 +28,8 @@
     "deployment_target": "14.4",
     "arch": "arm64",
     "cmake": "4.1.2",
-    "ninja": "1.13.0"
+    "ninja": "1.13.0",
+    "ninja_binary": "1.13.0.git.kitware.jobserver-pipe-1"
   },
   "patched_sources": {
     "src/plugins/platforms/cocoa/qcocoaaccessibilityelement.h": "99185a8e33a3b9838e1e24c71b48e52125d1d4090c8d0ea98dcf9fd58163f301",

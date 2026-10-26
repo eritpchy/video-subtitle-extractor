@@ -4,12 +4,35 @@ Status: **diagnostic candidate only; no production dependency change, package
 replacement, Qt downgrade, tag update or release publication.** Local cloud
 tests below are not native macOS acceptance.
 
-Authoring verification: **46 passed, 2 native-only skips** for the probe,
+Authoring verification: **54 passed, 2 native-only skips** for the probe,
 build/evidence guards, runtime dependency resolver and Qt runtime tests on Linux
 with Qt 6.12.0. The full 51,220,268-byte QtBase source archive and exact PS6 patch
 were downloaded, SHA256-verified and applied successfully; both modified Cocoa
-source hashes match the committed pins. macOS compilation and runtime gates
-remain **not run** until this isolated CI workflow executes.
+source hashes match the committed pins. macOS compilation and candidate runtime
+gates remain **not run**: the first server attempt stopped at the build-tool
+version guard, before source configuration.
+
+### First server evidence: run 40254522060, source 315b10e
+
+On hosted macOS 15.7.9 (24G830), arm64, both original-wheel Cocoa probes
+(`selected-row` and `model-churn`) reported AX active and failed with
+`table-cache-loss: live table interface was deleted` at the first selected-row
+inspection. Both exited 1 with the explicit accessibility invariant, not a
+SIGSEGV; the checked original plugin SHA256 matches the incident wheel. This is
+a reproduced in-process native table-lifetime invariant, **not** a reproduction
+of the user's macOS 26 external AX hierarchy SIGSEGV. Candidate comparison and
+authorized final-app user-Mac acceptance are still required.
+
+The server's `toolchain.json` matched Xcode 26.0.1/17A400, SDK 26.0 and CMake
+4.1.2, but Ninja reported `1.13.0.git.kitware.jobserver-pipe-1`. The initial guard
+incorrectly compared this binary version with the package version `1.13.0`.
+The correction below pins both separately without changing any source, patch,
+wheel, package or tool version. The old report did not record the selected
+Ninja absolute path, so it does not establish that PATH selected a wrong tool.
+
+Evidence ZIP SHA256:
+`3361c994f1ca9a3e61fecb2f407f85f836135b13dc1d3aa70f953b5b8339e833`
+(512,876 bytes; toolchain and both full stock probe logs retained).
 
 ## Exact incident and symbol identity
 
@@ -121,7 +144,17 @@ desktops and self-hosted executors.
 1. Pin official QtBase 6.12.0 source archive, its published SHA256, exact Gerrit
    PS6 revision and decoded patch SHA256. Reject changes to either input.
 2. Pin Xcode 26.0.1 build 17A400, SDK 26.0, macOS minimum 14.4, CMake 4.1.2 and
-   Ninja 1.13.0. The source wheel's own Mach-O records justify SDK/minimum-OS
+   Ninja Python package 1.13.0 and its binary's exact
+   `1.13.0.git.kitware.jobserver-pipe-1` version separately. The
+   [publisher's distribution](https://pypi.org/project/ninja/1.13.0/) bundles a
+   Kitware fork, not a binary whose version is simply the package version.
+   The locked Mac wheel (`fa2a8bfc62e31b08f83127d1613d10821775a0eb334197154c4d6067b7068ff1`)
+   was downloaded and hash-verified; both Mach-O slices contain the exact
+   `.git.` version above, and executing the locked Linux wheel agrees. Do not
+   substitute the publisher README's source-tag `.gd74ef.` for the built binary
+   version. Record package versions, PATH-resolved executable paths and SHA256;
+   reject commands not owned by the installed pinned package as well as version
+   mismatches. The source wheel's own Mach-O records justify SDK/minimum-OS
    choices. If the hosted image lacks this toolchain, **fail**, do not silently
    select another one.
 3. Use normal upstream QtBase configuration, accessibility **ON**, then build

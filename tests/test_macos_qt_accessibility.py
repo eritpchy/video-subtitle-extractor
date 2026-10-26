@@ -7,6 +7,7 @@ from pathlib import Path
 import signal
 import struct
 import tarfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -51,6 +52,52 @@ def test_non_ci_and_user_desktops_cannot_build_or_stage(monkeypatch):
         module.require_hosted_macos()
     monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
     module.require_hosted_macos()
+
+
+def test_build_tool_identity_rejects_an_unrelated_path_command(tmp_path, monkeypatch):
+    packaged = tmp_path / "pinned" / "ninja"
+    packaged.parent.mkdir()
+    packaged.write_bytes(b"pinned binary")
+    other = tmp_path / "other" / "ninja"
+    other.parent.mkdir()
+    other.write_bytes(b"different binary")
+    distribution = SimpleNamespace(version="1.13.0", files=["bin/ninja"], locate_file=lambda _: packaged)
+    monkeypatch.setattr(module.importlib.metadata, "distribution", lambda _: distribution)
+    monkeypatch.setattr(module.shutil, "which", lambda _: str(packaged))
+    identity = module.build_tool_identity("ninja")
+    assert identity["package_version"] == "1.13.0" and identity["owned_by_package"]
+    assert identity["sha256"] == hashlib.sha256(packaged.read_bytes()).hexdigest()
+    monkeypatch.setattr(module.shutil, "which", lambda _: str(other))
+    assert not module.build_tool_identity("ninja")["owned_by_package"]
+
+
+@pytest.mark.parametrize("binary_version,package_version,owned,error", [
+    ("1.13.0.git.kitware.jobserver-pipe-1", "1.13.0", True, None),
+    ("1.13.0", "1.13.0", True, "Ninja binary version"),
+    ("1.13.0.gd74ef.kitware.jobserver-pipe-1", "1.13.0", True, "Ninja binary version"),
+    ("1.13.0.git.kitware.jobserver-pipe-2", "1.13.0", True, "Ninja binary version"),
+    ("1.13.2", "1.13.2", True, "pinned Python build package"),
+    ("1.13.0.git.kitware.jobserver-pipe-1", "1.13.0", False, "pinned Python build package"),
+])
+def test_ninja_package_and_binary_versions_are_separately_exact(
+        tmp_path, monkeypatch, binary_version, package_version, owned, error):
+    settings = module.pins()["toolchain"]
+    outputs = {"xcodebuild": "Xcode 26.0.1\nBuild version 17A400\n", "xcrun": "26.0\n",
+               "cmake": "cmake version 4.1.2\n\nCMake suite", "ninja": binary_version + "\n",
+               "sw_vers": "ProductVersion: 15"}
+    monkeypatch.setattr(module, "run", lambda command: outputs[command[0]])
+    monkeypatch.setattr(module, "build_tool_identity", lambda name: {
+        "package_version": package_version if name == "ninja" else "4.1.2",
+        "owned_by_package": owned if name == "ninja" else True,
+        "executable": "/pinned/bin/" + name})
+    if error:
+        with pytest.raises(RuntimeError, match=error):
+            module.check_toolchain(settings, tmp_path)
+    else:
+        module.check_toolchain(settings, tmp_path)
+    evidence = json.loads((tmp_path / "toolchain.json").read_text())
+    assert evidence["ninja"] == binary_version
+    assert evidence["build_tools"]["ninja"]["package_version"] == package_version
 
 
 def test_hash_mismatch_never_materializes_download(tmp_path, monkeypatch):
