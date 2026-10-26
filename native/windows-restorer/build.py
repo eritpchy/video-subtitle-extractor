@@ -10,6 +10,7 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -46,6 +47,102 @@ def tool_record(path: Path) -> dict:
     return {'path': str(path.resolve(strict=True)), 'sha256': digest(path), 'bytes': path.stat().st_size}
 
 
+def assert_pe_dependency_policy(executable: Path) -> dict:
+    """Read the security field from PE bytes, never localized dumpbin prose.
+
+    Self-contained stdlib code keeps the fixed-header source rebuild closed.
+    PE32+ data-directory index 10 is the Load Configuration directory. In
+    IMAGE_LOAD_CONFIG_DIRECTORY64, DependentLoadFlags is the WORD at 0x4e.
+    https://learn.microsoft.com/en-us/windows/win32/debug/pe-format
+    https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-image_load_config_directory64
+    https://learn.microsoft.com/en-us/cpp/build/reference/dependentloadflag
+    """
+    if executable.is_symlink() or not executable.is_file():
+        raise RuntimeError('Missing or linked PE executable')
+    before = executable.stat()
+    with executable.open('rb') as stream:
+        opened = os.fstat(stream.fileno())
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+                opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns):
+            raise RuntimeError('PE executable changed while opening')
+        size = opened.st_size
+
+        def read(offset: int, length: int) -> bytes:
+            if offset < 0 or length < 0 or offset > size or length > size - offset:
+                raise RuntimeError('Truncated or out-of-bounds PE structure')
+            stream.seek(offset)
+            data = stream.read(length)
+            if len(data) != length:
+                raise RuntimeError('Truncated PE structure')
+            return data
+
+        dos = read(0, 64)
+        pe = struct.unpack_from('<I', dos, 0x3c)[0]
+        if dos[:2] != b'MZ' or pe < 64 or read(pe, 4) != b'PE\0\0':
+            raise RuntimeError('Invalid DOS/PE executable signature')
+        coff = read(pe + 4, 20)
+        machine, section_count = struct.unpack_from('<HH', coff)
+        optional_size, characteristics = struct.unpack_from('<HH', coff, 16)
+        if machine != 0x8664 or not characteristics & 0x0002 or characteristics & (0x0100 | 0x2000):
+            raise RuntimeError('Expected an AMD64 x64 PE executable, not a DLL or 32-bit image')
+        if not 1 <= section_count <= 96 or optional_size < 112 + 11 * 8:
+            raise RuntimeError('Missing or invalid PE optional/section headers')
+        optional_offset = pe + 24
+        optional = read(optional_offset, optional_size)
+        if struct.unpack_from('<H', optional)[0] != 0x20b:
+            raise RuntimeError('Expected PE32+ optional header')
+        directory_count = struct.unpack_from('<I', optional, 108)[0]
+        if not 11 <= directory_count <= (optional_size - 112) // 8:
+            raise RuntimeError('Missing or out-of-bounds PE LoadConfig data directory')
+        image_size, headers_size = struct.unpack_from('<II', optional, 56)
+        section_table = optional_offset + optional_size
+        if not section_table + section_count * 40 <= headers_size <= size or image_size < headers_size:
+            raise RuntimeError('Invalid PE image/header size')
+        rva, directory_size = struct.unpack_from('<II', optional, 112 + 10 * 8)
+        if not rva or directory_size < 80 or rva + directory_size > min(image_size, 0x100000000):
+            raise RuntimeError('Missing, undersized or out-of-image PE LoadConfig directory')
+        sections, virtual_ranges, raw_ranges = [], [], []
+        for index in range(section_count):
+            header = read(section_table + index * 40, 40)
+            virtual_size, address, raw_size, raw = struct.unpack_from('<IIII', header, 8)
+            span = max(virtual_size, raw_size)
+            if span:
+                if address < headers_size or address + span > min(image_size, 0x100000000):
+                    raise RuntimeError('Invalid PE section virtual range')
+                virtual_ranges.append((address, address + span))
+            if raw_size:
+                if raw < headers_size or raw > size or raw_size > size - raw:
+                    raise RuntimeError('Invalid PE section raw-file range')
+                raw_ranges.append((raw, raw + raw_size))
+            sections.append((address, span, raw, raw_size))
+        for ranges in (virtual_ranges, raw_ranges):
+            ranges.sort()
+            if any(left[1] > right[0] for left, right in zip(ranges, ranges[1:])):
+                raise RuntimeError('Ambiguous overlapping PE sections')
+        matches = [(raw + rva - address, raw_size - (rva - address))
+                   for address, span, raw, raw_size in sections
+                   if address <= rva < address + span and rva + directory_size <= address + span]
+        if len(matches) != 1 or matches[0][1] < directory_size:
+            raise RuntimeError('LoadConfig RVA does not map uniquely to file-backed PE bytes')
+        offset, _ = matches[0]
+        configuration = read(offset, 80)
+        structure_size = struct.unpack_from('<I', configuration)[0]
+        if not 80 <= structure_size <= directory_size:
+            raise RuntimeError('LoadConfig structure Size does not contain DependentLoadFlags')
+        flags = struct.unpack_from('<H', configuration, 0x4e)[0]
+        if flags != 0x0800:
+            raise RuntimeError(f'System32-only static dependency load flag not established in PE: 0x{flags:04x}')
+        after = executable.stat()
+        if executable.is_symlink() or (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns) != (
+                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+            raise RuntimeError('PE executable changed during policy verification')
+    return {'source': 'PE binary LoadConfig, not dumpbin text', 'machine': machine,
+            'optional_header_magic': 0x20b, 'data_directory_index': 10,
+            'load_config_rva': rva, 'load_config_file_offset': offset,
+            'load_config_directory_size': directory_size, 'load_config_structure_size': structure_size,
+            'dependent_load_flags_offset': 0x4e, 'dependent_load_flags': flags}
+
+
 def compile_fixed(source_directory: Path, header_directory: Path, output: Path) -> dict:
     """Compile a fixed verified header; no transport imports/network involved."""
     if os.name != 'nt' or platform.machine().lower() not in ('amd64', 'x86_64'): raise RuntimeError('Native Windows x64 Server build required')
@@ -67,10 +164,9 @@ def compile_fixed(source_directory: Path, header_directory: Path, output: Path) 
     (output / 'imports.txt').write_text(dependencies, encoding='utf-8')
     header_info = subprocess.run([dumpbin, '/HEADERS', str(executable)], check=True, capture_output=True, text=True, env=process_environment).stdout
     (output / 'pe-headers.txt').write_text(header_info, encoding='utf-8')
-    if '8664 machine (x64)' not in header_info.lower(): raise RuntimeError('Expected x64 executable')
     loadconfig = subprocess.run([dumpbin, '/LOADCONFIG', str(executable)], check=True, capture_output=True, text=True, env=process_environment).stdout
     (output / 'load-config.txt').write_text(loadconfig, encoding='utf-8')
-    if not re.search(r'^\s*0*800\s+Dependent Load Flags', loadconfig, re.MULTILINE | re.IGNORECASE): raise RuntimeError('System32-only static dependency load flag not established')
+    pe_policy = assert_pe_dependency_policy(executable)
     actual = json.loads(dependencies_path.read_text(encoding='utf-8-sig'))
     includes = actual['Data']['Includes']
     if not includes or any(not isinstance(name, str) for name in includes): raise RuntimeError('Actual compiler header dependencies unavailable')
@@ -86,7 +182,7 @@ def compile_fixed(source_directory: Path, header_directory: Path, output: Path) 
                  'diagnostic_language': '1033', 'compiler_bv_and_link_log': built.stdout, 'actual_headers': include_records, 'actual_libraries': library_records,
                  'actual_sdk_headers': sdk_headers, 'environment_labels_only': {name: os.environ.get(name) for name in ('VCToolsVersion', 'WindowsSDKVersion', 'WindowsSdkDir')},
                  'python': {'version': sys.version, 'executable': tool_record(Path(sys.executable))}}
-    return {'command': command, 'toolchain': toolchain, 'imports': imports,
+    return {'command': command, 'toolchain': toolchain, 'imports': imports, 'pe_dependency_policy': pe_policy,
             'exe_sha256': digest(executable), 'exe_bytes': executable.stat().st_size,
             'bit_identical_rebuild_verified': False}
 

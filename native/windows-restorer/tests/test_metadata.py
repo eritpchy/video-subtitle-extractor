@@ -4,12 +4,16 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parents[1]
 ROOT = HERE.parents[1]
@@ -110,6 +114,169 @@ class MetadataTests(unittest.TestCase):
             self.assertFalse(other.exists())
         finally:
             case.doCleanups()
+
+
+def synthetic_x64_pe(flags=0x800):
+    """Only PE structure bytes for parser tests, not a runnable Windows image."""
+    data = bytearray(0x800)
+    data[:2] = b'MZ'
+    struct.pack_into('<I', data, 0x3c, 0x80)
+    data[0x80:0x84] = b'PE\0\0'
+    struct.pack_into('<HHIIIHH', data, 0x84, 0x8664, 1, 0, 0, 0, 0xf0, 0x22)
+    optional = 0x98
+    struct.pack_into('<H', data, optional, 0x20b)
+    struct.pack_into('<II', data, optional + 32, 0x1000, 0x200)
+    struct.pack_into('<II', data, optional + 56, 0x2000, 0x400)
+    struct.pack_into('<I', data, optional + 108, 16)
+    struct.pack_into('<II', data, optional + 112 + 10 * 8, 0x1100, 0x140)
+    section = optional + 0xf0
+    data[section:section + 8] = b'.rdata\0\0'
+    struct.pack_into('<IIII', data, section + 8, 0x400, 0x1000, 0x400, 0x400)
+    struct.pack_into('<I', data, 0x500, 0x140)
+    # Distinguish the WORD at offset 78 from its neighbouring CSDVersion and
+    # EditList fields, so an off-by-two parser cannot accidentally pass.
+    struct.pack_into('<HHQ', data, 0x500 + 76, 0x1234, flags, 0x0102030405060708)
+    return data
+
+
+class PeDependencyPolicyTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='restorer PE test ')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.executable = self.root / 'restore.exe'
+
+    def inspect(self, data):
+        self.executable.write_bytes(data)
+        return builder.assert_pe_dependency_policy(self.executable)
+
+    def test_binary_x64_loadconfig_field_and_rva_to_raw_mapping(self):
+        report = self.inspect(synthetic_x64_pe())
+        self.assertEqual(report['machine'], 0x8664)
+        self.assertEqual(report['optional_header_magic'], 0x20b)
+        self.assertEqual(report['load_config_rva'], 0x1100)
+        self.assertEqual(report['load_config_file_offset'], 0x500)
+        self.assertEqual(report['load_config_directory_size'], 0x140)
+        self.assertEqual(report['load_config_structure_size'], 0x140)
+        self.assertEqual(report['dependent_load_flags_offset'], 78)
+        self.assertEqual(report['dependent_load_flags'], 0x800)
+
+    def test_flag_must_equal_system32_only_not_merely_contain_its_bit(self):
+        for flags in (0, 0x8, 0x80, 0x100, 0x900, 0x1800, 0xffff):
+            with self.subTest(flags=flags), self.assertRaisesRegex(RuntimeError, 'not established in PE'):
+                self.inspect(synthetic_x64_pe(flags))
+
+    def test_missing_loadconfig_directory_or_old_structure_fails(self):
+        for offset, fmt, value in ((0x98 + 108, '<I', 10),
+                                   (0x98 + 192, '<I', 0), (0x98 + 196, '<I', 0),
+                                   (0x98 + 196, '<I', 79),
+                                   (0x500, '<I', 0), (0x500, '<I', 78),
+                                   (0x500, '<I', 0x141)):
+            data = synthetic_x64_pe()
+            struct.pack_into(fmt, data, offset, value)
+            with self.subTest(offset=offset, value=value), self.assertRaises(RuntimeError):
+                self.inspect(data)
+
+    def test_wrong_architecture_optional_magic_dll_or_non_executable_fails(self):
+        for offset, value in ((0x84, 0x14c), (0x84, 0xaa64), (0x84, 0xa641),
+                              (0x98, 0x10b), (0x98, 0),
+                              (0x96, 0x2022), (0x96, 0x20), (0x96, 0x122)):
+            data = synthetic_x64_pe()
+            struct.pack_into('<H', data, offset, value)
+            with self.subTest(offset=offset, value=value), self.assertRaises(RuntimeError):
+                self.inspect(data)
+
+    def test_bad_signatures_and_truncated_headers_fail(self):
+        complete = synthetic_x64_pe()
+        cases = [complete[:length] for length in (0, 63, 0x83, 0x97, 0x120, 0x19f, 0x54f, 0x7ff)]
+        for offset, value in ((0, b'NO'), (0x80, b'PX\0\0')):
+            data = synthetic_x64_pe(); data[offset:offset + len(value)] = value; cases.append(data)
+        data = synthetic_x64_pe(); struct.pack_into('<I', data, 0x3c, 0xfffffff0); cases.append(data)
+        data = synthetic_x64_pe(); struct.pack_into('<I', data, 0x3c, 0x20); cases.append(data)
+        for index, data in enumerate(cases):
+            with self.subTest(case=index), self.assertRaises(RuntimeError):
+                self.inspect(data)
+
+    def test_bad_optional_directory_and_section_bounds_fail(self):
+        for offset, fmt, value in ((0x86, '<H', 0), (0x86, '<H', 97),
+                                   (0x94, '<H', 199), (0x98 + 108, '<I', 17),
+                                   (0x98 + 60, '<I', 0x190), (0x98 + 60, '<I', 0x1000),
+                                   (0x98 + 56, '<I', 0x300),
+                                   (0x98 + 192, '<I', 0xfffffff0),
+                                   (0x188 + 20, '<I', 0x300),
+                                   (0x188 + 20, '<I', 0x700),
+                                   (0x188 + 12, '<I', 0x100)):
+            data = synthetic_x64_pe()
+            struct.pack_into(fmt, data, offset, value)
+            with self.subTest(offset=offset, value=value), self.assertRaises(RuntimeError):
+                self.inspect(data)
+
+    def test_unmapped_cross_section_or_zero_fill_loadconfig_is_rejected(self):
+        cases = []
+        for rva in (0x200, 0x1800, 0x13f0):
+            data = synthetic_x64_pe(); struct.pack_into('<I', data, 0x98 + 192, rva); cases.append(data)
+        data = synthetic_x64_pe()
+        struct.pack_into('<I', data, 0x188 + 8, 0x800)  # larger virtual zero-fill tail
+        struct.pack_into('<I', data, 0x98 + 192, 0x1500)
+        cases.append(data)
+        for index, data in enumerate(cases):
+            with self.subTest(case=index), self.assertRaisesRegex(RuntimeError, 'file-backed'):
+                self.inspect(data)
+
+    def test_overlapping_section_rva_or_raw_aliases_are_rejected(self):
+        for address, raw in ((0x1000, 0x800), (0x2000, 0x400)):
+            data = synthetic_x64_pe() + bytes(0x400)
+            struct.pack_into('<H', data, 0x86, 2)
+            struct.pack_into('<I', data, 0x98 + 56, 0x3000)
+            struct.pack_into('<IIII', data, 0x188 + 40 + 8, 0x400, address, 0x400, raw)
+            with self.subTest(address=address, raw=raw), self.assertRaisesRegex(RuntimeError, 'overlapping'):
+                self.inspect(data)
+
+    def test_text_lookalike_cannot_replace_the_binary_field(self):
+        data = synthetic_x64_pe(0) + b'\n0800 Dependent Load Flag\n0800 Dependent Load Flags\n'
+        with self.assertRaisesRegex(RuntimeError, 'not established in PE'):
+            self.inspect(data)
+
+    def fake_compile(self, loadconfig_text, *, flags=0x800):
+        tools = self.root / 'tools'; tools.mkdir(exist_ok=True)
+        for name in ('cl.exe', 'link.exe', 'dumpbin.exe'):
+            (tools / name).write_bytes(b'unit tool provenance, not executable')
+        include = self.root / 'Windows Kits/10/Include/10.0.26100.0/um/windows.h'
+        include.parent.mkdir(parents=True, exist_ok=True); include.write_text('// synthetic SDK provenance')
+        library = self.root / 'libcmt.lib'; library.write_bytes(b'unit library provenance')
+        output = self.root / 'output'; output.mkdir(exist_ok=True)
+
+        def run(command, **kwargs):
+            if command[0] == str(tools / 'cl.exe'):
+                (output / 'restore.exe').write_bytes(synthetic_x64_pe(flags))
+                (output / 'source-dependencies.json').write_text(json.dumps({'Data': {'Includes': [str(include)]}}))
+                return subprocess.CompletedProcess(command, 0, stdout=f'  Searching {library}:\n')
+            text = {'/DEPENDENTS': '    KERNEL32.dll\n    BCRYPT.dll\n',
+                    '/HEADERS': 'localized diagnostics; architecture checked from bytes instead',
+                    '/LOADCONFIG': loadconfig_text}[command[1]]
+            return subprocess.CompletedProcess(command, 0, stdout=text)
+
+        with patch.object(builder, 'os', SimpleNamespace(name='nt', environ={}, fstat=os.fstat)), \
+                patch.object(builder.platform, 'machine', return_value='AMD64'), \
+                patch.object(builder.shutil, 'which', side_effect=lambda name: str(tools / name)), \
+                patch.object(builder.subprocess, 'run', side_effect=run):
+            return builder.compile_fixed(self.root, self.root, output)
+
+    def test_compile_gate_ignores_singular_plural_and_localized_dumpbin_prose(self):
+        for text in ('                0800 Dependent Load Flag\n',
+                     '                0800 Dependent Load Flags\n',
+                     'localized opaque diagnostic text\n', '0000 misleading diagnostic only\n'):
+            with self.subTest(text=text):
+                report = self.fake_compile(text)
+                self.assertEqual(report['pe_dependency_policy']['dependent_load_flags'], 0x800)
+                self.assertEqual((self.root / 'output/load-config.txt').read_text(), text)
+                self.assertTrue((self.root / 'output/pe-headers.txt').is_file())
+                self.assertTrue((self.root / 'output/imports.txt').is_file())
+
+    def test_compile_gate_rejects_bad_binary_even_with_passing_dumpbin_text(self):
+        with self.assertRaisesRegex(RuntimeError, 'not established in PE'):
+            self.fake_compile('0800 Dependent Load Flags\n', flags=0x1800)
+        self.assertTrue((self.root / 'output/load-config.txt').is_file())
 
 
 if __name__ == '__main__': unittest.main()
