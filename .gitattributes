@@ -10,3 +10,10 @@ native/ocr/tests/evidence/legacy/pipeline-comparison.json -text
 native/ocr/tests/evidence/missing/conversion-manifest.json -text
 native/ocr/tests/evidence/missing/pipeline-comparison.json -text
 native/ocr/tests/evidence/detection/direct-standalone-detection-baseline.json -text
+
+# Exact conversion input bytes must survive Windows consumer checkouts too.
+native/ocr/prepare_models.py -text
+native/ocr/requirements-model-build.txt -text
+native/ocr/model_assets.py -text
+native/ocr/verify_model_cache.py -text
+native/ocr/model_cache_identity.py -text

@@ -40,13 +40,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Compute conversion-only identity (producer Python, not app commit)
+        id: model-inputs
+        run: python -S native/ocr/model_cache_identity.py key --github-output "$GITHUB_OUTPUT"
       - name: Restore converted models by reviewed inputs (never by commit)
         id: model-cache
         uses: actions/cache/restore@v4
         with:
           path: build/native-models
           # No restore-keys: stale conversion inputs must never skip conversion.
-          key: native-ocr-fp32-v1-${{ runner.os }}-${{ runner.arch }}-py312-${{ hashFiles('native/ocr/model-source-pins.json', 'native/ocr/prepare_models.py', 'native/ocr/requirements-model-build.txt', 'native/ocr/verify_model_cache.py', 'native/ocr/build.py', 'native/ocr/fetch_sources.py', 'native/ocr/fetch_ort.py', 'native/ocr/build_opencv.py') }}
+          key: ${{ steps.model-inputs.outputs.key }}
       - name: Install explicitly pinned conversion tools (build side only)
         if: steps.model-cache.outputs.cache-hit != 'true'
         run: python -m pip install -r native/ocr/requirements-model-build.txt
@@ -56,9 +59,14 @@ jobs:
           PIP_NO_INDEX: '1'
           PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: 'True'
         run: python native/ocr/prepare_models.py --output build/native-models --cache build/model-cache
+      - name: Record actual fresh-conversion producer (never rewrite cache-hit origin)
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: python native/ocr/model_cache_identity.py record build/native-models
+      - name: Check restored or fresh producer input key
+        run: python -S native/ocr/model_cache_identity.py check build/native-models --expected-key "${{ steps.model-inputs.outputs.key }}"
       - name: Independently verify all 15 model/config bytes against committed pins
         # Unconditional on cache-hit; -S proves this gate needs no Paddle/site packages.
-        run: python -S native/ocr/verify_model_cache.py build/native-models
+        run: python -S native/ocr/verify_model_cache.py build/native-models --require-provenance
       - name: Cache only independently verified converted models
         if: steps.model-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -66,11 +74,25 @@ jobs:
           path: build/native-models
           key: ${{ steps.model-cache.outputs.cache-primary-key }}
       - uses: actions/upload-artifact@v4
+        id: model-artifact
         with:
+          # This name identifies the consumer run, not the original conversion.
           name: native-ocr-fp32-models-${{ github.sha }}
           path: build/native-models/
           if-no-files-found: error
           compression-level: 0
+          retention-days: 7
+      - name: Record actual upload identity separately from immutable producer bytes
+        run: >-
+          python -S native/ocr/model_cache_identity.py receipt build/native-models
+          --artifact-id "${{ steps.model-artifact.outputs.artifact-id }}"
+          --artifact-digest "${{ steps.model-artifact.outputs.artifact-digest }}"
+          --output build/native-model-upload-receipt.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-ocr-model-upload-receipt-${{ github.sha }}
+          path: build/native-model-upload-receipt.json
+          if-no-files-found: error
           retention-days: 7
 
   precision-reference-sources:
@@ -161,6 +183,8 @@ jobs:
         with:
           name: native-ocr-fp32-models-${{ github.sha }}
           path: build/native-models
+      - name: Reverify original conversion producer and every pinned model/config
+        run: python -S native/ocr/verify_model_cache.py build/native-models --require-provenance
       - name: Install Linux attributable GUI runtime libraries
         if: runner.os == 'Linux'
         run: >-

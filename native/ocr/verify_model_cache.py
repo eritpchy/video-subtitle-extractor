@@ -10,13 +10,13 @@ import argparse
 import json
 from pathlib import Path
 
-from build import verify_models
+from model_assets import verify_models
 from prepare_models import load_pins
 
 ROOT = Path(__file__).resolve().parent
 
 
-def verify(root):
+def verify(root, *, require_provenance=False):
     root = Path(root).absolute()
     if root.is_symlink() or not root.is_dir():
         raise ValueError('Model cache must be a regular directory')
@@ -24,6 +24,8 @@ def verify(root):
     expected_files = {'model-manifest.json', 'model-source-pins.json', 'unavailable-models.json',
                       *pins['config_sha256'],
                       *('models/' + m['name'] + '_infer.onnx' for m in pins['models'])}
+    if require_provenance:
+        expected_files.add('conversion-provenance.json')
     actual_files = set()
     for path in root.rglob('*'):
         if path.is_symlink() or not (path.is_file() or path.is_dir()):
@@ -41,7 +43,7 @@ def verify(root):
 
     # Reuses the native build's independent identity, size and SHA256 checks.
     # That verifier reads its own committed pins, never the cache's copy.
-    rows = verify_models(root)
+    rows = verify_models(root, pins_path=ROOT / 'model-source-pins.json')
     expected = {m['name'] + '_infer': m for m in pins['models']}
     for row in rows:
         source = expected[row['name']]
@@ -57,14 +59,19 @@ def verify(root):
         }
         if row != manifest:
             raise ValueError('Model/config identity or provenance differs from committed pins: ' + name)
+    if require_provenance:
+        from model_cache_identity import verify_provenance
+        verify_provenance(root, source_root=ROOT)
     return rows
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('models', type=Path)
+    parser.add_argument('--require-provenance', action='store_true',
+                        help='Require the unchanged original conversion producer and input contract')
     args = parser.parse_args()
-    rows = verify(args.models)
+    rows = verify(args.models, require_provenance=args.require_provenance)
     print(f'Independently verified {len(rows)} pinned models and all config/provenance files')
 
 

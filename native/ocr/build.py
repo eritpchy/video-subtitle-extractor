@@ -33,39 +33,10 @@ def native_target(target):
 
 
 def verify_models(root):
-    root = Path(root).resolve(strict=True)
-    rows = json.loads((root / 'model-manifest.json').read_text(encoding='utf-8'))
-    pins = json.loads((ROOT / 'model-source-pins.json').read_text(encoding='utf-8'))
-    expected = {m['name'] + '_infer': m for m in pins['models']}
-    names = [r['name'] for r in rows]
-    if len(rows) != 15 or len(set(names)) != 15:
-        raise ValueError('Exactly 15 distinct pinned model entries are required')
-    if set(names) != set(expected):
-        raise ValueError('Model identities differ from reviewed source pins')
-    for row in rows:
-        name = row['name']
-        if row['onnx_sha256'] != expected[name]['onnx_sha256'] or row['onnx_bytes'] != expected[name]['onnx_bytes']:
-            raise ValueError('Model bytes differ from reviewed deterministic conversion: ' + name)
-        source_name = expected[name]['name']
-        config = ('config/' + source_name.split('_')[1] + '.json'
-                  if source_name.startswith('PP-OCRv6_') else 'config/' + source_name + '.json')
-        if row['config_file'] != config:
-            raise ValueError('Config identity differs from reviewed model binding: ' + name)
-        if pins['config_sha256'].get(row['config_file']) != row['config_sha256']:
-            raise ValueError('Config differs from reviewed source pins: ' + name)
-        if not isinstance(name, str) or len(relative(name).parts) != 1 or not name.endswith('_infer'):
-            raise ValueError('Invalid model name')
-        for rel, digest in [('models/' + name + '.onnx', row['onnx_sha256']),
-                            (row['config_file'], row['config_sha256'])]:
-            relative(rel)
-            p = root / rel
-            if p.is_symlink() or not p.is_file() or not p.resolve().is_relative_to(root):
-                raise ValueError('Invalid model asset path: ' + rel)
-            if sha256(p) != digest:
-                raise ValueError('Model/config SHA256 mismatch: ' + rel)
-        if (root / 'models' / (name + '.onnx')).stat().st_size != row['onnx_bytes']:
-            raise ValueError('Model byte count mismatch: ' + name)
-    return rows
+    # Keep the public build helper, but conversion identity must not depend on
+    # native worker/compiler/OpenCV/ORT build implementation changes.
+    from model_assets import verify_models as verify_model_assets
+    return verify_model_assets(root, pins_path=ROOT / 'model-source-pins.json')
 
 
 def opencv_config(prefix):

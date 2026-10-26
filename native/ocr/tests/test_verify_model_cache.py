@@ -174,23 +174,40 @@ def test_workflow_cache_hit_cannot_skip_verification_or_upload_unverified_bytes(
     restore_i, restore = step('id: model-cache')
     install_i, install = step('run: python -m pip install')
     convert_i, convert = step('run: python native/ocr/prepare_models.py')
+    key_i, key = step('id: model-inputs')
+    producer_i, producer = step('name: Record actual fresh-conversion producer')
+    check_i, check = step('name: Check restored or fresh producer input key')
     verify_i, verify = step('run: python -S native/ocr/verify_model_cache.py build/native-models')
     save_i, save = step('name: Cache only independently verified converted models')
     upload_i, upload = step('name: native-ocr-fp32-models-${{ github.sha }}')
     assert 'uses: actions/cache/restore@v4' in restore
     assert 'uses: actions/cache/save@v4' in save
     assert 'uses: actions/upload-artifact@v4' in upload
-    assert restore_i < install_i < convert_i < verify_i < save_i < upload_i
+    assert key_i < restore_i < install_i < convert_i < producer_i < check_i < verify_i < save_i < upload_i
     assert '        if:' not in verify and 'continue-on-error:' not in verify
-    assert verify.split('        run: ', 1)[1].strip() == 'python -S native/ocr/verify_model_cache.py build/native-models'
+    assert verify.split('        run: ', 1)[1].strip() == 'python -S native/ocr/verify_model_cache.py build/native-models --require-provenance'
     assert 'always()' not in save + upload and 'continue-on-error:' not in models
-    for conditional in (install, convert, save):
+    for conditional in (install, convert, producer, save):
         assert "if: steps.model-cache.outputs.cache-hit != 'true'" in conditional
     assert '          restore-keys:' not in restore and 'github.sha' not in restore
-    for filename in ('model-source-pins.json', 'prepare_models.py', 'requirements-model-build.txt',
-                     'verify_model_cache.py', 'build.py', 'fetch_sources.py', 'fetch_ort.py', 'build_opencv.py'):
-        assert "'native/ocr/" + filename + "'" in restore
+    assert 'key: ${{ steps.model-inputs.outputs.key }}' in restore
+    assert 'python -S native/ocr/model_cache_identity.py key' in key
+    assert '        if:' not in check
+    assert '--expected-key "${{ steps.model-inputs.outputs.key }}"' in check
+    assert 'hashFiles' not in restore
+    receipt_i, receipt = step('name: Record actual upload identity separately')
+    assert receipt_i > upload_i
+    assert 'steps.model-artifact.outputs.artifact-id' in receipt
+    assert 'steps.model-artifact.outputs.artifact-digest' in receipt
     assert 'key: ${{ steps.model-cache.outputs.cache-primary-key }}' in save
     assert 'name: native-ocr-fp32-models-${{ github.sha }}' in upload
     assert "PIP_NO_INDEX: '1'" in convert
     assert "POLYGRAPHY_AUTOINSTALL_DEPS: '0'" in workflow
+
+
+def test_all_cross_platform_consumers_require_original_provenance():
+    native = (REPO / '.github/workflows/native-ocr.yml').read_text()
+    consumer = native.split('  native:\n', 1)[1]
+    assert 'run: python -S native/ocr/verify_model_cache.py build/native-models --require-provenance' in consumer
+    directml = (REPO / '.github/workflows/release.yml').read_text()
+    assert 'run: python -S native/ocr/verify_model_cache.py build/native-models --require-provenance' in directml

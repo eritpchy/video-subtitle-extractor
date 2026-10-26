@@ -155,7 +155,7 @@ jobs:
           name: native-ocr-fp32-models-${{ github.sha }}
           path: build/native-models
       - name: Reverify every converted graph/config against committed pins
-        run: python -S native/ocr/verify_model_cache.py build/native-models
+        run: python -S native/ocr/verify_model_cache.py build/native-models --require-provenance
       - run: python -m pip install packaging pytest==8.3.5
       - name: Resolve original ORT DirectML 1.20.1 (no new SDK/client converter)
         run: python scripts/prepare_release_profile.py --profile directml --output build/wheelhouse
