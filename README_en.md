@@ -7,7 +7,7 @@
 ## Introduction
 
 ![License](https://img.shields.io/badge/License-Apache%202-red.svg)
-![python version](https://img.shields.io/badge/Python-3.12+-blue.svg)
+![python version](https://img.shields.io/badge/Python-3.12-blue.svg)
 ![support os](https://img.shields.io/badge/OS-Windows/macOS/Linux-green.svg)
 
 Video-subtitle-extractor (VSE) is a software that extracts hard-coded subtitles from videos into external subtitle files (SRT format).
@@ -71,7 +71,7 @@ Key features:
 - Accurate: medium models; CPU retains VideoSubFinder detection, compatible GPU configurations can use frame-by-frame detection.
 - Unsupported v6 languages retain explicit v5/v3 language recognizers. See [model coverage](docs/PP-OCRv6.md).
 
-The supported release path is CPU. Old DirectML/ONNX/GPU download recommendations do not apply to this version.
+Source backends include default Paddle, Windows DirectML and macOS Python CoreML. Native one-click package implementations are separate from source installation. Backend availability is not hardware certification: consult completed CI for the exact commit.
 
 ## Demo
 
@@ -82,83 +82,95 @@ The supported release path is CPU. Old DirectML/ONNX/GPU download recommendation
 
 ## Source Code Usage Guide
 
-#### 1. Install Python
+**The application can run from Python source without compiling or invoking this project's C++ `native-ocr` worker.**
+The repository includes GUI/CLI, video orchestration and Python Paddle, DirectML and CoreML OCR adapters and processing.
+The C++ worker under `native/ocr/` is a separate one-click package implementation, not a source-run prerequisite.
+This does **not** mean every dependency is pure Python: Qt/PySide, Paddle, ONNX Runtime, OpenCV, FFmpeg and
+VideoSubFinder include native third-party binaries. Install their supported platform distributions.
 
-Make sure you have Python 3.12+ installed.
+### 1. Clean clone and Python environment
 
-- Windows users can download and install Python from the [Python official website](https://www.python.org/downloads/windows/)
-- MacOS users can install via Homebrew:
-  ```shell
-  brew install python@3.12
-  ```
-- Linux users can install via package manager, e.g. Ubuntu/Debian:
-  ```shell
-  sudo apt update && sudo apt install python3.12 python3.12-venv python3.12-dev
-  ```
+Use **Python 3.12**, not an arbitrary “3.12+”. Create a separate environment for each backend;
+do not mix CPU/GPU Paddle packages or different ONNX Runtime distributions.
 
-#### 2. Install Dependencies
-
-Use a virtual environment to manage project dependencies and avoid conflicts with the system environment.
-
-(1) Create and activate a virtual environment
-```shell
-python -m venv videoEnv
+```sh
+git clone https://github.com/eritpchy/video-subtitle-extractor.git
+cd video-subtitle-extractor
+python3.12 -m venv .venv
+. .venv/bin/activate
 ```
 
-- Windows:
-```shell
-videoEnv\\Scripts\\activate
-```
-- MacOS/Linux:
-```shell
-source videoEnv/bin/activate
+On Windows PowerShell, replace the last two lines with:
+
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\Activate.ps1
 ```
 
-#### 3. Navigate to the Project Directory
+### 2. Default Paddle Python path (CPU)
 
-Switch to the source code directory:
-```shell
-cd <source-code-directory>
-```
-> For example: if your source code is in the tools folder on drive D, and the source code folder is named video-subtitle-extractor, enter:
-> ```shell
-> cd D:/tools/video-subtitle-extractor-main
-> ```
-
-#### 4. Install the Current CPU Runtime
-
-The maintained/tested dependency set is native Python 3.12 with the Paddle CPU
-engine. DirectML, ONNX Runtime providers, CoreML and ROCm are **not inference
-backends in this version**. The old accelerator recipes and
-`requirements_directml.txt` are legacy and do not enable acceleration here.
-CUDA may work with a separately compatible Paddle GPU installation, but is not
-certified by the CPU release matrix; do not install CPU and GPU Paddle packages
-together.
-
-```shell
+```sh
 python -m pip install -r requirements.txt
 python -m pip check
 python scripts/install_videosubfinder.py --version 6.10.7
-python -m backend.tools.model_download --tiers small medium
+python -S scripts/prepare_source_models.py paddle --output build/source-paddle-models --cache build/model-downloads/paddle
+python -S scripts/prepare_source_models.py verify --format paddle build/source-paddle-models
 ```
 
-Use [the current runtime guide](docs/USAGE.md) and
-[PP-OCRv6 model documentation](docs/PP-OCRv6.md) for supported models, offline
-operation and hardware behavior.
+This prepares **all 15 pinned original models**: four v6 small/medium detection/recognition models,
+ten v5 compatibility recognizers and one v3 Kannada recognizer—not only the four v6 models.
+The output must be a new directory; tracked checkout models are not overwritten. Select the separate data root:
 
-#### 5. Run the Program
+```sh
+export VSE_OCR_BACKEND=paddle
+export VSE_MODEL_DIR="$PWD/build/source-paddle-models"
+python gui.py
+# Or:
+python -m backend.cli "input.mp4" --language en --mode fast --cpu
+```
 
-- Run the GUI version:
+Equivalent PowerShell environment syntax:
 
-```shell
+```powershell
+$env:VSE_OCR_BACKEND = 'paddle'
+$env:VSE_MODEL_DIR = "$PWD/build/source-paddle-models"
 python gui.py
 ```
 
-- Run the CLI version:
+### 3. DirectML / Python CoreML source paths
 
-```shell
-python -m backend.cli "input.mp4" --language en --cpu
+Choose one in another clean Python 3.12 environment:
+
+| Platform/backend | Requirements | Backend variable | Model-root variable |
+| --- | --- | --- | --- |
+| Windows DirectML | `requirements-directml-inference.txt` | `VSE_OCR_BACKEND=directml` | `VSE_DIRECTML_MODEL_ROOT` |
+| macOS arm64 Python CoreML | `requirements-coreml-inference.txt` | `VSE_OCR_BACKEND=python-coreml` | `VSE_PYTHON_COREML_MODEL_ROOT` |
+
+After installing the selected requirements and VSF, prepare the shared complete FP32 ONNX data:
+
+```sh
+python -S scripts/prepare_source_models.py onnx --output build/source-onnx-models --cache build/model-downloads/onnx
+python -S scripts/prepare_source_models.py verify --format onnx build/source-onnx-models
 ```
+
+The source is a public, SHA256-pinned official 2.3.0 release ZIP. The helper extracts **only 15 graphs,
+13 configs and two model metadata files**. It never extracts, installs or executes the Linux worker/runtime.
+No GitHub login, Actions token, C++ compiler or local model converter is needed. To reuse the original ZIP,
+pass `--archive PATH --offline` instead of downloading it.
+
+For example, on macOS (see the [runtime guide](docs/USAGE.md) for Windows DirectML commands):
+
+```sh
+export VSE_OCR_BACKEND=python-coreml
+export VSE_PYTHON_COREML_MODEL_ROOT="$PWD/build/source-onnx-models"
+python gui.py
+# Explicit CPU through this same Python backend:
+python -m backend.cli "input.mp4" --language en --mode accurate --cpu
+```
+
+Provider registration, model hashes and earlier Native worker results do not establish successful inference
+through this Python backend. CoreML EP execution is not proof of physical GPU dispatch or internal precision.
+See [source, offline and reproducible conversion details](docs/USAGE.md).
 
 ## FAQ
 

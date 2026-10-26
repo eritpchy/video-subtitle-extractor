@@ -7,7 +7,7 @@
 ## 项目简介
 
 ![License](https://img.shields.io/badge/License-Apache%202-red.svg)
-![python version](https://img.shields.io/badge/Python-3.12+-blue.svg)
+![python version](https://img.shields.io/badge/Python-3.12-blue.svg)
 ![support os](https://img.shields.io/badge/OS-Windows/macOS/Linux-green.svg)  
 
 Video-subtitle-extractor (VSE) 是一款将视频中的硬字幕提取为外挂字幕文件(srt格式)的软件
@@ -70,7 +70,7 @@ Video-subtitle-extractor (VSE) 是一款将视频中的硬字幕提取为外挂�
 - 精准：使用 medium 模型；CPU 保持 VideoSubFinder 检测，兼容的 GPU 配置可使用逐帧检测。
 - v6 未覆盖的语言明确回退到 v5/v3 专用识别模型，详见[模型覆盖说明](docs/PP-OCRv6.md)。
 
-当前发布验证范围为 CPU，旧的 DirectML/ONNX/GPU 安装和下载建议不适用于本版本。
+源码提供默认 Paddle、Windows DirectML 和 macOS Python CoreML 路径；一键包的 Native 实现与源码安装独立。可用后端不等于已完成硬件验收，请以对应提交的实际 CI 证据为准。
 
 ## 演示
 
@@ -81,80 +81,93 @@ Video-subtitle-extractor (VSE) 是一款将视频中的硬字幕提取为外挂�
 
 ## 源码使用说明
 
-#### 1. 安装 Python
+**源码应用可直接用 Python 运行，不要求编译或调用本项目的 C++ `native-ocr` worker。**
+GUI/CLI、视频调度及 Paddle、DirectML、Python CoreML 的 OCR 适配与处理代码均保留在仓库。
+`native/ocr/` 的 C++ worker 是独立的一键包实现，不是运行 Python 源码的前置条件。
+这不意味着所有第三方依赖都是纯 Python：Qt/PySide、Paddle、ONNX Runtime、OpenCV、FFmpeg 和
+VideoSubFinder 含原生二进制，仍需按所选平台安装其受支持的发行包。
 
-请确保您已经安装了 Python 3.12+
+### 1. 干净克隆与 Python 环境
 
-- Windows 用户可以前往 [Python 官网](https://www.python.org/downloads/windows/) 下载并安装 Python
-- MacOS 用户可以使用 Homebrew 安装：
-  ```shell
-  brew install python@3.12
-  ```
-- Linux 用户可以使用包管理器安装，例如 Ubuntu/Debian：
-  ```shell
-  sudo apt update && sudo apt install python3.12 python3.12-venv python3.12-dev
-  ```
+使用 **Python 3.12**（不是任意“3.12+”），每个后端创建独立虚拟环境，不混装 Paddle CPU/GPU
+或不同 ONNX Runtime 发行包。
 
-#### 2. 安装依赖文件
-
-请使用虚拟环境来管理项目依赖，避免与系统环境冲突
-
-（1）创建虚拟环境并激活
-```shell
-python -m venv videoEnv
+```sh
+git clone https://github.com/eritpchy/video-subtitle-extractor.git
+cd video-subtitle-extractor
+python3.12 -m venv .venv
+. .venv/bin/activate
 ```
 
-- Windows：
-```shell
-videoEnv\\Scripts\\activate
-```
-- MacOS/Linux：
-```shell
-source videoEnv/bin/activate
+Windows PowerShell 将后两行替换为：
+
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\Activate.ps1
 ```
 
-#### 3. 创建并激活项目目录
+### 2. 默认 Paddle Python 路径（CPU）
 
-切换到源码所在目录：
-```shell
-cd <源码所在目录>
-```
-> 例如：如果您的源代码放在 D 盘的 tools 文件夹下，并且源代码的文件夹名为 video-subtitle-extractor，则输入：
-> ```shell
-> cd D:/tools/video-subtitle-extractor-main
-> ```
-
-#### 4. 安装当前 CPU 运行环境
-
-当前维护和测试的依赖组合为原生 Python 3.12 与 Paddle CPU 推理引擎。
-本版本**不使用 DirectML、ONNX Runtime、CoreML 或 ROCm 作为推理后端**；
-旧的加速安装教程和 `requirements_directml.txt` 仅为历史遗留内容，安装它们不会启用加速。
-CUDA 需要另外匹配的 Paddle GPU 环境，目前不属于 CPU 发布矩阵的验证范围，
-请勿将 Paddle CPU 与 GPU 软件包同时安装。
-
-```shell
+```sh
 python -m pip install -r requirements.txt
 python -m pip check
 python scripts/install_videosubfinder.py --version 6.10.7
-python -m backend.tools.model_download --tiers small medium
+python -S scripts/prepare_source_models.py paddle --output build/source-paddle-models --cache build/model-downloads/paddle
+python -S scripts/prepare_source_models.py verify --format paddle build/source-paddle-models
 ```
 
-支持的模型、离线部署和硬件行为请参阅[当前使用指南](docs/USAGE.md)及
-[PP-OCRv6 模型说明](docs/PP-OCRv6.md)。
+这会准备 **全部 15 个固定原模型**：4 个 v6 small/medium det/rec、10 个 v5 兼容识别器、
+1 个 v3 Kannada 识别器；不再只下载四个 v6 模型。输出必须是新目录，不覆盖 clone 自带模型。
+运行前指定独立数据根：
 
-#### 5. 运行程序
+```sh
+export VSE_OCR_BACKEND=paddle
+export VSE_MODEL_DIR="$PWD/build/source-paddle-models"
+python gui.py
+# 或：
+python -m backend.cli "input.mp4" --language en --mode fast --cpu
+```
 
-- 运行图形化界面版本（GUI）
+PowerShell 环境变量等价写法：
 
-```shell
+```powershell
+$env:VSE_OCR_BACKEND = 'paddle'
+$env:VSE_MODEL_DIR = "$PWD/build/source-paddle-models"
 python gui.py
 ```
 
-- 运行命令行版本（CLI）
+### 3. DirectML / Python CoreML 源码路径
 
-```shell
-python -m backend.cli "input.mp4" --language en --cpu
+在另一个干净 Python 3.12 虚拟环境中选择其一：
+
+| 平台/后端 | 依赖文件 | 后端变量 | 模型目录变量 |
+| --- | --- | --- | --- |
+| Windows DirectML | `requirements-directml-inference.txt` | `VSE_OCR_BACKEND=directml` | `VSE_DIRECTML_MODEL_ROOT` |
+| macOS arm64 Python CoreML | `requirements-coreml-inference.txt` | `VSE_OCR_BACKEND=python-coreml` | `VSE_PYTHON_COREML_MODEL_ROOT` |
+
+安装对应依赖并运行 VSF 安装脚本后，准备共同的全 15 模型 FP32 ONNX 数据：
+
+```sh
+python -S scripts/prepare_source_models.py onnx --output build/source-onnx-models --cache build/model-downloads/onnx
+python -S scripts/prepare_source_models.py verify --format onnx build/source-onnx-models
 ```
+
+模型来源为公开、固定 SHA256 的正式 2.3.0 ZIP。工具**只提取 15 个 graph、13 个 config 和两个
+模型清单**；不提取、安装或执行其中的 Linux worker/runtime。无需 GitHub 登录、Actions token、
+C++ 编译器或本机模型转换器。已有原 ZIP 可用 `--archive PATH --offline` 代替下载。
+
+例如 macOS（Windows DirectML 的 PowerShell 写法见[使用指南](docs/USAGE.md)）：
+
+```sh
+export VSE_OCR_BACKEND=python-coreml
+export VSE_PYTHON_COREML_MODEL_ROOT="$PWD/build/source-onnx-models"
+python gui.py
+# 同一 Python 路径显式使用 CPU：
+python -m backend.cli "input.mp4" --language en --mode accurate --cpu
+```
+
+后端注册、模型校验或旧 Native worker 的结果都不能替代这个 Python 后端的真实推理验收。
+CoreML EP 也不等于已证明物理 GPU 执行/内部精度。详见[完整源码、离线与可复现转换说明](docs/USAGE.md)。
 
 ## 常见问题与解决方案
 
