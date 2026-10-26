@@ -9,6 +9,7 @@ on:
   push:
     branches:
       - fix/restore-release-matrix
+      - fix/macos-accessibility
     paths:
       - .github/workflows/macos-accessibility.yml
       - scripts/build_macos_qt_accessibility.py

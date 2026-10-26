@@ -2,7 +2,8 @@ name: Cross-platform CI
 
 on:
   push:
-    branches: ['**']
+    # This exclusion belongs only to the isolated AX diagnostic branch snapshot.
+    branches: ['**', '!fix/macos-accessibility']
   pull_request:
   workflow_dispatch:
   workflow_call:

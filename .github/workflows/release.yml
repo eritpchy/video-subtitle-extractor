@@ -3,7 +3,8 @@ name: Automatic one-click package candidates
 # Build-only. Never create/move tags or publish/replace release assets.
 on:
   push:
-    branches: ['**']
+    # This exclusion belongs only to the isolated AX diagnostic branch snapshot.
+    branches: ['**', '!fix/macos-accessibility']
     paths: ['.gitattributes', '.github/workflows/**', 'native/ocr/**', 'requirements*.txt', 'backend/**', 'ui/**', 'gui.py', 'design/**', 'scripts/**', 'tests/**', 'docs/licenses/**']
   pull_request:
     paths: ['.gitattributes', '.github/workflows/**', 'native/ocr/**', 'requirements*.txt', 'backend/**', 'ui/**', 'gui.py', 'design/**', 'scripts/**', 'tests/**', 'docs/licenses/**']

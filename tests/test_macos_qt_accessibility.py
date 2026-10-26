@@ -1,5 +1,7 @@
 """Portable safety/identity tests; never represented as native Mac acceptance."""
 import base64
+import ast
+import fnmatch
 import hashlib
 import io
 import json
@@ -276,6 +278,7 @@ def test_workflow_trigger_is_confined_to_ax_changes_on_the_repair_branch():
         "  push:",
         "    branches:",
         "      - fix/restore-release-matrix",
+        "      - fix/macos-accessibility",
         "    paths:",
         "      - .github/workflows/macos-accessibility.yml",
         "      - scripts/build_macos_qt_accessibility.py",
@@ -285,6 +288,30 @@ def test_workflow_trigger_is_confined_to_ax_changes_on_the_repair_branch():
         "      - tests/test_macos_qt_accessibility.py",
         "      - tests/test_macos_accessibility_probe.py",
     ]
+
+
+@pytest.mark.parametrize("filename", ["ci.yml", "release.yml"])
+def test_isolated_ax_push_never_starts_or_cancels_the_main_matrix(filename):
+    workflow = (module.ROOT / ".github/workflows" / filename).read_text()
+    triggers = workflow.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
+    push = triggers.split("  push:\n", 1)[1].split("  pull_request:", 1)[0]
+    branch_line = next(line for line in push.splitlines() if line.strip().startswith("branches:"))
+    patterns = ast.literal_eval(branch_line.split(":", 1)[1].strip())
+    assert patterns == ["**", "!fix/macos-accessibility"]
+    for branch, expected in [("main", True), ("master", True), ("fix/restore-release-matrix", True),
+                             ("feature/example", True), ("release/2.3.0", True),
+                             ("fix/macos-accessibility-other", True), ("fix/macos-accessibility", False)]:
+        included = False
+        for pattern in patterns:
+            if fnmatch.fnmatchcase(branch, pattern.lstrip("!")):
+                included = not pattern.startswith("!")
+        assert included == expected, branch
+    # Neither PR nor manual coverage is narrowed by the push-only exclusion.
+    after_push = triggers.split("  pull_request:", 1)[1]
+    assert "  workflow_dispatch:" in after_push
+    assert "branches:" not in after_push and "branches-ignore:" not in after_push
+    assert "cancel-in-progress: true" in workflow
+    assert "${{ github.ref }}" in workflow.split("concurrency:", 1)[1].split("env:", 1)[0]
 
 
 def test_workflow_is_read_only_and_never_replaces_release_packages():

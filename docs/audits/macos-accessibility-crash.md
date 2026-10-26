@@ -154,10 +154,19 @@ No security exception or old-version production pin is introduced by this work.
 
 ## Bounded server-side candidate
 
+**Isolated-branch-only trigger snapshot:** `fix/macos-accessibility` additionally
+runs the AX workflow and is the sole push exclusion in this branch's copies of
+`ci.yml` and `release.yml`. This lets the candidate run without moving or
+cancelling the in-progress `fix/restore-release-matrix` ref. Every other branch,
+all PRs and manual main-matrix dispatch retain their existing coverage. Do not
+merge this trigger-only commit into the main repair/default branch; the general
+RPATH repair remains separately available as `53758fb`.
+
 The independently triggered workflow
 [`macos-accessibility.yml`](../../.github/workflows/macos-accessibility.yml)
 does not run from or feed the release workflow. Its push trigger requires both
-the exact `fix/restore-release-matrix` branch and changes to its seven explicitly
+one of the exact `fix/restore-release-matrix` / `fix/macos-accessibility` branches
+and changes to its seven explicitly
 listed AX workflow/script/pin/constraint/test paths. Other branches, tags,
 documentation-only and unrelated release changes do not trigger it. Manual
 dispatch remains declared, but [GitHub requires the workflow on the default
