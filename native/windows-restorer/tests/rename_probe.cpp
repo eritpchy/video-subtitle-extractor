@@ -175,6 +175,15 @@ bool marker_matches(const std::wstring& path, const char* payload) {
     return count == std::strlen(payload) && std::memcmp(buffer, payload, count) == 0;
 }
 const char* const modes[] = {"relative-exact-buffer", "relative-nul-buffer", "absolute-extended-nul-buffer"};
+void outcome(Record& row, unsigned index, bool met) {
+    if (index < 16) {
+        row["expectation_met"] = "null"; // Invalid-input observation, never an API compatibility pass.
+        boolean(row, "observation_safety_met", met);
+    } else {
+        boolean(row, "expectation_met", met);
+        row["observation_safety_met"] = "null";
+    }
+}
 const char* const source_bytes = "VSE SYNTHETIC SOURCE MARKER. NOT CUSTOMER DATA.\n";
 const char* const sentinel_bytes = "VSE SYNTHETIC EXISTING TARGET. MUST NOT CHANGE.\n";
 bool probe(unsigned index, const std::wstring& requested_root, Record& row) {
@@ -183,14 +192,19 @@ bool probe(unsigned index, const std::wstring& requested_root, Record& row) {
     const bool deep_child = (index & 4) != 0;
     const bool unicode = (index & 8) != 0;
     const unsigned mode = index / 16;
-    // Expectation basis: preserved Server 2022/2025 run 40276853621.
-    const bool incompatible_control = mode != 2;
-    const bool expected_rename_success = !incompatible_control && !existing;
+    // FILE_RENAME_INFO.FileName documents a NUL-terminated string. Mode 0
+    // deliberately preserves the historical unterminated input for observation
+    // only; no unique errno or product compatibility is asserted for that input.
+    const bool legacy_observation = mode == 0;
+    const bool incompatible_control = mode == 1;
+    const bool expected_rename_success = mode == 2 && !existing;
     const DWORD expected_rename_error = incompatible_control ? ERROR_INVALID_PARAMETER : (existing ? ERROR_ALREADY_EXISTS : ERROR_SUCCESS);
-    text(row, "classification", incompatible_control ? "relative-form-incompatible-negative-control" :
-         (existing ? "absolute-existing-target-no-overwrite-control" : "absolute-new-target-rename-positive"));
+    text(row, "classification", legacy_observation ? "legacy-unterminated-input-observation" :
+         (incompatible_control ? "relative-form-incompatible-negative-control" :
+          (existing ? "absolute-existing-target-no-overwrite-control" : "absolute-new-target-rename-positive")));
     boolean(row, "expected_rename_returned_success", expected_rename_success);
-    number(row, "expected_rename_win32_error", expected_rename_error);
+    if (legacy_observation) row["expected_rename_win32_error"] = "null";
+    else number(row, "expected_rename_win32_error", expected_rename_error);
     text(row, "mode", modes[mode]);
     boolean(row, "existing_target", existing); boolean(row, "long_parent", long_parent);
     boolean(row, "deep_child", deep_child); boolean(row, "unicode", unicode);
@@ -295,15 +309,16 @@ bool probe(unsigned index, const std::wstring& requested_root, Record& row) {
     }
     boolean(row, "source_marker_bytes_unchanged", marker_ok); boolean(row, "source_and_marker_identities_unchanged", identities_ok);
     boolean(row, "existing_target_preserved", target_preserved);
-    // Proven incompatible relative forms are negative controls, never renamed
-    // successfully. Exact errors and source/target preservation are mandatory;
-    // arbitrary failures (or unexpected relative-form success) do not pass.
+    // All modes must preserve identities/content and produce the specified
+    // source/target transition. Only NUL-terminated modes assert exact errno;
+    // the legacy malformed input records its actual error without a whitelist.
     const bool correct = parents_stable && marker_ok && identities_ok && target_preserved &&
-        ((renamed != FALSE) == expected_rename_success) && rename_error == expected_rename_error &&
+        ((renamed != FALSE) == expected_rename_success) && (legacy_observation || rename_error == expected_rename_error) &&
         source_present == !expected_rename_success && target_present == (existing || expected_rename_success);
-    boolean(row, "expectation_met", correct);
-    text(row, "observation", !correct ? "expectation-not-met" :
-         (incompatible_control ? "observed-incompatible-relative-form-not-a-rename" : (existing ? "correct-no-overwrite-refusal" : "correct-rename")));
+    outcome(row, index, correct);
+    text(row, "observation", !correct ? "diagnostic-requirement-not-met" :
+         (legacy_observation ? "legacy-invalid-input-observed-failure-no-compatibility-claim" :
+          (incompatible_control ? "observed-incompatible-relative-form-not-a-rename" : (existing ? "correct-no-overwrite-refusal" : "correct-rename"))));
     return correct;
 }
 } // namespace
@@ -335,7 +350,7 @@ int wmain(int argc, wchar_t** argv) {
     } catch (const std::exception& error) {
         text(row, "exception", error.what());
     }
-    boolean(row, "expectation_met", false);
+    outcome(row, index, false);
     try { emit(row); } catch (...) { return 4; }
     return 3;
 }

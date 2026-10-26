@@ -56,6 +56,20 @@ class FixedInflateSourceTests(unittest.TestCase):
         self.assertIn('hash.finish() != entry->sha256', source)
         self.assertIn('rename->ReplaceIfExists = FALSE', source)
 
+    def test_space_fixture_keeps_bounds_without_constant_controlling_expression_or_warning_suppression(self):
+        source = (HERE / 'restorer.cpp').read_text(encoding='utf-8')
+        self.assertIn('if (!vse::fixed_archive_bounds_ok(bundle::uncompressed_bytes, bundle::central_directory_offset,', source)
+        self.assertIn('bundle::archive_bytes, file_size(verified_zip))', source)
+        core = (HERE / 'core.hpp').read_text(encoding='utf-8')
+        helper = core.split('inline bool fixed_archive_bounds_ok(', 1)[1].split('inline bool sha256_text_ok', 1)[0]
+        self.assertIn('expanded <= 1024ULL * 1024 * 1024 * 1024', helper)
+        self.assertIn('central_offset < expected_bytes && actual_bytes == expected_bytes', helper)
+        self.assertNotIn('if (', helper)
+        builder_source = (HERE / 'build.py').read_text(encoding='utf-8')
+        self.assertIn("'/W4', '/WX'", builder_source)
+        self.assertNotIn('/wd4127', builder_source)
+        self.assertNotIn('warning(disable', source)
+
     def test_atomic_publish_uses_probed_absolute_nul_name_and_keeps_parent_locks(self):
         source = (HERE / 'restorer.cpp').read_text(encoding='utf-8')
         rename = source.split('void rename_without_replace(', 1)[1].split('void remove_owned_file(', 1)[0]

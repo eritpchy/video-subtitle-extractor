@@ -224,9 +224,8 @@ void check_space(const std::wstring& parent) {
     if (available.QuadPart < needed) fail(L"Insufficient free space: need at least " + std::to_wstring(needed) + L" bytes in the destination (downloaded parts are additional).");
 }
 void extract_fixed_ranges(HANDLE verified_zip, const std::wstring& destination) {
-    if (bundle::uncompressed_bytes > 1024ULL * 1024 * 1024 * 1024 ||
-        bundle::central_directory_offset >= bundle::archive_bytes ||
-        file_size(verified_zip) != bundle::archive_bytes) fail(L"Invalid fixed archive bounds");
+    if (!vse::fixed_archive_bounds_ok(bundle::uncompressed_bytes, bundle::central_directory_offset,
+                                      bundle::archive_bytes, file_size(verified_zip))) fail(L"Invalid fixed archive bounds");
     std::vector<const vse::Entry*> ranges;
     std::uint64_t expanded = 0;
     for (const auto& entry : bundle::entries) {

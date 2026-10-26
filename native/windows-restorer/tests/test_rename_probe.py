@@ -19,11 +19,12 @@ spec.loader.exec_module(runner)
 def record(index, passed=True):
     expected = runner.definition(index)
     value = {**expected, 'schema': 1, 'scope': 'synthetic-rename-api-observation-not-production-or-client-certification',
-             'client_restore_verified': False, 'expectation_met': passed,
+             'client_restore_verified': False, 'expectation_met': None if index < 16 else passed,
+             'observation_safety_met': passed if index < 16 else None,
              'ancestor_identities_unchanged': True, 'source_marker_bytes_unchanged': True,
              'source_and_marker_identities_unchanged': True, 'existing_target_preserved': True,
              'replace_if_exists': False, 'rename_returned_success': expected['expected_rename_returned_success'],
-             'rename_win32_error': expected['expected_rename_win32_error'],
+             'rename_win32_error': 87 if index < 16 else expected['expected_rename_win32_error'],
              'source_present_after': not expected['expected_rename_returned_success'],
              'target_present_after': expected['existing_target'] or expected['expected_rename_returned_success']}
     identity = {'volume_serial': 1, 'file_index_high': 2, 'file_index_low': 3}
@@ -42,21 +43,27 @@ class RenameProbeTests(unittest.TestCase):
 
     def test_each_good_record_has_proof_and_mode_identity(self):
         for index in range(48):
-            self.assertIs(runner.validate_record(record(index), runner.definition(index), 0)['expectation_met'], True)
+            value = runner.validate_record(record(index), runner.definition(index), 0)
+            self.assertIs(value['observation_safety_met' if index < 16 else 'expectation_met'], True)
+            self.assertIsNone(value['expectation_met' if index < 16 else 'observation_safety_met'])
 
     def test_classification_never_turns_incompatible_control_into_actual_rename_success(self):
         rows = [record(index) for index in range(48)]
         summary = runner.aggregate(rows)
-        self.assertTrue(summary['all_expectations_met'])
+        self.assertTrue(summary['all_diagnostic_requirements_met'])
         self.assertEqual(summary['actual_successful_renames'], 8)
-        self.assertEqual(summary['incompatible_relative_controls_met'], 32)
+        self.assertEqual(summary['strict_api_expectations_met'], 32)
+        self.assertEqual(summary['legacy_observations_collected'], 16)
+        self.assertEqual(summary['legacy_observations_safety_met'], 16)
+        self.assertFalse(summary['legacy_compatibility_asserted'])
         for index, row in enumerate(rows):
             if index < 32:
                 self.assertFalse(row['rename_returned_success'])
                 self.assertEqual(row['rename_win32_error'], 87)
                 self.assertTrue(row['source_present_after'])
                 self.assertEqual(row['target_present_after'], row['existing_target'])
-                self.assertEqual(row['classification'], 'relative-form-incompatible-negative-control')
+                self.assertEqual(row['classification'], 'legacy-unterminated-input-observation' if index < 16 else 'relative-form-incompatible-negative-control')
+                if index < 16: self.assertIsNone(row['expectation_met'])
             elif row['existing_target']:
                 self.assertFalse(row['rename_returned_success'])
                 self.assertEqual(row['rename_win32_error'], 183)
@@ -65,7 +72,7 @@ class RenameProbeTests(unittest.TestCase):
                 self.assertEqual(row['rename_win32_error'], 0)
 
     def test_wrong_error_unexpected_success_or_changed_paths_fail_each_control(self):
-        for index in (0, 1, 16, 17, 32, 33, 46, 47):
+        for index in (16, 17, 32, 33, 46, 47):
             original = record(index)
             for change in ({'rename_returned_success': not original['rename_returned_success']},
                            {'rename_win32_error': 206}, {'rename_win32_error': True},
@@ -80,6 +87,22 @@ class RenameProbeTests(unittest.TestCase):
         for index in (1, 17, 33):
             changed = record(index); changed['existing_sentinel_identity_after'] = None
             with self.assertRaises(ValueError): runner.validate_record(changed, runner.definition(index), 0)
+
+    def test_legacy_errors_are_observations_not_whitelisted_or_compatibility_passes(self):
+        for index in (0, 1, 14, 15):
+            for error in (87, 206, 5, 0, 0xffffffff):
+                value = record(index); value['rename_win32_error'] = error
+                result = runner.validate_record(value, runner.definition(index), 0)
+                self.assertIsNone(result['expectation_met'])
+                self.assertIsNone(result['expected_rename_win32_error'])
+                self.assertEqual(result['rename_win32_error'], error)
+                self.assertFalse(result['rename_returned_success'])
+            for change in ({'expectation_met': True}, {'rename_returned_success': True},
+                           {'source_present_after': False}, {'target_present_after': not bool(index & 1)},
+                           {'ancestor_identities_unchanged': False}, {'source_marker_bytes_unchanged': False},
+                           {'observation_safety_met': False}, {'rename_win32_error': True}):
+                with self.subTest(index=index, change=change), self.assertRaises(ValueError):
+                    runner.validate_record({**record(index), **change}, runner.definition(index), 0)
 
     def test_missing_changed_and_forged_success_rejected(self):
         original = record(0)
@@ -114,9 +137,12 @@ class RenameProbeTests(unittest.TestCase):
             self.assertEqual(len(list(runner.run_cases(work / 'synthetic.exe', work, rows))), 48)
             self.assertTrue(rows[-1]['expectation_met'])
             self.assertTrue((work / 'case-47.stdout.log').is_file())
-        self.assertEqual(runner.aggregate(rows), {'all_cases_collected': True, 'all_expectations_met': False,
-                                                'observed_expectations_met': 47, 'observed_expectations_not_met': 1,
-                                                'actual_successful_renames': 8, 'incompatible_relative_controls_met': 31})
+        summary = runner.aggregate(rows)
+        self.assertTrue(summary['all_cases_collected'])
+        self.assertFalse(summary['all_diagnostic_requirements_met'])
+        self.assertEqual(summary['strict_api_expectations_met'], 32)
+        self.assertEqual(summary['legacy_observations_safety_met'], 15)
+        self.assertEqual(summary['actual_successful_renames'], 8)
 
     def test_crash_timeout_bad_json_and_oversized_output_do_not_abort_matrix(self):
         rows = []
@@ -140,13 +166,14 @@ class RenameProbeTests(unittest.TestCase):
             list(runner.run_cases(work / 'synthetic.exe', work, rows))
             self.assertEqual((work / 'case-01.stderr.log').read_bytes(), b'partial error\n')
         self.assertEqual(len(rows), 48)
-        self.assertEqual(runner.aggregate(rows)['observed_expectations_not_met'], 4)
+        self.assertEqual(runner.aggregate(rows)['legacy_observations_safety_met'], 12)
+        self.assertFalse(runner.aggregate(rows)['all_diagnostic_requirements_met'])
         self.assertTrue(rows[-1]['expectation_met'])
 
     def test_empty_partial_or_duplicate_collection_is_not_success(self):
         for rows in ([], [record(0)], [record(0)] * 48):
             self.assertFalse(runner.aggregate(rows)['all_cases_collected'])
-            self.assertFalse(runner.aggregate(rows)['all_expectations_met'])
+            self.assertFalse(runner.aggregate(rows)['all_diagnostic_requirements_met'])
 
     def test_cpp_retains_contract_and_is_standalone_synthetic_only(self):
         source = (HERE / 'rename_probe.cpp').read_text(encoding='utf-8')

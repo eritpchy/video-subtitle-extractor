@@ -16,6 +16,14 @@ int main() {
     assert(vse::quote_arg(L"a\\\"b\\") == L"\"a\\\\\\\"b\\\\\"");
     assert(vse::required_space(3'000'000'000, 7'000'000'000, 50'000) == 13'343'908'864ULL);
     bool failed = false; try { vse::required_space(UINT64_MAX, 1, 1); } catch (const std::overflow_error&) { failed = true; } assert(failed);
+    constexpr std::uint64_t cap = 1024ULL * 1024 * 1024 * 1024;
+    assert(vse::fixed_archive_bounds_ok(cap, 99, 100, 100));
+    assert(!vse::fixed_archive_bounds_ok(cap + 1, 99, 100, 100));
+    assert(!vse::fixed_archive_bounds_ok(9223372036854775807ULL, 99, 100, 100));
+    assert(!vse::fixed_archive_bounds_ok(0, 100, 100, 100));
+    assert(!vse::fixed_archive_bounds_ok(0, UINT64_MAX, 100, 100));
+    assert(!vse::fixed_archive_bounds_ok(0, 99, 100, 101));
+    assert(!vse::fixed_archive_bounds_ok(0, 99, 100, 99));
     assert(vse::sha256_text_ok(std::string(64, 'a')));
     assert(!vse::sha256_text_ok(std::string(64, 'A')));
     std::cout << "portable lexical/quoting/64-bit tests passed\n";

@@ -209,6 +209,21 @@ files and tests valid/empty/multibuffer streams, truncated/invalid/trailing inpu
 size bounds and cancellation; source/index/link-map drift tests fail closed.
 **Linux success is not Windows execution evidence.**
 
+### Space-preflight compiler regression
+
+Run `40278641385` reached the real native gates on both Servers: 18/19 passed,
+including Unicode, long paths, stored ZIP64 over 2 GiB, expanded DEFLATE over
+2 GiB, invalid data and interruption. The remaining space-preflight fixture did
+not run: its deliberately oversized constant made the original bounds `if`
+constant-true, producing MSVC 14.44 C4127 under `/W4 /WX`. This was a fixture
+compilation failure, not a demonstrated disk-space preflight pass.
+
+The same expanded/central-offset/actual-size comparisons now use a pure,
+non-constexpr parameter helper; no safety bound, fixture constant or warning
+policy is removed. Boundary and oversized-value tests cover the helper. The
+next Server run must compile and execute all 19 cases; earlier 18/19 evidence
+cannot certify the corrected candidate or either real CUDA package.
+
 ## Required independent Server 2022 + 2025 gate
 
 The existing release workflow must remain unchanged while this candidate is
@@ -296,20 +311,37 @@ extended NUL-terminated form succeeded for all eight new-target combinations;
 all eight existing-target cases returned error 183 with preserved identities and
 sentinel bytes. Destination paths ranged from 98 to 442 UTF-16 units; the longest
 source marker path was 841 units. That original run retains its 32 expectations
-met / 16 unmet result unchanged. In the subsequent explicitly authorized
-classification correction, both relative forms are incompatible **negative
-controls**: they must return exactly error 87 with `rename_returned_success=false`,
-source bytes/identity unchanged, no new target, and any existing target/sentinel
-preserved. The production absolute form still must actually rename every new
-target (success/error 0), or reject an existing target with exactly error 183
-while preserving it. Unexpected relative success, a different error, changed
-paths/content, incomplete evidence or a missing case fails the diagnostic.
+met / 16 unmet result unchanged. The later `fc04df5` run `40278641385` recorded
+47/48 diagnostic expectations met on each Server: Server 2025 case 14 and
+Server 2022 case 15 returned error 206 rather than the then-required 87. Both
+were the historical **unterminated** mode 0 with destination/source/marker lengths
+442/469/841 UTF-16 units; FileNameLength 36 bytes, buffer 56 bytes, filename offset
+20, trailing NUL bytes 0. Source/marker/ancestors and existing target contents and
+identities remained unchanged. The preserved evidence ZIP is 5,246,983 bytes,
+SHA256 `ed43024864204cd3dd28aa4ca7590d9a51a08e79418b3c1e563dfce20f230cf3`.
+These historical failures are not rewritten as passes.
 
-All 48 cases still run. Every record keeps its actual rename result/error plus
-its explicit classification and expected result/error; control expectation is
-not actual rename success. The aggregate separately reports the eight expected
-actual renames and 32 incompatible relative controls. No historical raw result
-is rewritten, and this comparison cannot replace any production restoration gate.
+The [FILE_RENAME_INFO contract](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info)
+describes FileName as NUL-terminated (while its FileNameLength note says a NUL is
+not required). Consequently the old mode 0 input is not used to assert product
+compatibility or a uniquely guaranteed error. The observed error variation does
+**not** prove an out-of-bounds-read mechanism, nor that the valid absolute path
+is unsupported. No raw bytes beyond the declared buffer were recorded/read.
+
+The explicitly authorized diagnostic classification now keeps mode 0's **16
+invalid-input observations**, not 16 API passes: `expectation_met=null`, while
+`observation_safety_met` must be true. Every actual BOOL/error remains unchanged;
+there is no errno whitelist. These observations still hard-fail on unexpected
+API success, crash, missing evidence, source/target/ancestor changes, or a new
+target. The NUL-terminated relative mode 1 keeps its 16 exact-error-87 controls.
+The production absolute mode 2 keeps eight actual success/error-0 renames and
+eight exact-error-183 existing-target refusals, preserving all content/identities.
+
+All 48 cases must be collected. The report separately counts **32 strict API
+cases** and **16 safety-checked observations**; it never claims 48 restorations.
+The wrapper validates both counts/outcomes, independently of all 19 full native
+restoration gates. Every actual rename result/error and case classification stays
+in the report. Observation-only compatibility is explicitly not asserted.
 
 The current production candidate now uses the proven absolute-name API form,
 NULL RootDirectory and `ReplaceIfExists=FALSE`. Parent/ancestor locks remain

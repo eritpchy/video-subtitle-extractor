@@ -80,8 +80,10 @@ class DiagnosticContracts(unittest.TestCase):
         script = (ROOT / 'scripts/run_windows_restorer_ci.py').read_text()
         self.assertIn("parser.add_argument('--rename-probe-only', action='store_true'", script)
         self.assertIn("child.get('all_cases_collected') is not True", script)
-        self.assertIn("child.get('all_expectations_met') is not True", script)
+        self.assertIn("child.get('all_diagnostic_requirements_met') is not True", script)
         self.assertIn('result.check_returncode()', script)
+        for check in ("child.get('strict_api_expectations_met') != 32", "child.get('legacy_observations_safety_met') != 16", "child.get('legacy_compatibility_asserted') is not False"):
+            self.assertIn(check, script)
 
     def test_large_zip64_is_mandatory_and_toolchain_is_not_installed(self):
         text = (ROOT / 'scripts/run_windows_restorer_ci.py').read_text()

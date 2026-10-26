@@ -115,8 +115,11 @@ def main(argv=None):
         result.check_returncode()
         if args.rename_probe_only:
             child = json.loads((args.work_directory / 'rename-probe-report.json').read_text(encoding='utf-8'))
-            if (child.get('result') != 'expectations-met' or child.get('all_cases_collected') is not True or
-                    child.get('all_expectations_met') is not True or len(child.get('cases', [])) != 48 or
+            if (child.get('result') != 'diagnostic-requirements-met' or child.get('all_cases_collected') is not True or
+                    child.get('all_diagnostic_requirements_met') is not True or len(child.get('cases', [])) != 48 or
+                    child.get('strict_api_cases_collected') != 32 or child.get('strict_api_expectations_met') != 32 or
+                    child.get('legacy_observations_collected') != 16 or child.get('legacy_observations_safety_met') != 16 or
+                    child.get('legacy_compatibility_asserted') is not False or
                     child.get('scope') != 'synthetic-rename-api-observations-not-restoration-acceptance'):
                 raise RuntimeError('Complete independent rename probe receipt missing')
         else:

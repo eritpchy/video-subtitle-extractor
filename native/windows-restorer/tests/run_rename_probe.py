@@ -4,8 +4,8 @@
 Use the already selected MSVC x64 environment. The new work directory contains
 only synthetic trees, compiler outputs and evidence. No cleanup or overwrite is
 performed. Each case runs in a separate process, so an old-buffer crash does not
-hide later candidate observations. Observed relative forms are exact-error negative
-controls, never successful restores. Failed expectations remain overall nonzero.
+hide later candidate observations. The unterminated legacy form is observation-only, never an API compatibility
+pass; the NUL-terminated relative form is an exact-error negative control. Failed expectations remain overall nonzero.
 """
 from __future__ import annotations
 
@@ -35,13 +35,15 @@ def sha(path):
 def definition(index):
     if type(index) is not int or not 0 <= index < 48:
         raise ValueError('Case index must be an integer in 0..47')
-    relative, existing = index // 16 != 2, bool(index & 1)
+    mode, existing = index // 16, bool(index & 1)
+    relative, legacy = mode != 2, mode == 0
     return {'case_index': index, 'mode': MODES[index // 16], 'existing_target': existing,
             'long_parent': bool(index & 2), 'deep_child': bool(index & 4), 'unicode': bool(index & 8),
-            'classification': ('relative-form-incompatible-negative-control' if relative else
+            'classification': ('legacy-unterminated-input-observation' if legacy else
+                               'relative-form-incompatible-negative-control' if relative else
                                'absolute-existing-target-no-overwrite-control' if existing else 'absolute-new-target-rename-positive'),
             'expected_rename_returned_success': not relative and not existing,
-            'expected_rename_win32_error': 87 if relative else 183 if existing else 0}
+            'expected_rename_win32_error': None if legacy else 87 if relative else 183 if existing else 0}
 
 
 def validate_record(record, expected, returncode):
@@ -51,11 +53,14 @@ def validate_record(record, expected, returncode):
         raise ValueError('Invalid diagnostic-only native record')
     if record.get('scope') != 'synthetic-rename-api-observation-not-production-or-client-certification':
         raise ValueError('Unexpected native report scope')
-    if type(record.get('expectation_met')) is not bool:
-        raise ValueError('Missing native outcome')
-    if record['expectation_met'] != (returncode == 0):
+    legacy = expected['classification'] == 'legacy-unterminated-input-observation'
+    outcome_key = 'observation_safety_met' if legacy else 'expectation_met'
+    absent_key = 'expectation_met' if legacy else 'observation_safety_met'
+    if absent_key not in record or record[absent_key] is not None or type(record.get(outcome_key)) is not bool:
+        raise ValueError('Legacy observation and strict API expectation must remain separate')
+    if record[outcome_key] != (returncode == 0):
         raise ValueError('Native exit code and evidence disagree')
-    if record['expectation_met']:
+    if record[outcome_key]:
         for key in ('ancestor_identities_unchanged', 'source_marker_bytes_unchanged', 'source_and_marker_identities_unchanged', 'existing_target_preserved'):
             if record.get(key) is not True:
                 raise ValueError('Met control lacks identity/content evidence')
@@ -70,7 +75,8 @@ def validate_record(record, expected, returncode):
                 raise ValueError('Malformed Win32 identity')
         expected_success = expected['expected_rename_returned_success']
         if (record.get('rename_returned_success') is not expected_success or
-                type(record.get('rename_win32_error')) is not int or record['rename_win32_error'] != expected['expected_rename_win32_error']):
+                type(record.get('rename_win32_error')) is not int or not 0 <= record['rename_win32_error'] <= 0xffffffff or
+                (not legacy and record['rename_win32_error'] != expected['expected_rename_win32_error'])):
             raise ValueError('Actual rename result/error differs from classified control')
         if (record.get('source_present_after') is not (not expected_success) or
                 record.get('target_present_after') is not (expected['existing_target'] or expected_success)):
@@ -86,12 +92,23 @@ def validate_record(record, expected, returncode):
 
 def aggregate(rows):
     complete = len(rows) == 48 and [row.get('case_index') for row in rows] == list(range(48))
+    strict = [row for row in rows if row.get('classification') in (
+        'relative-form-incompatible-negative-control', 'absolute-existing-target-no-overwrite-control', 'absolute-new-target-rename-positive')]
+    legacy = [row for row in rows if row.get('classification') == 'legacy-unterminated-input-observation']
+    strict_met = sum(row.get('expectation_met') is True and row.get('observation_safety_met') is None for row in strict)
+    observed = sum(type(row.get('rename_returned_success')) is bool and type(row.get('rename_win32_error')) is int for row in legacy)
+    safe = sum(row.get('observation_safety_met') is True and row.get('expectation_met') is None for row in legacy)
     return {'all_cases_collected': complete,
-            'all_expectations_met': complete and all(row.get('expectation_met') is True for row in rows),
-            'observed_expectations_met': sum(row.get('expectation_met') is True for row in rows),
-            'observed_expectations_not_met': sum(row.get('expectation_met') is not True for row in rows),
-            'actual_successful_renames': sum(row.get('rename_returned_success') is True for row in rows),
-            'incompatible_relative_controls_met': sum(row.get('classification') == 'relative-form-incompatible-negative-control' and row.get('expectation_met') is True for row in rows)}
+            'strict_api_cases_collected': len(strict), 'strict_api_expectations_met': strict_met,
+            'legacy_observations_collected': observed, 'legacy_observations_safety_met': safe,
+            'legacy_compatibility_asserted': False,
+            'all_diagnostic_requirements_met': complete and len(strict) == 32 and strict_met == 32 and len(legacy) == 16 and observed == safe == 16,
+            'actual_successful_renames': sum(row.get('rename_returned_success') is True for row in rows)}
+
+
+def failed_outcome(expected):
+    legacy = expected['classification'] == 'legacy-unterminated-input-observation'
+    return {'expectation_met': None if legacy else False, 'observation_safety_met': False if legacy else None}
 
 
 def run_cases(executable, work, rows):
@@ -100,7 +117,7 @@ def run_cases(executable, work, rows):
         expected = definition(index)
         stdout, stderr = work / f'case-{index:02d}.stdout.log', work / f'case-{index:02d}.stderr.log'
         command = [str(executable), '--new-root', str(cases / f'case-{index:02d}'), '--case', str(index)]
-        row = {**expected, 'expectation_met': False, 'command': command}
+        row = {**expected, **failed_outcome(expected), 'command': command}
         try:
             with stdout.open('xb') as out, stderr.open('xb') as err:
                 result = subprocess.run(command, cwd=work, stdout=out, stderr=err, timeout=60)
@@ -111,7 +128,7 @@ def run_cases(executable, work, rows):
             validate_record(document, expected, result.returncode)
             row.update(document)
         except (OSError, subprocess.TimeoutExpired, ValueError) as error:
-            row.update(expectation_met=False, collector_error=f'{type(error).__name__}: {error}')
+            row.update(**failed_outcome(expected), collector_error=f'{type(error).__name__}: {error}')
         finally:
             for label, path in (('stdout', stdout), ('stderr', stderr)):
                 if path.is_file():
@@ -156,7 +173,7 @@ def main():
                f'/MAP:{work / "rename-probe.map"}', '/MANIFEST:EMBED', "/MANIFESTUAC:level='asInvoker' uiAccess='false'"]
     rows = []
     report = {'schema': 1, 'scope': 'synthetic-rename-api-observations-not-restoration-acceptance',
-              'expectation_policy': 'server-40276853621-relative-87-absolute-no-replace',
+              'expectation_policy': 'legacy-unterminated-observation-16-strict-api-controls-32',
               'os': platform.platform(), 'python': platform.python_version(), 'cases': rows,
               'source_sha256': sources, 'compiler': {'path': compiler, 'sha256': sha(Path(compiler))},
               'compile_command': command, 'client_restore_verified': False, 'result': 'incomplete'}
@@ -176,10 +193,10 @@ def main():
             report.update(aggregate(rows))
             report_path.write_text(json.dumps(report, indent=2, ensure_ascii=True) + '\n', encoding='utf-8')
         report.update(aggregate(rows))
-        report['result'] = 'expectations-met' if report['all_expectations_met'] else 'expectations-not-met'
+        report['result'] = 'diagnostic-requirements-met' if report['all_diagnostic_requirements_met'] else 'diagnostic-requirements-not-met'
     finally:
         report_path.write_text(json.dumps(report, indent=2, ensure_ascii=True) + '\n', encoding='utf-8')
-    return 0 if report.get('all_expectations_met') else 1
+    return 0 if report.get('all_diagnostic_requirements_met') else 1
 
 
 if __name__ == '__main__':
