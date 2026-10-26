@@ -171,9 +171,64 @@ def test_only_the_wheel_relative_rpath_and_expected_qt_frameworks_are_allowed():
 def test_configure_preserves_accessibility_and_only_build_target_is_reviewed():
     command = module.configure_command(Path("source"), Path("install"))
     assert "-DFEATURE_accessibility=ON" in command
-    assert "-DCMAKE_SKIP_BUILD_RPATH=ON" in command
+    assert "-DCMAKE_SKIP_BUILD_RPATH=OFF" in command
+    assert "-DCMAKE_SKIP_BUILD_RPATH=ON" not in command
     assert "-DCMAKE_OSX_DEPLOYMENT_TARGET=14.4" in command
     assert not any("accessibility=OFF" in part or "no-feature-accessibility" in part for part in command)
+
+
+@pytest.mark.parametrize("initial_rpaths", [[], ["build-lib"], ["build-lib", module.RPATH]])
+def test_only_candidate_copy_loses_build_rpaths_before_signing(tmp_path, monkeypatch, initial_rpaths):
+    build_dir = tmp_path / "qt-build"
+    candidate = tmp_path / "candidate/libqcocoa.dylib"
+    paths = [str(build_dir / "lib") if path == "build-lib" else path for path in initial_rpaths]
+    before = {**metadata(), "rpaths": paths}
+    snapshots = iter([before, {**metadata(), "rpaths": []}, metadata()])
+    monkeypatch.setattr(module, "macho_arm64", lambda _: next(snapshots))
+    commands = []
+    monkeypatch.setattr(module, "run", lambda command, **kwargs: commands.append(command))
+    assert module.relocate_candidate(candidate, build_dir, module.pins(), tmp_path / "reports") == metadata()
+    assert commands == [
+        *(["install_name_tool", "-delete_rpath", path, candidate] for path in paths),
+        ["install_name_tool", "-add_rpath", module.RPATH, candidate],
+        ["codesign", "--force", "--sign", "-", candidate],
+        ["codesign", "--verify", "--strict", candidate],
+    ]
+    assert json.loads((tmp_path / "reports/relocation-before.json").read_text())["rpaths"] == paths
+    assert json.loads((tmp_path / "reports/relocation-after.json").read_text())["rpaths"] == [module.RPATH]
+
+
+@pytest.mark.parametrize("path", ["/opt/homebrew/lib", "@loader_path/../../../foreign", "/tmp/unrelated-qt/lib"])
+def test_relocation_rejects_unreviewed_build_paths_before_mutation(tmp_path, monkeypatch, path):
+    monkeypatch.setattr(module, "macho_arm64", lambda _: {**metadata(), "rpaths": [path]})
+    commands = []
+    monkeypatch.setattr(module, "run", lambda command, **kwargs: commands.append(command))
+    with pytest.raises(RuntimeError, match="Unreviewed candidate build RPATH"):
+        module.relocate_candidate(tmp_path / "candidate/libqcocoa.dylib", tmp_path / "qt-build",
+                                  module.pins(), tmp_path / "reports")
+    assert not commands
+
+
+def test_relocation_never_adds_runtime_path_if_build_path_removal_failed(tmp_path, monkeypatch):
+    build_dir = tmp_path / "qt-build"
+    monkeypatch.setattr(module, "macho_arm64", lambda _: {**metadata(), "rpaths": [str(build_dir / "lib")]})
+    commands = []
+    monkeypatch.setattr(module, "run", lambda command, **kwargs: commands.append(command))
+    with pytest.raises(RuntimeError, match="still has RPATHs"):
+        module.relocate_candidate(tmp_path / "candidate/libqcocoa.dylib", build_dir,
+                                  module.pins(), tmp_path / "reports")
+    assert len(commands) == 1 and commands[0][1] == "-delete_rpath"
+
+
+def test_relocation_final_contract_still_rejects_leaked_build_library_path(tmp_path, monkeypatch):
+    build_dir = tmp_path / "qt-build"
+    snapshots = iter([{**metadata(), "rpaths": []}, {**metadata(), "rpaths": []},
+                      {**metadata(), "rpaths": [module.RPATH, str(build_dir / "lib")]}])
+    monkeypatch.setattr(module, "macho_arm64", lambda _: next(snapshots))
+    monkeypatch.setattr(module, "run", lambda *args, **kwargs: None)
+    with pytest.raises(RuntimeError, match="Unreviewed build/library search path"):
+        module.relocate_candidate(tmp_path / "candidate/libqcocoa.dylib", build_dir,
+                                  module.pins(), tmp_path / "reports")
 
 
 def test_qt_imports_must_be_enumerable_and_check_both_frameworks():

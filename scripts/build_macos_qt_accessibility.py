@@ -178,8 +178,33 @@ def configure_command(source: Path, install: Path) -> list[str]:
     return [str(source / "configure"), "-opensource", "-confirm-license", "-release",
             "-nomake", "examples", "-nomake", "tests", "-prefix", str(install), "--",
             "-DCMAKE_OSX_ARCHITECTURES=arm64", "-DCMAKE_OSX_DEPLOYMENT_TARGET=14.4",
-            "-DCMAKE_SKIP_BUILD_RPATH=ON", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+            # Build tools such as rcc must find their just-built QtCore. Only
+            # the copied candidate is relocated away from build-tree libraries.
+            "-DCMAKE_SKIP_BUILD_RPATH=OFF", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
             "-DFEATURE_accessibility=ON"]
+
+
+def relocate_candidate(candidate: Path, build_dir: Path, settings: dict, reports: Path) -> dict:
+    """Remove reviewed build RPATHs from the copy, never from build tools."""
+    before = macho_arm64(candidate)
+    build_lib = (build_dir / "lib").resolve()
+    for path in before["rpaths"]:
+        if path != RPATH and (not Path(path).is_absolute() or Path(path).resolve() != build_lib):
+            raise RuntimeError(f"Unreviewed candidate build RPATH: {path}")
+    write_json(reports / "relocation-before.json", before)
+    for path in dict.fromkeys(before["rpaths"]):
+        run(["install_name_tool", "-delete_rpath", path, candidate], log=reports / "relocation.log")
+    if macho_arm64(candidate)["rpaths"]:
+        raise RuntimeError("Candidate still has RPATHs after build-path removal")
+    run(["install_name_tool", "-add_rpath", RPATH, candidate], log=reports / "relocation.log")
+    run(["codesign", "--force", "--sign", "-", candidate], log=reports / "relocation.log")
+    run(["codesign", "--verify", "--strict", candidate], log=reports / "relocation.log")
+    after = macho_arm64(candidate)
+    write_json(reports / "relocation-after.json", after)
+    validate_link_contract(after, settings)
+    if before["dependencies"] != after["dependencies"]:
+        raise RuntimeError("Candidate relocation unexpectedly changed linked library identities")
+    return after
 
 
 def build_tool_identity(name: str) -> dict:
@@ -250,6 +275,10 @@ def build(work: Path, jobs: int) -> None:
     build_dir.mkdir(exist_ok=False)
     command = configure_command(source, work / "unused-install-prefix")
     run(command, cwd=build_dir, log=reports / "configure.log")
+    # Preserve exact configuration even when a later compiler/build tool fails.
+    for name in ("CMakeCache.txt", "compile_commands.json", "config.summary"):
+        if (build_dir / name).is_file():
+            shutil.copy2(build_dir / name, reports / name)
     run(["cmake", "--build", build_dir, "--target", "QCocoaIntegrationPlugin", "--parallel", jobs],
         log=reports / "build.log")
     plugin = build_dir / "plugins/platforms/libqcocoa.dylib"
@@ -261,18 +290,9 @@ def build(work: Path, jobs: int) -> None:
     shutil.copy2(plugin, candidate)
     # Never allow the candidate to find the just-built QtCore/QtGui. It must load
     # the unmodified official wheel's frameworks in the isolated runtime below.
-    if macho_arm64(candidate)["rpaths"]:
-        raise RuntimeError("Build unexpectedly embedded an RPATH despite CMAKE_SKIP_BUILD_RPATH")
-    run(["install_name_tool", "-add_rpath", RPATH, candidate], log=reports / "relocation.log")
-    run(["codesign", "--force", "--sign", "-", candidate], log=reports / "relocation.log")
-    run(["codesign", "--verify", "--strict", candidate], log=reports / "relocation.log")
-    metadata = macho_arm64(candidate)
-    validate_link_contract(metadata, settings)
+    metadata = relocate_candidate(candidate, build_dir, settings, reports)
     shutil.copytree(source / "LICENSES", artifact / "LICENSES")
     shutil.copy2(PINS_PATH, artifact / PINS_PATH.name)
-    for name in ("CMakeCache.txt", "compile_commands.json", "config.summary"):
-        if (build_dir / name).is_file():
-            shutil.copy2(build_dir / name, reports / name)
     notice = ("VSE DIAGNOSTIC CANDIDATE — NOT AN OFFICIAL QT BINARY OR RELEASE\n"
               "Qt 6.12.0 Cocoa platform plugin locally rebuilt with upstream Gerrit 772484 PS6.\n"
               "Modification: native accessibility wrappers no longer delete interfaces owned by Qt views/cache.\n"

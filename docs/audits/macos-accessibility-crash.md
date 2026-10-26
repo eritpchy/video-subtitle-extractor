@@ -4,13 +4,14 @@ Status: **diagnostic candidate only; no production dependency change, package
 replacement, Qt downgrade, tag update or release publication.** Local cloud
 tests below are not native macOS acceptance.
 
-Authoring verification: **54 passed, 2 native-only skips** for the probe,
+Authoring verification: **62 passed, 2 native-only skips** for the probe,
 build/evidence guards, runtime dependency resolver and Qt runtime tests on Linux
 with Qt 6.12.0. The full 51,220,268-byte QtBase source archive and exact PS6 patch
 were downloaded, SHA256-verified and applied successfully; both modified Cocoa
-source hashes match the committed pins. macOS compilation and candidate runtime
-gates remain **not run**: the first server attempt stopped at the build-tool
-version guard, before source configuration.
+source hashes match the committed pins. macOS configuration succeeded in the
+second server attempt, but compilation stopped at a build-tool runtime-path
+failure. Completed candidate compilation, staging, ABI/runtime and candidate AX
+gates remain **not run**.
 
 ### First server evidence: run 40254522060, source 315b10e
 
@@ -33,6 +34,30 @@ Ninja absolute path, so it does not establish that PATH selected a wrong tool.
 Evidence ZIP SHA256:
 `3361c994f1ca9a3e61fecb2f407f85f836135b13dc1d3aa70f953b5b8339e833`
 (512,876 bytes; toolchain and both full stock probe logs retained).
+
+### Second server evidence: run 40259052738, source 59749cc
+
+The exact Ninja package/binary identity guard passed and Qt configuration
+completed. Compilation reached the generated-resource steps at 591/895, where
+the just-built `qt-build/libexec/rcc` aborted with exit 134 because dyld could not
+resolve `@rpath/QtCore.framework/Versions/A/QtCore`: no `LC_RPATH` was present.
+Both `qrc_qpdf.cpp` and `qrc_gui_shaders.cpp` failed for that reason; no candidate
+plugin was staged or tested.
+
+Our `CMAKE_SKIP_BUILD_RPATH=ON` affected **all build targets**, including `rcc`,
+not just the candidate plugin. [CMake documents this build-tree-wide
+effect](https://cmake.org/cmake/help/latest/variable/CMAKE_SKIP_BUILD_RPATH.html).
+The corrected configuration sets it to `OFF`, allowing normal build tools to
+resolve their build-tree libraries. After compilation, only the copied candidate
+plugin has its reviewed build-library RPATH removed and its sole runtime RPATH
+set to `@loader_path/../../lib`, then is re-signed and subjected to the unchanged
+strict runtime link contract. Unknown build search paths fail before relocation;
+any residual build RPATH fails afterwards. No global `DYLD_*` search override is
+introduced, and no built QtCore/QtGui is copied into the candidate runtime.
+
+Evidence ZIP SHA256:
+`2b27a2d1b61438af0462cb846b42e47b6a09d01fad39d3429e948b056dc72066`
+(44,233 bytes; full configure/build/toolchain/stock and job logs retained).
 
 ## Exact incident and symbol identity
 
@@ -159,7 +184,9 @@ desktops and self-hosted executors.
    select another one.
 3. Use normal upstream QtBase configuration, accessibility **ON**, then build
    only `QCocoaIntegrationPlugin`. QtCore/QtGui build dependencies may be built;
-   their output is **never copied into the runtime**. No entire Qt/PySide rebuild
+   their output is **never copied into the runtime**. Preserve build-tree RPATHs
+   for build tools such as `rcc`; remove them only from the copied candidate
+   before its strict wheel-relative RPATH check and signing. No entire Qt/PySide rebuild
    or WebEngine build is required. Cold build duration is not yet measured;
    the diagnostic job has a 100-minute process budget, not a promise of success.
 4. Check arm64, minimum OS, SDK, exact Cocoa plugin metadata, runtime library
