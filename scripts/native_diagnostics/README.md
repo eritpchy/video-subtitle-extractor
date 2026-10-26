@@ -33,9 +33,10 @@ unused production entrypoint. Its own main uses the same `Engine`/preprocessing/
 postprocessing. A private copy of the ORT API table clones session options before
 registering a provider and records timings/profile files. It never edits a
 production session's options, changes the original source or uses the production
-IPC provider guard to enable GPU. Build provenance hashes both the included
-worker and its provider-evidence helper. CPU diagnostic equivalence is checked against
-the frozen original boxes/text/confidence tolerance (`1e-5`).
+IPC provider guard to enable GPU. Build provenance hashes the included worker,
+provider-evidence, private-protocol-output and Metal-capture helpers. CPU diagnostic
+equivalence is checked against the frozen original boxes/text/confidence tolerance
+(`1e-5`).
 
 ## Telemetry must be disabled *before process creation*
 

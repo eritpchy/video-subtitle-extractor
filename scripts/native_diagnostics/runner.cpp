@@ -183,6 +183,7 @@ int main(int argc, char **argv) {
     const char *telemetry = std::getenv("ORT_DISABLE_TELEMETRY");
     if (!telemetry || std::string(telemetry) != "1")
       throw std::runtime_error("launch requires ORT_DISABLE_TELEMETRY=1 before process initialization");
+    native_protocol::Output protocol;
     original = OrtGetApiBase()->GetApi(ORT_API_VERSION);
     if (!original || std::string(OrtGetApiBase()->GetVersionString()) != "1.31.0")
       throw std::runtime_error("diagnostic requires the pinned ORT 1.31.0 runtime");
@@ -192,7 +193,7 @@ int main(int argc, char **argv) {
       auto info = runtime_info();
       if (std::string(argv[1]) == "--probe-metal")
         info["metal_capture"] = diagnostic_capture::capabilities();
-      std::cout << info.dump(2) << '\n';
+      protocol.capabilities(info.dump(2));
       return 0;
     }
     if (argc != 3) throw std::runtime_error("usage: diagnostic REQUEST.json NEW_OUTPUT_DIR | --probe");

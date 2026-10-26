@@ -174,9 +174,13 @@ def test_minimal_runtime_probe_requires_optout_before_dynamic_load():
 def test_build_provenance_covers_production_provider_helper():
     source = (diag.HERE / 'benchmark.py').read_text()
     assert "'production_included_source_sha256'" in source
-    for name in ('worker.cpp', 'provider_evidence.hpp', 'metal_capture.hpp',
+    for name in ('worker.cpp', 'provider_evidence.hpp', 'protocol_output.hpp', 'metal_capture.hpp',
                  'metal_capture.mm', 'metal_capture_stub.cpp'):
         assert repr(name) in source
+    runner = (diag.HERE / 'runner.cpp').read_text()
+    assert runner.index('native_protocol::Output protocol;') < runner.index('original = OrtGetApiBase()')
+    assert 'protocol.capabilities(info.dump(2))' in runner
+    assert 'std::cout' not in runner
 
 
 def test_metal_capture_environment_is_explicit_and_never_in_timing(monkeypatch):

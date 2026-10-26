@@ -228,7 +228,7 @@ def build(args):
                   'production_worker_source_sha256': digest(ROOT / 'native/ocr/worker.cpp'),
                   'production_included_source_sha256': {
                       name: digest(ROOT / 'native/ocr' / name)
-                      for name in ('worker.cpp', 'provider_evidence.hpp', 'metal_capture.hpp',
+                      for name in ('worker.cpp', 'provider_evidence.hpp', 'protocol_output.hpp', 'metal_capture.hpp',
                                    'metal_capture.mm', 'metal_capture_stub.cpp')},
                   'diagnostic_source_sha256': {p.name: digest(p) for p in HERE.iterdir() if p.is_file()},
                   'commands': commands, 'runtime_rebuilt': False,
