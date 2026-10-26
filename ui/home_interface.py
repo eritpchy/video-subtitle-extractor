@@ -2,10 +2,11 @@ import os
 import cv2
 import threading
 import multiprocessing
-import time
 import traceback
+from copy import deepcopy
+from dataclasses import dataclass, field
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout
-from PySide6.QtCore import Slot, QRect, Signal
+from PySide6.QtCore import Slot, QRect, Signal, Qt, QThread, QTimer, QSignalBlocker
 from PySide6.QtGui import QTextCharFormat
 from PySide6 import QtWidgets
 from qfluentwidgets import (PushButton, CardWidget, PlainTextEdit, FluentIcon)
@@ -18,10 +19,22 @@ from backend.config import config, tr
 from backend.tools.subtitle_extractor_remote_call import SubtitleExtractorRemoteCall
 from backend.tools.process_manager import ProcessManager
 
+@dataclass(eq=False)
+class _ExtractionJob:
+    """One immutable input snapshot and its independently cancellable process."""
+    task: object
+    video_path: str
+    output_path: str
+    options: dict
+    cancelled: threading.Event = field(default_factory=threading.Event)
+    lock: object = field(default_factory=threading.Lock)
+    process: object = None
+    subprocess_pids: list = field(default_factory=list)
+    last_progress: int = 0
+
+
 class HomeInterface(QWidget):
-    progress_signal = Signal(int, int, int, bool, int) 
-    append_log_signal = Signal(list)
-    task_error_signal = Signal(object)
+    worker_event = Signal(object, str, object)
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.setObjectName("HomeInterface")
@@ -37,16 +50,18 @@ class HomeInterface(QWidget):
         # 添加自动滚动控制标志
         self.auto_scroll = True
         self.running_task = False
-        self.running_process = None
-        self.running_sub_process_pids = []
+        self._active_job = None
+        self._closing = False
+        self._worker_signal_lock = threading.Lock()
+        self._next_task_timer = QTimer(self)
+        self._next_task_timer.setSingleShot(True)
+        self._next_task_timer.timeout.connect(self._start_next_task)
         
         # 当前正在处理的任务索引
         self.current_processing_task_index = -1
 
         self.__init_widgets()
-        self.progress_signal.connect(self.update_progress)
-        self.append_log_signal.connect(self.append_log)
-        self.task_error_signal.connect(self.on_task_error)
+        self.worker_event.connect(self._on_worker_event, Qt.ConnectionType.QueuedConnection)
         print(tr['Main']['AcceleratorWarning'])
 
     def __init_widgets(self):
@@ -148,11 +163,23 @@ class HomeInterface(QWidget):
             self.auto_scroll = False
 
     
+    def _require_gui_thread(self):
+        if QThread.currentThread() != self.thread():
+            raise RuntimeError("Preview and task widgets belong to the GUI thread")
+
+    def _release_preview(self):
+        self._require_gui_thread()
+        capture, self.video_cap = self.video_cap, None
+        if capture is not None:
+            capture.release()
+
+    @Slot(int)
     def slider_changed(self, value):
-        if self.video_cap is not None and self.video_cap.isOpened():
-            frame_no = self.video_slider.value()
-            self.video_cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
-            ret, frame = self.video_cap.read()
+        self._require_gui_thread()
+        capture = self.video_cap
+        if not self._closing and capture is not None and capture.isOpened():
+            capture.set(cv2.CAP_PROP_POS_FRAMES, value)
+            ret, frame = capture.read()
             if ret:
                 # 更新预览图像
                 self.update_preview(frame)
@@ -177,10 +204,12 @@ class HomeInterface(QWidget):
             file_path: 文件路径
         """
         # 加载选中的视频进行预览
-        self.load_video(file_path)
+        if not self.load_video(file_path):
+            return False
         ab_sections = self.task_list_component.get_task_option(index, TaskOptions.AB_SECTIONS, [])
         self.video_display_component.set_ab_sections(ab_sections)
         self.apply_task_selection(index)
+        return True
 
     def apply_task_selection(self, index):
         """
@@ -214,13 +243,14 @@ class HomeInterface(QWidget):
             index: 任务索引
         """
         # 如果删除的是正在处理的任务，则需要更新状态
-        if index == self.current_processing_task_index:
-            self.current_processing_task_index = -1
+        self.current_processing_task_index = self._active_task_index()
         
         task = self.task_list_component.get_task(0)
         if task:
             # 如果还有任务，选中第一个
             self.task_list_component.select_task(0)
+        else:
+            self._release_preview()
 
     def update_preview(self, frame):
         # 先缩放图像
@@ -290,116 +320,146 @@ class HomeInterface(QWidget):
         
         return padded
 
+    def _active_task_index(self):
+        if self._active_job is None:
+            return -1
+        # Row numbers and paths can be reused after deletion/re-import. Only
+        # the original Task object may receive this job's results.
+        return next((i for i, task in enumerate(self.task_list_component.get_all_tasks())
+                     if task is self._active_job.task), -1)
+
     def stop_button_clicked(self):
+        self._require_gui_thread()
+        job = self._active_job
+        index = self._active_task_index()
+        self._active_job = None  # Invalidate queued callbacks before waiting.
+        self.running_task = False
+        self._next_task_timer.stop()
         try:
-            self.running_task = False
-            for pid in self.running_sub_process_pids:
-                ProcessManager.instance().terminate_by_pid(pid)
-            running_process = self.running_process
-            if running_process:
-                ProcessManager.instance().terminate_by_process(running_process)
-            # 更新任务状态为待处理
-            if self.current_processing_task_index >= 0:
-                self.task_list_component.update_task_status(self.current_processing_task_index, TaskStatus.PENDING)
-        finally:    
-            self.running_sub_process_pids = []
-            self.running_process = None
+            if job is not None:
+                with job.lock:
+                    job.cancelled.set()
+                    process = job.process
+                    pids = list(job.subprocess_pids)
+                for pid in pids:
+                    ProcessManager.instance().terminate_by_pid(pid)
+                if process is not None:
+                    ProcessManager.instance().terminate_by_process(process)
+            if index >= 0:
+                self.task_list_component.update_task_status(index, TaskStatus.PENDING)
+        finally:
+            self.current_processing_task_index = -1
+            self._release_preview()
             self.run_button.setVisible(True)
             self.stop_button.setVisible(False)
 
     def run_button_clicked(self):
+        self._require_gui_thread()
+        if self._closing or self.running_task:
+            return
         if not self.task_list_component.get_pending_tasks():
             self.append_output(tr['SubtitleExtractorGUI']['OpenVideoFirst'])
             return
-            
-        try:
-            # 获取所有待执行的任务
-            pending_tasks = self.task_list_component.get_pending_tasks()
-            if not pending_tasks:
+        self.running_task = True
+        self.run_button.setVisible(False)
+        self.stop_button.setVisible(True)
+        self._next_task_timer.stop()
+        self._start_next_task()
+
+    @Slot()
+    def _start_next_task(self):
+        self._require_gui_thread()
+        if self._closing or not self.running_task or self._active_job is not None:
+            return
+        while self.running_task:
+            pending = self.task_list_component.get_pending_tasks()
+            if not pending:
+                self.processing_finished()
                 return
-            
-            self.run_button.setVisible(False)
-            self.stop_button.setVisible(True)
-            # 开启后台线程处理视频
-            def task():
-                self.running_task = True
-                try:
-                    while self.running_task:
-                        try:
-                            pending_tasks = self.task_list_component.get_pending_tasks()
-                            if not pending_tasks:
-                                print("No pending tasks. Exiting.")
-                                break
-                            pending_task = pending_tasks[0]
-                            # 更新当前处理的任务索引
-                            self.current_processing_task_index, task = pending_task
-                            if not self.load_video(task.path):
-                                self.append_output(tr['SubtitleExtractorGUI']['OpenVideoFailed'].format(task.path))
-                                self.task_list_component.update_task_status(self.current_processing_task_index, TaskStatus.FAILED)
-                                continue
-                            
-                            # 获取字幕区域坐标
-                            subtitle_areas = self.apply_task_selection(self.current_processing_task_index)
-                            if not subtitle_areas or len(subtitle_areas) <= 0:
-                                self.append_output(tr['SubtitleExtractorGUI']['SelectSubtitleArea'].format(task.path))
-                                self.task_list_component.update_task_status(self.current_processing_task_index, TaskStatus.FAILED)
-                                continue
+            index, task = pending[0]
+            self.current_processing_task_index = index
+            try:
+                self.task_list_component.set_current_task(index)
+                if not self.on_task_selected(index, task.path):
+                    self.append_output(tr['SubtitleExtractorGUI']['OpenVideoFailed'].format(task.path))
+                    self.task_list_component.update_task_status(index, TaskStatus.FAILED)
+                    continue
+                subtitle_areas = self.task_list_component.get_task_option(index, TaskOptions.SUB_AREAS, [])
+                if not subtitle_areas:
+                    self.append_output(tr['SubtitleExtractorGUI']['SelectSubtitleArea'].format(task.path))
+                    self.task_list_component.update_task_status(index, TaskStatus.FAILED)
+                    continue
+                self.video_display_component.save_selections_to_config()
+                self.task_list_component.update_task_progress(index, 0)
+                self.task_list_component.update_task_status(index, TaskStatus.PROCESSING)
+                options = deepcopy(task.options)
+                for key, value in options.items():
+                    if key == TaskOptions.SUB_AREAS.value:
+                        areas = self.video_display_component.preview_coordinates_to_video_coordinates(value)
+                        options[key] = areas[0] if areas else None
+                task.output_path = None
+                job = _ExtractionJob(task, task.path, task.output_path, options)
+                self._active_job = job
+                # This thread must never read/change QWidget, TaskList or
+                # VideoCapture state. All such work stays in the slots above.
+                threading.Thread(target=self._extract_job, args=(job,), daemon=True).start()
+                return
+            except Exception as error:
+                self.append_output(f"Error: {error}")
+                self.task_list_component.update_task_status(index, TaskStatus.FAILED)
+                self._active_job = None
+                self._release_preview()
 
-                            self.video_display_component.save_selections_to_config()
+    def _emit_worker_event(self, job, kind, payload):
+        # Serialize emission with shutdown. Checking only after emit raises is
+        # too late if a background thread races native QObject destruction.
+        with self._worker_signal_lock:
+            if self._closing:
+                return
+            self.worker_event.emit(job, kind, payload)
 
-                            # 更新任务状态为运行中
-                            self.task_list_component.update_task_progress(self.current_processing_task_index, 0)
-                            
-                            # 选中当前任务
-                            self.task_list_component.select_task(self.current_processing_task_index)
-                            
-                            self.task_list_component.update_task_status(self.current_processing_task_index, TaskStatus.PROCESSING)
-                            options = {}
-                            for key in task.options:
-                                value = task.options[key]
-                                if key == TaskOptions.SUB_AREAS.value:
-                                    value = self.video_display_component.preview_coordinates_to_video_coordinates(value)
-                                    value = value[0] if len(value) > 0 else None
-                                options[key] = value
-                            # 清理缓存, 使用动态路径
-                            task.output_path = None
-                            output_path = task.output_path
-                            process = self.run_subtitle_extractor_process(task.path, output_path, options)
-                            
-                            # 更新任务状态为已完成
-                            task = self.task_list_component.get_task(self.current_processing_task_index)
-                            if process.exitcode == 0 and task and task.status == TaskStatus.PROCESSING:
-                                self.progress_signal.emit(100, 100, 100, True, 100)
-                                # 任务完成, 更新输出路径为只读
-                                task.output_path = output_path
-                                self.task_list_component.update_task_status(self.current_processing_task_index, TaskStatus.COMPLETED)
-                            else:
-                                self.task_list_component.update_task_status(self.current_processing_task_index, TaskStatus.FAILED)
-                            
-                        except Exception as e:
-                            print(e)
-                            self.append_output(f"Error: {e}")
-                            # 更新任务状态为失败
-                            if self.current_processing_task_index >= 0:
-                                self.task_list_component.update_task_status(self.current_processing_task_index, TaskStatus.FAILED)
-                            break
-                        finally:
-                            if self.video_cap:
-                                self.video_cap.release()
-                                self.video_cap = None
-                            time.sleep(1)
-                finally:
-                    self.running_task = False
-                    self.run_button.setVisible(True)
-                    self.stop_button.setVisible(False)
-
-            threading.Thread(target=task, daemon=True).start()
-        except Exception as e:
+    def _extract_job(self, job):
+        exitcode, error = None, None
+        try:
+            process = self.run_subtitle_extractor_process(job)
+            exitcode = process.exitcode if process is not None else None
+        except Exception as exc:
+            error = str(exc)
             print(traceback.format_exc())
-            self.append_output(f"Error: {e}")
-            # 没有待执行的任务，恢复按钮状态
-            self.run_button.setVisible(True)
-            self.stop_button.setVisible(False)
+        finally:
+            self._emit_worker_event(job, 'finished', (exitcode, error))
+
+    @Slot(object, str, object)
+    def _on_worker_event(self, job, kind, payload):
+        self._require_gui_thread()
+        if self._closing or job is not self._active_job or job.cancelled.is_set():
+            return
+        self.current_processing_task_index = self._active_task_index()
+        if kind == 'progress':
+            if self.current_processing_task_index >= 0:
+                self.update_progress(*payload)
+        elif kind == 'log':
+            self.append_output(*payload)
+        elif kind == 'error':
+            self.on_task_error(payload)
+        elif kind == 'finished':
+            exitcode, error = payload
+            index = self.current_processing_task_index
+            if error:
+                self.append_output(f"Error: {error}")
+            if index >= 0:
+                if exitcode == 0 and not error and job.task.status == TaskStatus.PROCESSING:
+                    self.update_progress(100, 100, 100, True, 100)
+                    job.task.output_path = job.output_path
+                    self.task_list_component.update_task_status(index, TaskStatus.COMPLETED)
+                else:
+                    self.task_list_component.update_task_status(index, TaskStatus.FAILED)
+            if index >= 0 and self.video_path == job.video_path:
+                self.video_slider.setValue(1)
+                self._release_preview()
+            self._active_job = None
+            self.current_processing_task_index = -1
+            self._next_task_timer.start(1000)
 
     @staticmethod
     def extractor_process(queue, video_path, output_path, options):
@@ -433,49 +493,53 @@ class HomeInterface(QWidget):
             ProcessManager.instance().terminate_all()
             
 
-    # 修改run_subtitle_extractor_process方法
-    def run_subtitle_extractor_process(self, video_path, output_path, options):
-        """
-        使用多进程执行字幕提取，并等待进程完成
-        
-        Args:
-            video_path: 视频文件路径
-            output_path: 输出文件路径
-            options: 任务选项
-        """
+    def run_subtitle_extractor_process(self, job):
+        """Worker-only process management; no preview or widget access."""
+        caller = SubtitleExtractorRemoteCall()
+        caller.register_update_progress_callback(
+            lambda *args: self._emit_worker_event(job, 'progress', args))
+        caller.register_log_callback(lambda args: self._emit_worker_event(job, 'log', args))
+        caller.register_error_callback(lambda error: self._emit_worker_event(job, 'error', error))
 
-        subtitle_extractor_remote_caller = SubtitleExtractorRemoteCall()
-        subtitle_extractor_remote_caller.register_update_progress_callback(self.progress_signal.emit)
-        subtitle_extractor_remote_caller.register_log_callback(self.append_log_signal.emit)
-        subtitle_extractor_remote_caller.register_manage_process_callback(lambda pid: (
-                ProcessManager.instance().add_pid(pid),
-                self.running_sub_process_pids.append(pid),
-            )
-        )
-        subtitle_extractor_remote_caller.register_error_callback(self.task_error_signal.emit)
+        def manage_process(pid):
+            with job.lock:
+                cancelled = job.cancelled.is_set()
+                if not cancelled:
+                    ProcessManager.instance().add_pid(pid)
+                    job.subprocess_pids.append(pid)
+            if cancelled:
+                ProcessManager.instance().terminate_by_pid(pid)
+
+        caller.register_manage_process_callback(manage_process)
         process = multiprocessing.Process(
             target=HomeInterface.extractor_process,
-            args=(subtitle_extractor_remote_caller.queue, video_path, output_path, options)
-        )
+            args=(caller.queue, job.video_path, job.output_path, job.options))
         try:
-            if not self.running_task:
-                return process
-            process.start()
-            ProcessManager.instance().add_process(process)
-            self.running_process = process
+            with job.lock:
+                if job.cancelled.is_set():
+                    return None
+                process.start()
+                job.process = process
+                ProcessManager.instance().add_process(process)
             process.join()
+            # The child sends FINISH after its final ERROR/progress/logs. A
+            # successful exit alone does not prove those messages were handled.
+            if process.exitcode == 0 and not job.cancelled.is_set() and not caller.wait(5):
+                raise RuntimeError("Extractor callback stream did not finish")
             print(f"Process exited with code {process.exitcode}")
         finally:
-            subtitle_extractor_remote_caller.stop()
+            caller.stop()
         return process
 
     @Slot()
     def processing_finished(self):
+        self._require_gui_thread()
         pending_tasks = self.task_list_component.get_pending_tasks()
-        if pending_tasks:
+        if self._active_job is not None or pending_tasks:
             # 还有待执行任务, 忽略
             return
-        # 处理完成后恢复界面可用性
+        # Only the process-completion slot advances/finishes a task batch.
+        self.running_task = False
         self.run_button.setVisible(True)
         self.stop_button.setVisible(False)
         self.se = None
@@ -484,31 +548,33 @@ class HomeInterface(QWidget):
         # 重置当前处理任务索引
         self.current_processing_task_index = -1
 
-    @Slot(int, bool)
+    @Slot(int, int, int, bool, int)
     def update_progress(self, progress_remover, progress_finder, progress_total, isFinished, progress_post=0):
+        self._require_gui_thread()
         try:
-            pos = min(self.frame_count - 1, int(progress_remover / 100 * self.frame_count))
-            if pos != self.video_slider.value():
-                self.video_slider.setValue(pos)
+            job = self._active_job
+            if (self.frame_count and job is not None
+                    and self.video_path == job.video_path):
+                pos = min(self.frame_count - 1, int(progress_remover / 100 * self.frame_count))
+                if pos != self.video_slider.value():
+                    self.video_slider.setValue(pos)
 
             # 更新任务进度（加权：帧提取5% + OCR 90% + 后处理5%）
             if self.current_processing_task_index >= 0:
                 displayed = min(100, int(progress_remover * 0.9 + progress_finder * 0.05 + progress_post * 0.05))
                 # 确保进度不会回退
-                if not hasattr(self, '_last_task_progress'):
-                    self._last_task_progress = {}
                 task_idx = self.current_processing_task_index
-                last_progress = self._last_task_progress.get(task_idx, -1)
+                last_progress = job.last_progress if job is not None else -1
                 if displayed >= last_progress or isFinished:
-                    self._last_task_progress[task_idx] = displayed
+                    if job is not None:
+                        job.last_progress = displayed
                     self.task_list_component.update_task_progress(
                         task_idx,
                         displayed,
                     )
             
-            # 检查是否完成
-            if isFinished:
-                self.processing_finished()
+            # isFinished belongs to OCR progress, not process/queue lifetime.
+            # The tagged worker 'finished' event is the only completion owner.
         except Exception as e:
             # 捕获任何异常，防止崩溃
             print(f"更新进度时出错: {str(e)}")
@@ -541,31 +607,34 @@ class HomeInterface(QWidget):
             self.task_list_component.update_task_status(self.current_processing_task_index, TaskStatus.FAILED)
 
     def load_video(self, video_path):
+        self._require_gui_thread()
+        if self._closing:
+            return False
+        self._release_preview()
         self.video_path = video_path
-        if self.video_cap:
-            self.video_cap.release()
-            self.video_cap = None
-        self.video_cap = cv2.VideoCapture(self.video_path)
-        if not self.video_cap.isOpened():
-            return False
-        ret, frame = self.video_cap.read()
-        if not ret:
-            return False
-        self.frame_count = int(self.video_cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        self.frame_height = int(self.video_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        self.frame_width = int(self.video_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self.fps = self.video_cap.get(cv2.CAP_PROP_FPS)
-        
-        self.update_preview(frame)
-        self.video_slider.setMaximum(self.frame_count)
-        self.video_slider.setValue(1)
-        self.video_display_component.set_dragger_enabled(True)
-        return True
-        self.video_slider.setMaximum(self.frame_count)
-        self.video_slider.setValue(1)
-        self.video_display_component.set_dragger_enabled(True)
-        return True
-
+        capture = cv2.VideoCapture(video_path)
+        try:
+            if not capture.isOpened():
+                return False
+            ret, frame = capture.read()
+            if not ret:
+                return False
+            self.frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+            self.frame_height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            self.frame_width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+            self.fps = capture.get(cv2.CAP_PROP_FPS)
+            self.video_cap = capture
+            self.update_preview(frame)
+            # The first decoded frame is already displayed. Do not cause
+            # implicit seeks from range/value changes during replacement.
+            with QSignalBlocker(self.video_slider):
+                self.video_slider.setMaximum(self.frame_count)
+                self.video_slider.setValue(1)
+            self.video_display_component.set_dragger_enabled(True)
+            return True
+        finally:
+            if self.video_cap is not capture:
+                capture.release()
 
     def open_file(self):
         files, _ = QtWidgets.QFileDialog.getOpenFileNames(
@@ -590,23 +659,15 @@ class HomeInterface(QWidget):
             index = max(0, self.task_list_component.find_task_index_by_path(path))
             self.task_list_component.select_task(index)
 
+    def shutdown(self):
+        """Called explicitly by the main window, before its children die."""
+        self._require_gui_thread()
+        if self._closing:
+            return
+        with self._worker_signal_lock:
+            self._closing = True
+        self.stop_button_clicked()
+
     def closeEvent(self, event):
-        """窗口关闭时断开信号连接"""
-        try:
-            # 断开信号连接
-            self.progress_signal.disconnect(self.update_progress)
-            self.append_log_signal.disconnect(self.append_log)
-            self.task_error_signal.disconnect(self.on_task_error)
-            self.video_display_component.video_slider.valueChanged.disconnect(self.slider_changed)
-            self.video_display_component.ab_sections_changed.disconnect(self.ab_sections_changed)
-            self.video_display_component.selections_changed.disconnect(self.selections_changed)
-            # 释放视频资源
-            if self.video_cap:
-                self.video_cap.release()
-                self.video_cap = None
-                
-            # 确保所有子进程都已终止
-            ProcessManager.instance().terminate_all()
-        except Exception as e:
-            print(f"Error during close window:", e)
+        self.shutdown()
         super().closeEvent(event)

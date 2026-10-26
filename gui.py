@@ -122,6 +122,7 @@ class SubtitleExtractorGUI(FluentWindow):
         """程序关闭时保存窗口位置并恢复标准输出和标准错误"""
         self.save_window_position()
         self.themeListener.stop()
+        self.homeInterface.shutdown()
         ProcessManager().instance().terminate_all()
         super().closeEvent(event)
 

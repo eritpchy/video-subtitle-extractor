@@ -17,22 +17,46 @@ class SubtitleExtractorRemoteCall:
         self.queue = multiprocessing.Queue()
         self.callbacks = {}
         self.running = True
-        threading.Thread(target=self.run, daemon=True).start()
+        self.finished = False
+        self.stopped = False
+        self.error = None
+        self.thread = threading.Thread(target=self.run, daemon=True)
+        self.thread.start()
     
     def run(self):
         try:
             while self.running:
                 cmd, args = self.queue.get(block=True)
                 if cmd == Command.FINISH:
+                    self.finished = True
                     break
                 callback = self.callbacks.get(cmd)
                 if callback:
-                    callback(*args)
+                    try:
+                        callback(*args)
+                    except Exception as error:
+                        # Keep draining the child pipe after delivery failure;
+                        # otherwise its Queue feeder can block process.join().
+                        if self.error is None:
+                            self.error = error
+        except Exception as error:
+            self.error = error
         finally:
             self.running = False
 
+    def wait(self, timeout=None):
+        """Wait for FINISH after a joined child, draining earlier callbacks."""
+        self.thread.join(timeout)
+        return not self.thread.is_alive() and self.finished and not self.stopped and self.error is None
+
     def stop(self):
+        self.stopped = True
         self.running = False
+        # A stopped/failed child may never send FINISH. Wake an idle reader;
+        # never leave a daemon blocked forever in Queue.get().
+        if self.thread.is_alive():
+            self.queue.put((Command.FINISH, ()))
+            self.thread.join(timeout=1)
 
     def register_update_progress_callback(self, callback):
         self.callbacks[Command.PROGRESS] = callback
