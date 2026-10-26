@@ -53,8 +53,9 @@ restoration gates failed; neither this source change nor offline tests waive the
 5. Every actual extracted entry is checked against the fixed table. Extra,
    missing, wrong-type, reparse, hard-linked, wrong-size or wrong-hash outputs
    fail. Only then does a same-volume `FileRenameInfo` with `ReplaceIfExists=FALSE`
-   publish the complete root relative to the already held parent handle. An
-   existing directory—even an empty one—is never replaced.
+   publish the complete root using a NUL-terminated extended absolute UTF-16
+   name with NULL RootDirectory, while the canonical parent and all ancestor
+   handles remain held. An existing directory—even an empty one—is never replaced.
 
 The manifest build directory intentionally permits only its defined parts and
 sidecars. The native EXE is a **separate** output/release asset. Do not place it in
@@ -87,8 +88,9 @@ not the build directory's mutable manifest.
   before the parent/staging paths, so MAX_PATH-only support is insufficient.
   The new extractor does not create a process or set a cwd, but actual Unicode,
   >260-character member and >260-character destination restoration remain
-  mandatory Server gates. The separate observed atomic-rename error 206 is
-  **unresolved**; it is not attributed to tar or fixed by changing extraction.
+  mandatory Server gates. The separate observed atomic-rename error 206 was
+  not attributed to tar. The current publication candidate follows the absolute
+  name form proven by isolated Server probes; full restoration remains unproven.
 * A random `.vse-incomplete-...` directory is atomically created with an ACL for
   the current user and SYSTEM. No existing tree is reused. Preflight requires
   free space for merged ZIP + extracted bytes + 64 KiB per inventory entry +
@@ -286,8 +288,32 @@ parent and absent/existing target. Each process records API structure offsets,
 file identities, marker contents, error and unchanged existing-target sentinel.
 No case failure/crash hides later cases; any unmet expectation keeps the total
 nonzero. The **current Microsoft Win32 contract permits a relative RootDirectory**;
-no NT-only assumption is used. The old production rename stays unchanged until
-Server evidence isolates the failure and a reviewed fix passes no-overwrite gates.
+no NT-only assumption is used. Run `40276853621` at `3dcf4a6` returned all 48
+records on each Server (evidence ZIP 347,124 bytes, SHA256
+`aa0a2dfaa556ecff3375896d52531da5bacdc9aa89c57ad56fda8d10a19d7601`).
+Both relative-name modes returned error 87 for all new-target cases. The absolute
+extended NUL-terminated form succeeded for all eight new-target combinations;
+all eight existing-target cases returned error 183 with preserved identities and
+sentinel bytes. Destination paths ranged from 98 to 442 UTF-16 units; the longest
+source marker path was 841 units. Both original relative-mode failures remain
+recorded: the probe still collects all modes and returns overall nonzero when
+any expectation is unmet. Do not relabel a failed comparison as a full pass.
+
+The current production candidate now uses the proven absolute-name API form,
+NULL RootDirectory and `ReplaceIfExists=FALSE`. Parent/ancestor locks remain
+live across publication, and the trailing NUL is allocated separately from
+`FileNameLength`. This does not establish the unique mechanism of the earlier
+error 206 or substitute for complete native extraction/publication testing.
+
+That same run stopped before all production restoration gates: a portable test
+driver's default Windows text stdout changed payload LF bytes into CRLF. Its
+binary input and raw inflate were not sufficient to make stdout binary. The
+driver now uses the [documented binary CRT mode](https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/setmode)
+`_setmode(_fileno(stdout), _O_BINARY)` before output,
+and separately checks LF/CRLF/NUL/0x1A and every byte without normalizing either
+expected or actual payload. All native ZIP64/Unicode/long-path gates still need
+to run and pass on this new candidate; neither that test correction nor the
+rename-only probe is reported as successful client restoration.
 
 ### Restricted zlib provenance and known-risk boundary
 

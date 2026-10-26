@@ -56,6 +56,28 @@ class FixedInflateSourceTests(unittest.TestCase):
         self.assertIn('hash.finish() != entry->sha256', source)
         self.assertIn('rename->ReplaceIfExists = FALSE', source)
 
+    def test_atomic_publish_uses_probed_absolute_nul_name_and_keeps_parent_locks(self):
+        source = (HERE / 'restorer.cpp').read_text(encoding='utf-8')
+        rename = source.split('void rename_without_replace(', 1)[1].split('void remove_owned_file(', 1)[0]
+        self.assertIn('const auto filename = native_path(destination);', rename)
+        self.assertIn('storage(prefix + bytes + sizeof(wchar_t), 0)', rename)
+        self.assertIn('rename->RootDirectory = nullptr;', rename)
+        self.assertIn('rename->ReplaceIfExists = FALSE;', rename)
+        self.assertIn('rename->FileNameLength = static_cast<DWORD>(bytes);', rename)
+        self.assertIn('memcpy(rename->FileName, filename.data(), bytes);', rename)
+        self.assertIn('MAXDWORD - prefix - sizeof(wchar_t)', rename)
+        self.assertIn('SetFileInformationByHandle(root, FileRenameInfo', rename)
+        self.assertNotIn('MoveFile', rename)
+        restore = source.split('void restore(', 1)[1]
+        self.assertIn('auto parent = pin_directory(destination_path);', restore)
+        self.assertIn('const auto final_path = vse::join(parent.path, bundle::root_name);', restore)
+        self.assertIn('rename_without_replace(restored_root.get(), final_path);', restore)
+        self.assertNotIn('parent.locks.clear()', restore)
+        self.assertLess(restore.index('assert_absent(final_path); check_cancel();'),
+                        restore.index('rename_without_replace(restored_root.get(), final_path);'))
+        self.assertLess(restore.index('rename_without_replace(restored_root.get(), final_path);'),
+                        restore.index('incomplete.clear();'))
+
     def test_server_probe_keeps_four_argv_controls_and_unicode_long_cwd_gates(self):
         server = module('restorer_server_source_test', HERE / 'tests/windows_server_tests.py')
         cases = server.tar_probe_cases()

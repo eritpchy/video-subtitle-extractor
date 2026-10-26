@@ -203,6 +203,15 @@ class InflateTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, plain)
 
+    def test_stdout_preserves_lf_crlf_nul_sub_and_every_byte_without_translation(self):
+        plain = b'LF\nCRLF\r\nCR\rNUL\0SUB\x1aEND' + bytes(range(256))
+        result = self.run_raw(zlib.compress(plain)[2:-4], len(plain))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, b'')
+        self.assertEqual(len(result.stdout), len(plain))
+        self.assertEqual(result.stdout, plain)
+        self.assertEqual(hashlib.sha256(result.stdout).digest(), hashlib.sha256(plain).digest())
+
     def test_truncated_trailing_invalid_sizes_and_cancel_are_fail_closed(self):
         plain = b'payload' * 100
         raw = zlib.compress(plain)[2:-4]

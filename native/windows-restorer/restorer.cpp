@@ -328,13 +328,21 @@ void check_tree(const std::wstring& root, const std::wstring& relative, std::map
     } while (FindNextFileW(raw, &found));
     if (GetLastError() != ERROR_NO_MORE_FILES) winfail(L"Cannot finish enumerating restored directory");
 }
-void rename_without_replace(HANDLE root, HANDLE parent, const std::wstring& destination) {
-    const auto bytes = destination.size() * sizeof(wchar_t);
-    std::vector<unsigned char> storage(offsetof(FILE_RENAME_INFO, FileName) + bytes);
+void rename_without_replace(HANDLE root, const std::wstring& destination) {
+    // Caller retains the canonical destination parent AND all its ancestors
+    // without delete sharing through this atomic operation. Do not use a path
+    // obtained from a mutable environment or user-supplied device namespace.
+    // Actual Server 2022/2025 probes support an absolute extended UTF-16 name
+    // with NULL RootDirectory; both tested relative forms failed with error 87.
+    const auto filename = native_path(destination);
+    const auto bytes = filename.size() * sizeof(wchar_t);
+    const auto prefix = offsetof(FILE_RENAME_INFO, FileName);
+    if (bytes > MAXDWORD - prefix - sizeof(wchar_t)) fail(L"Atomic rename name exceeds the Windows buffer bound");
+    std::vector<unsigned char> storage(prefix + bytes + sizeof(wchar_t), 0);
     auto rename = reinterpret_cast<FILE_RENAME_INFO*>(storage.data());
-    rename->ReplaceIfExists = FALSE; rename->RootDirectory = parent;
-    rename->FileNameLength = static_cast<DWORD>(bytes);
-    memcpy(rename->FileName, destination.data(), bytes);
+    rename->ReplaceIfExists = FALSE; rename->RootDirectory = nullptr;
+    rename->FileNameLength = static_cast<DWORD>(bytes); // excludes the retained trailing NUL
+    memcpy(rename->FileName, filename.data(), bytes);
     if (!SetFileInformationByHandle(root, FileRenameInfo, rename, static_cast<DWORD>(storage.size()))) winfail(L"Cannot atomically publish restored directory; existing data was not replaced");
 }
 void remove_owned_file(HANDLE file) {
@@ -397,7 +405,7 @@ void restore(const std::wstring& source_path, const std::wstring& destination_pa
     for (const auto& lock : parent.locks) info(lock.get());
     info(staging.get()); info(extraction_directory.get()); info(restored_root.get());
     assert_absent(final_path); check_cancel();
-    rename_without_replace(restored_root.get(), parent.locks.back().get(), bundle::root_name);
+    rename_without_replace(restored_root.get(), final_path);
     incomplete.clear(); // The atomic rename is the sole success commit point.
     std::wprintf(L"Restored and verified: %ls\n", final_path.c_str());
     // No application launch; no recursive deletion. Temporary cleanup is best
