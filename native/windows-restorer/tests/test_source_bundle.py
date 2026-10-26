@@ -19,7 +19,7 @@ bundle = importlib.util.module_from_spec(spec); spec.loader.exec_module(bundle)
 class SourceBundleTests(unittest.TestCase):
     def test_full_source_snapshot_fixed_header_notices_no_obj_or_runtime(self):
         sources = bundle.snapshot_sources(ROOT)
-        notices = {name: b'unit test notice, not for distribution' for name in ('license.docx', 'license-2015-2022.docx', 'Apache-2.0.txt', 'THIRD_PARTY_NOTICES.txt')}
+        notices = {name: b'unit test notice, not for distribution' for name in ('license.docx', 'license-2015-2022.docx', 'Apache-2.0.txt', 'THIRD_PARTY_NOTICES.txt', 'zlib-LICENSE.txt')}
         record = {'git': {'commit': 'a' * 40, 'dirty': True, 'status_porcelain_v1': '?? new.cpp\n'}, 'exe_sha256': 'b' * 64}
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); archive = root / 'source.zip'

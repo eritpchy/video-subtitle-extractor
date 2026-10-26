@@ -70,10 +70,20 @@ inline std::uint64_t required_space(std::uint64_t zip, std::uint64_t unpacked, s
     if (entries > (std::numeric_limits<std::uint64_t>::max)() / 65536) throw std::overflow_error("entry overflow");
     return checked_add(checked_add(zip, unpacked), checked_add(entries * 65536, 64ULL * 1024 * 1024));
 }
+inline bool fixed_archive_bounds_ok(std::uint64_t expanded, std::uint64_t central_offset,
+                                    std::uint64_t expected_bytes, std::uint64_t actual_bytes) noexcept {
+    // Non-constexpr parameter check: a deliberately oversized space-preflight
+    // fixture must compile under MSVC /W4 /WX without a constant controlling if.
+    // The production limits and comparisons are unchanged; no unchecked sum.
+    return expanded <= 1024ULL * 1024 * 1024 * 1024 && central_offset < expected_bytes && actual_bytes == expected_bytes;
+}
 inline bool sha256_text_ok(const std::string& text) {
     if (text.size() != 64) return false;
     return std::all_of(text.begin(), text.end(), [](char ch) { return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f'); });
 }
 struct Part { const wchar_t* name; std::uint64_t bytes; const char* sha256; };
-struct Entry { const wchar_t* name; std::uint64_t bytes; bool directory; const char* sha256; };
+struct Entry {
+    const wchar_t* name; std::uint64_t bytes; bool directory; const char* sha256;
+    std::uint64_t data_offset; std::uint64_t compressed_bytes; unsigned method;
+};
 } // namespace vse

@@ -7,6 +7,9 @@ import json
 from pathlib import Path
 import sys
 sys.dont_write_bytecode = True
+# Supports an isolated -I -S build from the extracted companion, not imports
+# from a producer checkout, cwd, user site or PYTHONPATH.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from source_bundle import verify_extracted_sources
 
 

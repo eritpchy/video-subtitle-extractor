@@ -14,6 +14,26 @@ The distributor remains responsible for applicable Visual Studio toolchain and
 runtime redistribution rights. Preserving notices and using /MT do not establish
 license entitlement. The build does not download or accept a new license.
 
-Windows APIs and the Windows-provided tar.exe are operating-system components.
-No tar source, library, or executable is redistributed by this restorer. If the
-system tar.exe is unavailable, restoration fails; it never fetches a replacement.
+This diagnostic candidate includes a restricted static raw-inflate subset of
+official zlib 1.3.2, Copyright (C) 1995-2026 Jean-loup Gailly and Mark Adler,
+under the zlib license (not Apache 2.0). The complete unchanged LICENSE and
+exact source bytes are included in the source companion and zlib-LICENSE.txt.
+Official source: https://zlib.net/zlib-1.3.2.tar.gz
+SHA256: bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16
+Official tag v1.3.2 / commit da607da739fa6047df13e66a2af6b8bec7c2a498.
+No upstream source file was modified. The source selection/build macros and
+individual byte hashes are recorded in third_party/zlib-1.3.2/pin.json.
+
+Only inflate.c, inftrees.c, inffast.c, adler32.c and zutil.c are compiled,
+with Z_SOLO and NO_GZIP. The caller provides bounded allocations and calls
+raw inflate with windowBits=-15. No gzip I/O, compression, minizip, archive
+pathname parser, system tar subprocess or additional client runtime is used.
+CVE-2026-85091 affects gzwrite.c, which is not in this source/link closure.
+Upstream report: https://github.com/madler/zlib/issues/1310
+Upstream fix: df84af25dc1942490e1d1c899a07619152a46148 (gzwrite.c).
+Each build must retain object symbols and a final link map proving excluded
+paths are absent. This limited assessment does not claim zlib 1.3.2 as a whole
+has no known vulnerabilities, nor that this subset has no unknown risk.
+
+This is a Server diagnostic candidate, NOT a customer distribution approval.
+Windows APIs are operating-system components. No runtime network fetch occurs.

@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 #include "core.hpp"
+#include "inflate_fixed.hpp"
 #include "bundle_metadata.hpp" // Generated only by generate_metadata.py.
 #pragma comment(lib, "bcrypt.lib")
 #pragma comment(lib, "advapi32.lib")
@@ -222,42 +223,79 @@ void check_space(const std::wstring& parent) {
     const auto needed = vse::required_space(bundle::archive_bytes, bundle::uncompressed_bytes, bundle::entry_count);
     if (available.QuadPart < needed) fail(L"Insufficient free space: need at least " + std::to_wstring(needed) + L" bytes in the destination (downloaded parts are additional).");
 }
-void extract_with_system_tar(const std::wstring& zip, const std::wstring& destination) {
-    wchar_t directory[MAX_PATH + 1]{};
-    const UINT count = GetSystemDirectoryW(directory, MAX_PATH + 1);
-    if (!count || count > MAX_PATH) winfail(L"Cannot locate Windows system directory");
-    auto system = pin_directory(directory);
-    const std::wstring tar = vse::join(system.path, L"tar.exe");
-    auto tar_lock = open_input(tar, true); // Existence, regular file and no mutation while launching.
-    wchar_t windows[MAX_PATH + 1]{};
-    const UINT win_count = GetWindowsDirectoryW(windows, MAX_PATH + 1);
-    if (!win_count || win_count > MAX_PATH) winfail(L"Cannot locate Windows directory");
-    // Do not inherit TAR_OPTIONS, PATH, Python/Conda variables or shell hooks.
-    std::wstring environment = std::wstring(L"SystemRoot=") + windows;
-    environment.push_back(L'\0'); environment += std::wstring(L"WINDIR=") + windows;
-    environment.push_back(L'\0'); environment.push_back(L'\0');
-    std::wstring command = vse::quote_arg(tar) + L" -x --no-same-owner --no-same-permissions -f " + vse::quote_arg(native_path(zip)) + L" -C " + vse::quote_arg(native_path(destination));
-    Handle job(CreateJobObjectW(nullptr, nullptr));
-    if (!job.valid()) winfail(L"Cannot create extraction job");
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-    if (!SetInformationJobObject(job.get(), JobObjectExtendedLimitInformation, &limits, sizeof(limits))) winfail(L"Cannot bind extraction lifetime");
-    STARTUPINFOW startup{}; startup.cb = sizeof(startup);
-    PROCESS_INFORMATION process{};
-    if (!CreateProcessW(tar.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
-                        environment.data(), system.path.c_str(), &startup, &process)) winfail(L"Cannot start system tar; no dependency will be downloaded");
-    Handle process_handle(process.hProcess), thread_handle(process.hThread);
-    if (!AssignProcessToJobObject(job.get(), process_handle.get())) { TerminateProcess(process_handle.get(), 1); winfail(L"Cannot bind system tar to restoration job"); }
-    if (ResumeThread(thread_handle.get()) == static_cast<DWORD>(-1)) winfail(L"Cannot resume system tar");
-    for (;;) {
-        check_cancel();
-        const DWORD wait = WaitForSingleObject(process_handle.get(), 100);
-        if (wait == WAIT_OBJECT_0) break;
-        if (wait != WAIT_TIMEOUT) winfail(L"Cannot wait for system tar");
+void extract_fixed_ranges(HANDLE verified_zip, const std::wstring& destination) {
+    if (!vse::fixed_archive_bounds_ok(bundle::uncompressed_bytes, bundle::central_directory_offset,
+                                      bundle::archive_bytes, file_size(verified_zip))) fail(L"Invalid fixed archive bounds");
+    std::vector<const vse::Entry*> ranges;
+    std::uint64_t expanded = 0;
+    for (const auto& entry : bundle::entries) {
+        if (!vse::absolute_local_path_ok(vse::join(destination, entry.name))) fail(L"Invalid compiled entry path");
+        if (entry.directory) {
+            if (entry.bytes || entry.data_offset || entry.compressed_bytes || entry.method) fail(L"Invalid compiled directory");
+            continue;
+        }
+        expanded = vse::checked_add(expanded, entry.bytes);
+        if (!vse::sha256_text_ok(entry.sha256) || entry.data_offset < 30 ||
+            entry.data_offset > bundle::central_directory_offset ||
+            entry.compressed_bytes > bundle::central_directory_offset - entry.data_offset ||
+            (entry.method != 0 && entry.method != 8) ||
+            (entry.method == 0 && entry.compressed_bytes != entry.bytes)) fail(L"Invalid compiled compressed range");
+        ranges.push_back(&entry);
     }
-    DWORD status = 1;
-    if (!GetExitCodeProcess(process_handle.get(), &status)) winfail(L"Cannot inspect system tar result");
-    if (status != 0) fail(L"System tar could not extract the verified ZIP (exit " + std::to_wstring(status) + L"); nothing was published.");
+    if (expanded != bundle::uncompressed_bytes) fail(L"Fixed output bound mismatch");
+    std::sort(ranges.begin(), ranges.end(), [](const vse::Entry* a, const vse::Entry* b) { return a->data_offset < b->data_offset; });
+    std::uint64_t previous_end = 0;
+    for (const auto entry : ranges) {
+        if (entry->data_offset < previous_end) fail(L"Fixed compressed ranges overlap");
+        previous_end = vse::checked_add(entry->data_offset, entry->compressed_bytes);
+    }
+    // Only compiled names are used. Pin each directory before descendants;
+    // no library controls paths, changes cwd, or launches a subprocess.
+    std::vector<Handle> directories;
+    for (const auto& entry : bundle::entries) if (entry.directory) {
+        check_cancel();
+        const auto path = vse::join(destination, entry.name);
+        if (!CreateDirectoryW(native_path(path).c_str(), nullptr)) winfail(L"Cannot create new fixed output directory");
+        directories.push_back(open_directory(path));
+    }
+    std::vector<unsigned char> buffer(1024 * 1024);
+    for (const auto entry : ranges) {
+        check_cancel();
+        const auto path = vse::join(destination, entry->name);
+        Handle output(CreateFileW(native_path(path).c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                                 FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+        if (!output.valid()) winfail(L"Cannot exclusively create fixed output file");
+        const auto attributes = info(output.get());
+        if (attributes.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY || attributes.nNumberOfLinks != 1) fail(L"Unexpected output identity");
+        if (entry->data_offset > static_cast<std::uint64_t>((std::numeric_limits<LONGLONG>::max)())) fail(L"Fixed offset exceeds Windows signed seek bounds");
+        LARGE_INTEGER offset{}; offset.QuadPart = static_cast<LONGLONG>(entry->data_offset);
+        if (!SetFilePointerEx(verified_zip, offset, nullptr, FILE_BEGIN)) winfail(L"Cannot seek verified archive range");
+        Sha256 hash;
+        std::uint64_t written = 0;
+        auto read = [&](unsigned char* data, unsigned count) -> unsigned {
+            DWORD got = 0;
+            if (!ReadFile(verified_zip, data, count, &got, nullptr)) winfail(L"Cannot read fixed compressed range");
+            check_cancel(); return static_cast<unsigned>(got);
+        };
+        auto write = [&](const unsigned char* data, unsigned count) {
+            if (count > entry->bytes - written) fail(L"Fixed output exceeded accepted size");
+            write_chunk(output.get(), data, count); hash.add(data, count); written += count;
+        };
+        if (entry->method == 0) {
+            std::uint64_t left = entry->compressed_bytes;
+            while (left) {
+                const auto take = static_cast<unsigned>((std::min)(left, static_cast<std::uint64_t>(buffer.size())));
+                if (read(buffer.data(), take) != take) fail(L"Truncated STORE range");
+                write(buffer.data(), take); left -= take;
+            }
+        } else {
+            try { vse::inflate_exact(entry->compressed_bytes, entry->bytes, read, write, [] { check_cancel(); }); }
+            catch (const std::runtime_error&) { fail(L"Fixed DEFLATE range is invalid, truncated, oversized or has trailing input"); }
+        }
+        if (written != entry->bytes || hash.finish() != entry->sha256) fail(L"Restored file SHA256/size differs from accepted inventory");
+        if (!FlushFileBuffers(output.get())) winfail(L"Cannot flush restored file");
+        verify_file(output.get(), entry->bytes, entry->sha256, buffer);
+    }
 }
 struct TreeLocks { std::vector<Handle> directories; std::vector<Handle> files; };
 void check_tree(const std::wstring& root, const std::wstring& relative, std::map<std::wstring, const vse::Entry*>& expected,
@@ -289,13 +327,21 @@ void check_tree(const std::wstring& root, const std::wstring& relative, std::map
     } while (FindNextFileW(raw, &found));
     if (GetLastError() != ERROR_NO_MORE_FILES) winfail(L"Cannot finish enumerating restored directory");
 }
-void rename_without_replace(HANDLE root, HANDLE parent, const std::wstring& destination) {
-    const auto bytes = destination.size() * sizeof(wchar_t);
-    std::vector<unsigned char> storage(offsetof(FILE_RENAME_INFO, FileName) + bytes);
+void rename_without_replace(HANDLE root, const std::wstring& destination) {
+    // Caller retains the canonical destination parent AND all its ancestors
+    // without delete sharing through this atomic operation. Do not use a path
+    // obtained from a mutable environment or user-supplied device namespace.
+    // Actual Server 2022/2025 probes support an absolute extended UTF-16 name
+    // with NULL RootDirectory; both tested relative forms failed with error 87.
+    const auto filename = native_path(destination);
+    const auto bytes = filename.size() * sizeof(wchar_t);
+    const auto prefix = offsetof(FILE_RENAME_INFO, FileName);
+    if (bytes > MAXDWORD - prefix - sizeof(wchar_t)) fail(L"Atomic rename name exceeds the Windows buffer bound");
+    std::vector<unsigned char> storage(prefix + bytes + sizeof(wchar_t), 0);
     auto rename = reinterpret_cast<FILE_RENAME_INFO*>(storage.data());
-    rename->ReplaceIfExists = FALSE; rename->RootDirectory = parent;
-    rename->FileNameLength = static_cast<DWORD>(bytes);
-    memcpy(rename->FileName, destination.data(), bytes);
+    rename->ReplaceIfExists = FALSE; rename->RootDirectory = nullptr;
+    rename->FileNameLength = static_cast<DWORD>(bytes); // excludes the retained trailing NUL
+    memcpy(rename->FileName, filename.data(), bytes);
     if (!SetFileInformationByHandle(root, FileRenameInfo, rename, static_cast<DWORD>(storage.size()))) winfail(L"Cannot atomically publish restored directory; existing data was not replaced");
 }
 void remove_owned_file(HANDLE file) {
@@ -336,7 +382,7 @@ void restore(const std::wstring& source_path, const std::wstring& destination_pa
     if (!FlushFileBuffers(output.get())) winfail(L"Cannot flush reconstructed ZIP");
     verify_file(output.get(), bundle::archive_bytes, bundle::archive_sha256, buffer); // Re-read actual disk bytes.
     // Reopen read-only under the private stage after verification. Re-verify on
-    // the retained no-write/no-delete handle before handing the path to tar.
+    // the retained no-write/no-delete handle before reading fixed compressed ranges.
     output.reset();
     auto verified_zip = open_input(temporary_zip);
     const auto owned_zip_identity = info(verified_zip.get());
@@ -344,7 +390,7 @@ void restore(const std::wstring& source_path, const std::wstring& destination_pa
     const auto extracted = vse::join(incomplete, L"payload");
     if (!CreateDirectoryW(native_path(extracted).c_str(), nullptr)) winfail(L"Cannot create empty extraction directory");
     auto extraction_directory = open_directory(extracted);
-    extract_with_system_tar(temporary_zip, extracted);
+    extract_fixed_ranges(verified_zip.get(), extracted);
     const auto restored = vse::join(extracted, bundle::root_name);
     auto restored_root = open_directory(restored, true);
     std::map<std::wstring, const vse::Entry*> expected;
@@ -358,7 +404,7 @@ void restore(const std::wstring& source_path, const std::wstring& destination_pa
     for (const auto& lock : parent.locks) info(lock.get());
     info(staging.get()); info(extraction_directory.get()); info(restored_root.get());
     assert_absent(final_path); check_cancel();
-    rename_without_replace(restored_root.get(), parent.locks.back().get(), bundle::root_name);
+    rename_without_replace(restored_root.get(), final_path);
     incomplete.clear(); // The atomic rename is the sole success commit point.
     std::wprintf(L"Restored and verified: %ls\n", final_path.c_str());
     // No application launch; no recursive deletion. Temporary cleanup is best
