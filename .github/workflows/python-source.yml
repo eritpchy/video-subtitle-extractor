@@ -79,7 +79,8 @@ jobs:
           PY
       - name: Unit tests for Python provider, source-only data and evidence contracts
         run: >-
-          python -m pytest tests/test_python_coreml*.py tests/test_prepare_source_models.py
+          python -m pytest tests/test_python_coreml*.py tests/test_check_python_coreml.py
+          tests/test_prepare_source_models.py
           tests/test_e2e_python_coreml.py tests/test_python_source_workflow.py
           -q --junitxml=test-results/python-source/contracts.xml
       - name: Restore only the exact immutable public model-data archive
