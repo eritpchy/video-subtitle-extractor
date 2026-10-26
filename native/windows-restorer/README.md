@@ -295,9 +295,21 @@ Both relative-name modes returned error 87 for all new-target cases. The absolut
 extended NUL-terminated form succeeded for all eight new-target combinations;
 all eight existing-target cases returned error 183 with preserved identities and
 sentinel bytes. Destination paths ranged from 98 to 442 UTF-16 units; the longest
-source marker path was 841 units. Both original relative-mode failures remain
-recorded: the probe still collects all modes and returns overall nonzero when
-any expectation is unmet. Do not relabel a failed comparison as a full pass.
+source marker path was 841 units. That original run retains its 32 expectations
+met / 16 unmet result unchanged. In the subsequent explicitly authorized
+classification correction, both relative forms are incompatible **negative
+controls**: they must return exactly error 87 with `rename_returned_success=false`,
+source bytes/identity unchanged, no new target, and any existing target/sentinel
+preserved. The production absolute form still must actually rename every new
+target (success/error 0), or reject an existing target with exactly error 183
+while preserving it. Unexpected relative success, a different error, changed
+paths/content, incomplete evidence or a missing case fails the diagnostic.
+
+All 48 cases still run. Every record keeps its actual rename result/error plus
+its explicit classification and expected result/error; control expectation is
+not actual rename success. The aggregate separately reports the eight expected
+actual renames and 32 incompatible relative controls. No historical raw result
+is rewritten, and this comparison cannot replace any production restoration gate.
 
 The current production candidate now uses the proven absolute-name API form,
 NULL RootDirectory and `ReplaceIfExists=FALSE`. Parent/ancestor locks remain

@@ -4,7 +4,8 @@
 Use the already selected MSVC x64 environment. The new work directory contains
 only synthetic trees, compiler outputs and evidence. No cleanup or overwrite is
 performed. Each case runs in a separate process, so an old-buffer crash does not
-hide later candidate observations. Failed expectations remain overall nonzero.
+hide later candidate observations. Observed relative forms are exact-error negative
+controls, never successful restores. Failed expectations remain overall nonzero.
 """
 from __future__ import annotations
 
@@ -34,8 +35,13 @@ def sha(path):
 def definition(index):
     if type(index) is not int or not 0 <= index < 48:
         raise ValueError('Case index must be an integer in 0..47')
-    return {'case_index': index, 'mode': MODES[index // 16], 'existing_target': bool(index & 1),
-            'long_parent': bool(index & 2), 'deep_child': bool(index & 4), 'unicode': bool(index & 8)}
+    relative, existing = index // 16 != 2, bool(index & 1)
+    return {'case_index': index, 'mode': MODES[index // 16], 'existing_target': existing,
+            'long_parent': bool(index & 2), 'deep_child': bool(index & 4), 'unicode': bool(index & 8),
+            'classification': ('relative-form-incompatible-negative-control' if relative else
+                               'absolute-existing-target-no-overwrite-control' if existing else 'absolute-new-target-rename-positive'),
+            'expected_rename_returned_success': not relative and not existing,
+            'expected_rename_win32_error': 87 if relative else 183 if existing else 0}
 
 
 def validate_record(record, expected, returncode):
@@ -52,7 +58,7 @@ def validate_record(record, expected, returncode):
     if record['expectation_met']:
         for key in ('ancestor_identities_unchanged', 'source_marker_bytes_unchanged', 'source_and_marker_identities_unchanged', 'existing_target_preserved'):
             if record.get(key) is not True:
-                raise ValueError('Native success lacks identity/content evidence')
+                raise ValueError('Met control lacks identity/content evidence')
         if record.get('replace_if_exists') is not False:
             raise ValueError('Native diagnostic must prohibit replacement')
         for prefix in ('source', 'marker', 'destination_parent'):
@@ -62,14 +68,19 @@ def validate_record(record, expected, returncode):
                 raise ValueError('Native identity changed or is missing')
             if set(before) != {'volume_serial', 'file_index_high', 'file_index_low'} or any(type(value) is not int or not 0 <= value <= 0xffffffff for value in before.values()):
                 raise ValueError('Malformed Win32 identity')
+        expected_success = expected['expected_rename_returned_success']
+        if (record.get('rename_returned_success') is not expected_success or
+                type(record.get('rename_win32_error')) is not int or record['rename_win32_error'] != expected['expected_rename_win32_error']):
+            raise ValueError('Actual rename result/error differs from classified control')
+        if (record.get('source_present_after') is not (not expected_success) or
+                record.get('target_present_after') is not (expected['existing_target'] or expected_success)):
+            raise ValueError('Actual source/target state differs from classified control')
         if expected['existing_target']:
             if record.get('rename_returned_success') is not False or record.get('source_present_after') is not True:
                 raise ValueError('Existing target was not safely refused')
             for prefix in ('existing_target', 'existing_sentinel'):
                 if not isinstance(record.get(prefix + '_identity_before'), dict) or record.get(prefix + '_identity_before') != record.get(prefix + '_identity_after'):
                     raise ValueError('Existing target identity changed or is missing')
-        elif record.get('rename_returned_success') is not True or record.get('source_present_after') is not False or record.get('target_present_after') is not True:
-            raise ValueError('Rename success lacks source/target transition')
     return record
 
 
@@ -78,7 +89,9 @@ def aggregate(rows):
     return {'all_cases_collected': complete,
             'all_expectations_met': complete and all(row.get('expectation_met') is True for row in rows),
             'observed_expectations_met': sum(row.get('expectation_met') is True for row in rows),
-            'observed_expectations_not_met': sum(row.get('expectation_met') is not True for row in rows)}
+            'observed_expectations_not_met': sum(row.get('expectation_met') is not True for row in rows),
+            'actual_successful_renames': sum(row.get('rename_returned_success') is True for row in rows),
+            'incompatible_relative_controls_met': sum(row.get('classification') == 'relative-form-incompatible-negative-control' and row.get('expectation_met') is True for row in rows)}
 
 
 def run_cases(executable, work, rows):
@@ -143,6 +156,7 @@ def main():
                f'/MAP:{work / "rename-probe.map"}', '/MANIFEST:EMBED', "/MANIFESTUAC:level='asInvoker' uiAccess='false'"]
     rows = []
     report = {'schema': 1, 'scope': 'synthetic-rename-api-observations-not-restoration-acceptance',
+              'expectation_policy': 'server-40276853621-relative-87-absolute-no-replace',
               'os': platform.platform(), 'python': platform.python_version(), 'cases': rows,
               'source_sha256': sources, 'compiler': {'path': compiler, 'sha256': sha(Path(compiler))},
               'compile_command': command, 'client_restore_verified': False, 'result': 'incomplete'}

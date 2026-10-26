@@ -183,6 +183,14 @@ bool probe(unsigned index, const std::wstring& requested_root, Record& row) {
     const bool deep_child = (index & 4) != 0;
     const bool unicode = (index & 8) != 0;
     const unsigned mode = index / 16;
+    // Expectation basis: preserved Server 2022/2025 run 40276853621.
+    const bool incompatible_control = mode != 2;
+    const bool expected_rename_success = !incompatible_control && !existing;
+    const DWORD expected_rename_error = incompatible_control ? ERROR_INVALID_PARAMETER : (existing ? ERROR_ALREADY_EXISTS : ERROR_SUCCESS);
+    text(row, "classification", incompatible_control ? "relative-form-incompatible-negative-control" :
+         (existing ? "absolute-existing-target-no-overwrite-control" : "absolute-new-target-rename-positive"));
+    boolean(row, "expected_rename_returned_success", expected_rename_success);
+    number(row, "expected_rename_win32_error", expected_rename_error);
     text(row, "mode", modes[mode]);
     boolean(row, "existing_target", existing); boolean(row, "long_parent", long_parent);
     boolean(row, "deep_child", deep_child); boolean(row, "unicode", unicode);
@@ -287,9 +295,15 @@ bool probe(unsigned index, const std::wstring& requested_root, Record& row) {
     }
     boolean(row, "source_marker_bytes_unchanged", marker_ok); boolean(row, "source_and_marker_identities_unchanged", identities_ok);
     boolean(row, "existing_target_preserved", target_preserved);
-    const bool correct = parents_stable && marker_ok && identities_ok && (existing ? (!renamed && source_present && target_preserved) : (renamed && !source_present && target_present));
+    // Proven incompatible relative forms are negative controls, never renamed
+    // successfully. Exact errors and source/target preservation are mandatory;
+    // arbitrary failures (or unexpected relative-form success) do not pass.
+    const bool correct = parents_stable && marker_ok && identities_ok && target_preserved &&
+        ((renamed != FALSE) == expected_rename_success) && rename_error == expected_rename_error &&
+        source_present == !expected_rename_success && target_present == (existing || expected_rename_success);
     boolean(row, "expectation_met", correct);
-    text(row, "observation", correct ? (existing ? "correct-refusal" : "correct-rename") : "expectation-not-met");
+    text(row, "observation", !correct ? "expectation-not-met" :
+         (incompatible_control ? "observed-incompatible-relative-form-not-a-rename" : (existing ? "correct-no-overwrite-refusal" : "correct-rename")));
     return correct;
 }
 } // namespace
