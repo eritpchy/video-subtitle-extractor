@@ -260,7 +260,8 @@ def test_refuses_stale_evidence(tmp_path):
         main(['--archives', str(tmp_path), '--output', str(output)])
 
 
-def test_existing_package_smoke_uses_actual_launcher_and_explicit_trusted_audit(tmp_path, monkeypatch):
+@pytest.mark.parametrize('profile', ['paddle', 'native', 'directml'])
+def test_existing_package_smoke_uses_actual_launcher_and_explicit_trusted_audit(tmp_path, monkeypatch, profile):
     from scripts import package_release, standalone_runtime_probe
     root = tmp_path / 'app'
     (root / 'runtime/bin').mkdir(parents=True)
@@ -268,7 +269,7 @@ def test_existing_package_smoke_uses_actual_launcher_and_explicit_trusted_audit(
     (root / 'runtime/bin/python3.12').touch()
     shutil.copy2(standalone_runtime_probe.__file__, root / 'scripts/standalone_runtime_probe.py')
     (root / 'bundle-manifest.json').write_text(json.dumps({'format': 2, 'platform': 'linux', 'arch': 'x64',
-                                                         'runtime_python': 'runtime/bin/python3.12', 'files': {}}))
+                                                         'runtime_python': 'runtime/bin/python3.12', 'ocr_backend': profile, 'files': {}}))
     archive = tmp_path / 'candidate.zip'
     archive.write_bytes(b'fixture archive')
     archive.with_suffix('.zip.sha256').write_text(bootstrap.sha256(archive))
@@ -281,6 +282,9 @@ def test_existing_package_smoke_uses_actual_launcher_and_explicit_trusted_audit(
     package_release.verify_bundle(archive, True)
     assert calls[0][0][0] == str(root / 'Start-VSE.sh')
     assert '--runtime-audit-dir' in calls[0][0]
+    assert ('--paddle-model-fixtures' in calls[0][0]) == (profile == 'paddle')
+    if profile == 'paddle':
+        assert calls[0][0][calls[0][0].index('--paddle-model-fixtures') + 1] == str((package_release.ROOT / 'native/ocr/tests/evidence').resolve())
     assert len(summaries) == 1
     assert 'PySide6.QtWidgets' in summaries[0][1]['required_modules']
 
@@ -302,15 +306,17 @@ def test_bootstrap_manifest_wins_over_inherited_profile_without_discarding_prefe
     # Replace the mapping, not the real process environment: bootstrap correctly
     # mutates only its already-created child process's environment in production.
     environment = {'VSE_CONFIG_FILE': '/preferences', 'VSE_WORK_DIR': '/work', 'VSE_OCR_BACKEND': 'wrong',
-                   'VSE_NATIVE_OCR_ROOT': '/foreign/worker', 'VSE_NATIVE_OCR_PROVIDER': 'cuda', 'PYTHONHOME': '/foreign'}
+                   'VSE_NATIVE_OCR_ROOT': '/foreign/worker', 'VSE_MODEL_DIR': '/foreign/models', 'VSE_NATIVE_OCR_PROVIDER': 'cuda', 'PYTHONHOME': '/foreign'}
     monkeypatch.setattr(bootstrap.os, 'environ', environment)
     monkeypatch.setattr(bootstrap.subprocess, 'call', lambda *args: 0)
     assert bootstrap.main(['--cli', '--help']) == 0
     assert environment['VSE_OCR_BACKEND'] == profile
     if profile == 'native':
         assert environment['VSE_NATIVE_OCR_ROOT'] == str(root / 'native-ocr')
+        assert 'VSE_MODEL_DIR' not in environment
     else:
         assert 'VSE_NATIVE_OCR_ROOT' not in environment
+        assert environment['VSE_MODEL_DIR'] == str(root / 'backend/models')
     assert environment['VSE_NATIVE_OCR_PROVIDER'] == 'cuda'  # Preserve explicit GPU refusal, do not hide it.
     assert environment['VSE_CONFIG_FILE'] == '/preferences'
     assert environment['VSE_WORK_DIR'] == '/work'
@@ -561,3 +567,20 @@ def test_every_windows_launcher_scenario_requires_native_worker_records(tmp_path
     assert report['result'] == 'passed'
     assert len(calls) == len(verifier.SCENARIOS)
     assert all(call['require_native_workers'] is required and call['require_isolated'] for call in calls)
+
+
+@pytest.mark.parametrize('foreign', [False, True])
+def test_paddle_child_model_root_cannot_escape_final_bundle(tmp_path, foreign):
+    root, fixture, report = valid_environment_report(tmp_path)
+    (root / 'backend/models').mkdir(parents=True)
+    report['profile'] = report['environment']['VSE_OCR_BACKEND'] = 'paddle'
+    report['environment']['VSE_MODEL_DIR'] = str(root / 'backend/models')
+    (tmp_path / 'environment-report.json').write_text(json.dumps(report))
+    if foreign:
+        report['environment']['VSE_MODEL_DIR'] = str(tmp_path)
+    (tmp_path / 'dependency-isolation/process-1.json').write_text(json.dumps(report))
+    if foreign:
+        with pytest.raises(RuntimeError, match='Paddle model path'):
+            check_environment_evidence(tmp_path, fixture, 'paddle', root)
+    else:
+        check_environment_evidence(tmp_path, fixture, 'paddle', root)

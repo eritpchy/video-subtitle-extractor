@@ -360,7 +360,7 @@ def install_probe() -> None:
                           'OPENCV_VIDEOIO_PLUGIN_PATH', 'OPENCV_CORE_PLUGIN_PATH', 'OPENCV_DNN_PLUGIN_PATH',
                           'OPENCV_UI_PLUGIN_PATH', 'OPENCV_OPENCL_RUNTIME', 'OPENCV_FFMPEG_DLL_DIR', 'OPENCV_DNN_IE_EXTRA_PLUGIN_PATH',
                           'OPENCV_VIDEOIO_PLUGIN_FFMPEG', 'OPENCV_CORE_PARALLEL_PLUGIN_TBB', 'VSE_VSF_BINARY', 'VSE_VSF_DIR', 'IMAGEIO_FFMPEG_EXE',
-                          'VSE_CONFIG_FILE', 'VSE_WORK_DIR', 'VSE_OCR_BACKEND', 'VSE_NATIVE_OCR_ROOT', 'VSE_DIRECTML_MODEL_ROOT',
+                          'VSE_CONFIG_FILE', 'VSE_WORK_DIR', 'VSE_OCR_BACKEND', 'VSE_NATIVE_OCR_ROOT', 'VSE_DIRECTML_MODEL_ROOT', 'VSE_MODEL_DIR',
                           'CUDA_PATH', 'CUDA_HOME', 'CUDNN_PATH', 'CUDNN_HOME',
                           *(name for name in os.environ if name.lower().startswith('flags_') and name.lower().endswith('_dir'))) if key in os.environ},
                       'snapshots': snapshots, 'probe_errors': sorted(errors)}

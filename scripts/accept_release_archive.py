@@ -17,11 +17,11 @@ import zipfile
 
 try:
     from .bundle_bootstrap import sha256
-    from .release_guard import ACCEPTANCE_CHECKS, validate_acceptance_receipt
+    from .release_guard import required_acceptance_checks, validate_acceptance_receipt
     from .release_profiles import CANDIDATE_TARGETS, PROFILES, archive_name
 except ImportError:
     from bundle_bootstrap import sha256
-    from release_guard import ACCEPTANCE_CHECKS, validate_acceptance_receipt
+    from release_guard import required_acceptance_checks, validate_acceptance_receipt
     from release_profiles import CANDIDATE_TARGETS, PROFILES, archive_name
 
 
@@ -184,6 +184,19 @@ def prepare_acceptance(archive: Path, archives: Path, portable: Path) -> tuple[d
                            'archive_sha256': digest, **identity,
                            'payload': 'passed', 'launcher_smoke': 'passed'}, 'package-verification.json')
     _workload_evidence(evidence, archives, smoke_relative, 'package')
+    if manifest['ocr_backend'] == 'paddle':
+        try:
+            from .check_paddle_models import validate_report
+        except ImportError:
+            from check_paddle_models import validate_report
+        # This is original Paddle inference in the final extracted bundle,
+        # not Native parity, a source-tree test, or mere model-file presence.
+        model_report = evidence.read(archives, smoke_relative + '/paddle-models/report.json', 'package')
+        try:
+            validate_report(model_report, identity={key: manifest[key]
+                                                   for key in ('commit', 'version', 'build_profile')})
+        except (ValueError, KeyError, TypeError) as error:
+            raise RuntimeError(f'Final Paddle model acceptance did not pass: {error}') from error
     portable_relative = archive.stem
     environment = evidence.read(portable, portable_relative + '/portable-environment-report.json', 'portable')
     _bound_report(environment, {'result': 'passed', 'archive_sha256': digest,
@@ -205,7 +218,7 @@ def prepare_acceptance(archive: Path, archives: Path, portable: Path) -> tuple[d
         _passed_audit(detail.get('audit'), scenario + '/scenario-report.json')
         _workload_evidence(evidence, portable, case_relative, 'portable')
     receipt = {'schema': 1, 'archive': archive.name, 'archive_sha256': digest, **identity,
-               'checks': {check: 'passed' for check in ACCEPTANCE_CHECKS},
+               'checks': {check: 'passed' for check in required_acceptance_checks(manifest['build_profile'])},
                'gpu_inference_verified': False, 'gpu_validation': 'not-run-server-ci',
                'evidence': evidence.index,
                'scope': 'Final ZIP launcher, explicit CPU video modes, regressions and child-environment isolation; not GPU certification.'}

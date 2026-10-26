@@ -131,7 +131,7 @@ def fixture_environment(directory: Path, contaminated: bool, inherited: dict[str
                         LD_LIBRARY_PATH=str(paths['foreign-native']), DYLD_LIBRARY_PATH=str(paths['foreign-native']),
                         DYLD_FRAMEWORK_PATH=str(paths['foreign-native']), DYLD_FALLBACK_LIBRARY_PATH=str(paths['foreign-native']),
                         VSE_OCR_BACKEND='deliberately-invalid-inherited-selection', VSE_NATIVE_OCR_ROOT=str(paths['foreign-native']),
-                        VSE_DIRECTML_MODEL_ROOT=str(paths['foreign-native']))
+                        VSE_DIRECTML_MODEL_ROOT=str(paths['foreign-native']), VSE_MODEL_DIR=str(paths['foreign-native']))
         env.update(injected)
         for key in NATIVE_SEARCH_VARIABLES:
             if key.startswith('FLAGS_') or key in ('CUDA_PATH', 'CUDA_HOME', 'CUDNN_PATH', 'CUDNN_HOME'):
@@ -241,6 +241,10 @@ def check_environment_evidence(evidence: Path, fixture: dict, profile: str, root
             raise RuntimeError('Packaged backend selection was lost in a Python child')
         if profile == 'native' and not is_packaged_native_worker(environment.get('VSE_NATIVE_OCR_ROOT'), root):
             raise RuntimeError('Inherited native-worker path replaced packaged worker')
+        if profile == 'paddle':
+            expected_models = root.resolve() / 'backend/models'
+            if not environment.get('VSE_MODEL_DIR') or Path(environment['VSE_MODEL_DIR']).resolve(strict=True) != expected_models:
+                raise RuntimeError('Inherited Paddle model path replaced packaged models')
         if profile == 'directml':
             expected_models = root.resolve() / 'directml-models'
             if not environment.get('VSE_DIRECTML_MODEL_ROOT') or Path(environment['VSE_DIRECTML_MODEL_ROOT']).resolve(strict=True) != expected_models:

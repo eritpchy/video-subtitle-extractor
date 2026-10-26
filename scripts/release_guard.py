@@ -33,6 +33,14 @@ ACCEPTANCE_CHECKS = (
     'contaminated_host_environment', 'cpu_mode_fast',
     'cpu_mode_accurate', 'cpu_mode_auto',
 )
+PADDLE_MODEL_CHECK = 'paddle_all_models_cpu_modes'
+
+
+def required_acceptance_checks(build_profile: str) -> tuple[str, ...]:
+    profile = PROFILES.get(build_profile)
+    if profile is None:
+        raise RuntimeError(f'Unknown acceptance build profile: {build_profile}')
+    return ACCEPTANCE_CHECKS + ((PADDLE_MODEL_CHECK,) if profile['backend'] == 'paddle' else ())
 
 
 def _unique_json_object(pairs):
@@ -89,7 +97,8 @@ def validate_acceptance_receipt(path: Path, archive: Path, digest: str, manifest
         if receipt.get(key) != value or type(receipt.get(key)) is not type(value):
             raise RuntimeError(f'Acceptance receipt does not match {key}: {archive.name}')
     checks = receipt.get('checks')
-    if not isinstance(checks, dict) or any(checks.get(name) != 'passed' for name in ACCEPTANCE_CHECKS):
+    required = required_acceptance_checks(manifest['build_profile'])
+    if not isinstance(checks, dict) or any(checks.get(name) != 'passed' for name in required):
         raise RuntimeError(f'Final package acceptance is missing or failed: {archive.name}')
     # Hosted Server CI has no real GPU acceptance. It may validate an explicit
     # CPU mode, but may not turn a fallback or a packaging pass into GPU proof.

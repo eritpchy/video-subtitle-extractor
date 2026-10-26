@@ -74,7 +74,7 @@ jobs:
           tests/test_release_guard.py tests/test_release_acceptance.py tests/test_cuda_package.py
           tests/test_cuda_profile_audit.py tests/test_prune_cuda_development.py
           tests/test_runtime_dependencies.py tests/test_portable_environment.py tests/test_e2e_modes.py
-          tests/test_paddle_package_models.py -q
+          tests/test_paddle_package_models.py tests/test_check_paddle_models.py tests/test_final_paddle_launcher.py -q
       - name: Install fixed verified VideoSubFinder
         run: python scripts/install_videosubfinder.py --version 6.10.7
       - name: Prepare all 15 pinned original Paddle models (including Tamil/Telugu/Kannada)

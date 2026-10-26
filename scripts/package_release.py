@@ -400,8 +400,13 @@ def verify_bundle(archive_path: Path, smoke: bool) -> None:
                     from .portable_python import launcher_command
                 except ImportError:
                     from portable_python import launcher_command
-                command = launcher_command(root, manifest['platform'], ['--verify', '--results-dir', str(evidence),
-                                                                         '--runtime-audit-dir', str(isolation_reports)])
+                arguments = ['--verify', '--results-dir', str(evidence), '--runtime-audit-dir', str(isolation_reports)]
+                if manifest.get('ocr_backend', 'paddle') == 'paddle':
+                    # The hash-pinned fixtures are build-side evidence, not
+                    # customer payload or a source-code runtime substitute.
+                    fixtures = (ROOT / 'native/ocr/tests/evidence').resolve(strict=True)
+                    arguments += ['--paddle-model-fixtures', str(fixtures)]
+                command = launcher_command(root, manifest['platform'], arguments)
                 subprocess.run(command, check=True, cwd=root, env=env)
                 required = ('PySide6.QtWidgets', 'cv2', 'qfluentwidgets') + ({'paddle': ('paddle',), 'directml': ('onnxruntime',)}.get(manifest.get('ocr_backend', 'paddle'), ()))
                 forbidden = ('paddle', 'paddleocr', 'paddlex', 'onnxruntime') if manifest.get('ocr_backend') == 'native' else ('paddle', 'paddleocr', 'paddlex') if manifest.get('ocr_backend') == 'directml' else ()

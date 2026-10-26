@@ -12,8 +12,8 @@ import zipfile
 
 from scripts.bundle_bootstrap import sha256
 from scripts.release_guard import (
-    ACCEPTANCE_CHECKS, assert_complete_release_matrix, candidate_asset_names,
-    main, validate_assets,
+    ACCEPTANCE_CHECKS, PADDLE_MODEL_CHECK, assert_complete_release_matrix, candidate_asset_names,
+    main, required_acceptance_checks, validate_assets,
 )
 from scripts.release_profiles import PROFILES
 
@@ -61,7 +61,7 @@ class ReleaseAssetGuardTests(unittest.TestCase):
         manifest = self.manifests[name]
         receipt = {'schema': 1, 'archive': name, 'archive_sha256': digest,
                    **{key: manifest[key] for key in ('commit', 'version', 'platform', 'arch', 'build_profile')},
-                   'checks': {key: 'passed' for key in ACCEPTANCE_CHECKS},
+                   'checks': {key: 'passed' for key in required_acceptance_checks(manifest['build_profile'])},
                    'gpu_inference_verified': False, 'gpu_validation': 'not-run-server-ci'}
         archive.with_suffix('.zip.acceptance.json').write_text(json.dumps(receipt))
 
@@ -234,12 +234,30 @@ class ReleaseAssetGuardTests(unittest.TestCase):
                     self.validate()
 
     def test_every_final_acceptance_stage_is_required(self):
-        for check in ACCEPTANCE_CHECKS:
+        for check in required_acceptance_checks('paddle-cuda11.8'):
             with self.subTest(check=check):
                 self.write_sidecars(self.name)
                 self.mutate_receipt(lambda data: data['checks'].pop(check))
                 with self.assertRaisesRegex(RuntimeError, 'acceptance is missing or failed'):
                     self.validate()
+
+    def test_each_paddle_profile_requires_final_all_model_mode_check(self):
+        for profile in ('paddle-cpu', 'paddle-cuda11.8', 'paddle-cuda12.6'):
+            with self.subTest(profile=profile):
+                name = next(name for name, target in candidate_asset_names(VERSION).items() if target[2] == profile)
+                path = (self.directory / name).with_suffix('.zip.acceptance.json')
+                original = path.read_bytes()
+                document = json.loads(original)
+                document['checks'].pop(PADDLE_MODEL_CHECK)
+                path.write_text(json.dumps(document))
+                with self.assertRaisesRegex(RuntimeError, 'acceptance is missing or failed'):
+                    self.validate()
+                path.write_bytes(original)
+
+    def test_native_and_directml_do_not_claim_original_paddle_coverage(self):
+        for profile in ('native-cpu', 'directml'):
+            self.assertNotIn(PADDLE_MODEL_CHECK, required_acceptance_checks(profile))
+        self.validate()
 
     def test_failed_skipped_or_truthy_stage_is_not_a_pass(self):
         for value in ('failed', 'skipped', True, 'true', None):

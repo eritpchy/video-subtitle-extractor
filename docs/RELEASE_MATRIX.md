@@ -70,6 +70,18 @@ Conda/venv/Qt/Python/native-path contamination. These checks run on final ZIP
 bytes, not merely the build tree. The Linux Native package additionally retains
 its clean offline OS-container gate.
 
+Paddle CPU/CUDA final launchers additionally run 168 frozen **CPU** image cases:
+56 per actual `fast`/`accurate`/`auto` call, covering all 15 models, all 11 legacy
+recognizers and the Kannada aliases, plus standalone detection. CPU auto selects
+the small tier; accurate selects medium. Fixed test images/goldens remain on the
+build host, while inference executes the extracted ZIP's Python, production
+modules and packaged weights. Every case, source pin and model hash must pass;
+a source-tree-only report or partial model/mode coverage cannot issue a receipt.
+The contamination scenarios retain three-mode video tests without redundantly
+repeating the complete image suite. Packaged Paddle always pins VSE_MODEL_DIR
+to its own verified weights, rather than borrowing a host model directory.
+None of these CPU results certifies a GPU.
+
 `accept_release_archive.py` binds these completed reports to the ZIP SHA256,
 commit, version, platform and backend. `release_guard.py --validate-assets`
 requires exactly the seven approved packages and matching receipts, rejecting

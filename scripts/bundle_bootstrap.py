@@ -13,7 +13,8 @@ import sys
 
 
 # Language and native *search* settings only. Do not erase application options,
-# themes, display sessions, locale, HOME/XDG/LOCALAPPDATA or explicit VSE paths.
+# themes, display sessions, locale, HOME/XDG/LOCALAPPDATA or config/work paths.
+# Bundled model/worker/media selectors are pinned separately after manifest load.
 NATIVE_SEARCH_VARIABLES = (
     'LD_LIBRARY_PATH', 'LD_PRELOAD', 'LD_AUDIT',
     'DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH', 'DYLD_FRAMEWORK_PATH',
@@ -124,7 +125,7 @@ def verify_windows_runtime_configuration(root: Path, manifest: dict) -> None:
 def environment_report(root: Path, manifest: dict) -> dict:
     selected = ('PATH', *NATIVE_SEARCH_VARIABLES, 'PYTHONHOME', 'PYTHONPATH', 'PYTHONUSERBASE',
                 'PYTHONNOUSERSITE', 'PYTHONUTF8', 'PYTHONIOENCODING', 'CONDA_PREFIX', 'CONDA_DEFAULT_ENV', 'VIRTUAL_ENV',
-                'VSE_CONFIG_FILE', 'VSE_WORK_DIR', 'VSE_OCR_BACKEND', 'VSE_NATIVE_OCR_ROOT', 'VSE_DIRECTML_MODEL_ROOT',
+                'VSE_CONFIG_FILE', 'VSE_WORK_DIR', 'VSE_OCR_BACKEND', 'VSE_NATIVE_OCR_ROOT', 'VSE_DIRECTML_MODEL_ROOT', 'VSE_MODEL_DIR',
                 'VSE_VSF_BINARY', 'VSE_VSF_DIR', 'IMAGEIO_FFMPEG_EXE')
     return {'schema': 1, 'bundle_root': str(root), 'platform': manifest['platform'], 'executable': sys.executable,
             'prefix': sys.prefix, 'base_prefix': sys.base_prefix, 'sys_path': sys.path,
@@ -220,6 +221,17 @@ def configure_user_paths() -> None:
         os.environ['VSE_WORK_DIR'] = str(work)
 
 
+def run_paddle_model_acceptance(root: Path, python: Path, fixtures: Path, results: Path, env: dict) -> None:
+    """Run external frozen cases using only the final ZIP's Python and code."""
+    fixtures = fixtures.expanduser().resolve(strict=True)
+    if not fixtures.is_dir() or fixtures.is_relative_to(root.resolve()):
+        raise RuntimeError('Acceptance fixtures must be a build-side directory outside the customer package')
+    subprocess.run([str(python), str(root / 'scripts/check_paddle_models.py'),
+                    '--app-root', str(root), '--fixtures', str(fixtures),
+                    '--report', str(results / 'paddle-models/report.json')],
+                   check=True, env=env, timeout=1800)
+
+
 BUNDLE_DISTRIBUTION = 'self-contained inference runtime'
 
 
@@ -228,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--verify', action='store_true', help='Audit the included runtime and run real GUI/OCR/video regressions; no installation')
     parser.add_argument('--results-dir', type=Path, help='Writable verification evidence directory outside the application')
     parser.add_argument('--runtime-audit-dir', type=Path, help='Prepared trusted verification hooks/evidence outside application')
+    parser.add_argument('--paddle-model-fixtures', type=Path, help='Build-side frozen fixtures for full Paddle CPU model/mode acceptance; never shipped to customers')
     parser.add_argument('--cli', action='store_true', help='Pass remaining arguments to the subtitle CLI instead of the GUI')
     arguments = list(sys.argv[1:] if argv is None else argv)
     # Once --cli is selected, even --help belongs to the application CLI. Do
@@ -238,6 +251,8 @@ def main(argv: list[str] | None = None) -> int:
         forwarded = arguments[index + 1:]
     else:
         args, forwarded = parser.parse_known_args(arguments)
+    if args.paddle_model_fixtures is not None and not args.verify:
+        parser.error('--paddle-model-fixtures requires --verify')
     root = Path(__file__).resolve().parent
     manifest_path = root / 'bundle-manifest.json'
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
@@ -268,6 +283,11 @@ def main(argv: list[str] | None = None) -> int:
         raise RuntimeError('Unknown bundled OCR backend')
     os.environ['VSE_OCR_BACKEND'] = backend
     os.environ.pop('VSE_DIRECTML_MODEL_ROOT', None)
+    os.environ.pop('VSE_MODEL_DIR', None)
+    if backend == 'paddle':
+        os.environ['VSE_MODEL_DIR'] = str(root / 'backend/models')
+    if args.paddle_model_fixtures is not None and backend != 'paddle':
+        raise RuntimeError('Paddle model fixtures require a Paddle CPU/CUDA package')
     if backend == 'native':
         os.environ['VSE_NATIVE_OCR_ROOT'] = str(root / 'native-ocr')
         # Do not override a requested unsupported GPU provider: adapter rejects it.
@@ -306,6 +326,8 @@ def main(argv: list[str] | None = None) -> int:
         subprocess.run([str(python), '-m', 'backend.cli', '--help'], check=True)
         qt_platform = 'cocoa' if platform.system() == 'Darwin' else 'windows' if os.name == 'nt' else 'xcb' if os.environ.get('DISPLAY') else 'offscreen'
         env = dict(os.environ, QT_QPA_PLATFORM=qt_platform, VSE_OFFLINE='1', VSE_SMOKE_SCREENSHOT_DIR=str(results / 'gui'))
+        if args.paddle_model_fixtures is not None:
+            run_paddle_model_acceptance(root, python, args.paddle_model_fixtures, results, env)
         subprocess.run([str(python), 'gui.py', '--smoke-test'], check=True, env=env, timeout=120)
         subprocess.run([str(python), 'scripts/e2e_smoke.py', '--output', str(results / 'bundle-e2e')], check=True, env=env, timeout=960)
         for mode in ('accurate', 'auto'):

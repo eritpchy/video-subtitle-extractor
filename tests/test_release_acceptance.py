@@ -1,6 +1,9 @@
 """Acceptance receipts must be derived from the exact final ZIP's evidence."""
 from __future__ import annotations
 
+import copy
+from functools import lru_cache
+import importlib.util
 import json
 from pathlib import Path
 import tempfile
@@ -10,12 +13,22 @@ import zipfile
 
 from scripts.accept_release_archive import Evidence, SCENARIOS, accept_archives, main
 from scripts.bundle_bootstrap import sha256
-from scripts.release_guard import ACCEPTANCE_CHECKS, candidate_asset_names, validate_assets
+from scripts.release_guard import PADDLE_MODEL_CHECK, candidate_asset_names, required_acceptance_checks, validate_assets
 from scripts.release_profiles import PROFILES
 
 
 SHA = 'a' * 40
 VERSION = '2.3.0'
+
+
+@lru_cache(maxsize=3)
+def synthetic_paddle_report(commit, version, build_profile):
+    """Reuse the checker's frozen-reference unit fixture, never inference evidence."""
+    helper = Path(__file__).with_name('test_check_paddle_models.py')
+    spec = importlib.util.spec_from_file_location('paddle_gate_synthetic_test_helpers', helper)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.synthetic_report({'commit': commit, 'version': version, 'build_profile': build_profile})
 
 
 def write_json(path: Path, value):
@@ -57,6 +70,9 @@ class FinalReleaseAcceptanceTests(unittest.TestCase):
             **{key: manifest[key] for key in ('commit', 'version', 'platform', 'arch', 'build_profile')},
             'payload': 'passed', 'launcher_smoke': 'passed',
         })
+        if manifest['ocr_backend'] == 'paddle':
+            write_json(smoke / 'paddle-models/report.json',
+                       copy.deepcopy(synthetic_paddle_report(SHA, VERSION, profile)))
         self.workloads(smoke)
         environment = self.portable / archive.stem
         scenarios = []
@@ -105,14 +121,86 @@ class FinalReleaseAcceptanceTests(unittest.TestCase):
         receipt = json.loads(self.receipt.read_text())
         self.assertEqual(receipt['archive'], self.name)
         self.assertEqual(receipt['archive_sha256'], sha256(self.archive))
-        self.assertEqual(receipt['checks'], {check: 'passed' for check in ACCEPTANCE_CHECKS})
+        self.assertEqual(receipt['checks'], {check: 'passed' for check in required_acceptance_checks('paddle-cuda11.8')})
         self.assertIs(receipt['gpu_inference_verified'], False)
         self.assertEqual(receipt['gpu_validation'], 'not-run-server-ci')
-        self.assertEqual(len(receipt['evidence']), 19)
+        self.assertEqual(len(receipt['evidence']), 20)
         key = f'package/test-results/{self.archive.stem}/package-verification.json'
         path = self.smoke / 'package-verification.json'
         self.assertEqual(receipt['evidence'][key], {'sha256': sha256(path), 'bytes': path.stat().st_size})
+        key = f'package/test-results/{self.archive.stem}/paddle-models/report.json'
+        path = self.smoke / 'paddle-models/report.json'
+        self.assertEqual(receipt['evidence'][key], {'sha256': sha256(path), 'bytes': path.stat().st_size})
         self.assertNotIn('old', receipt)
+
+    def test_paddle_final_model_report_is_required(self):
+        (self.smoke / 'paddle-models/report.json').unlink()
+        self.assert_rejected('Missing or unsafe')
+
+    def test_source_model_success_cannot_authorize_final_package(self):
+        path = self.smoke / 'paddle-models/report.json'
+        self.mutate(path, lambda row: row.update(scope='source', bundled_python_verified=False))
+        self.assert_rejected('Final Paddle model acceptance did not pass.*final-bundle')
+
+    def test_paddle_model_report_identity_is_bound_to_current_bundle(self):
+        path = self.smoke / 'paddle-models/report.json'
+        original = path.read_bytes()
+        for key, value in (('commit', 'b' * 40), ('version', '2.2.0'), ('build_profile', 'paddle-cpu')):
+            with self.subTest(key=key):
+                path.write_bytes(original)
+                self.mutate(path, lambda row: row.update({key: value}))
+                self.assert_rejected('Final Paddle model acceptance did not pass.*identity')
+
+    def test_missing_actual_mode_or_model_cannot_be_replaced_by_summary(self):
+        path = self.smoke / 'paddle-models/report.json'
+        original = path.read_bytes()
+        changes = [lambda row: row.update(cases=[]),
+                   lambda row: row.update(cases=[case for case in row['cases'] if case['mode'] != 'auto']),
+                   lambda row: row.update(cases=[case for case in row['cases']
+                                                if case['rec_model'] != 'ta_PP-OCRv5_mobile_rec']),
+                   lambda row: row.update(model_count=14),
+                   lambda row: row.update(modes=['fast', 'accurate'])]
+        for index, change in enumerate(changes):
+            with self.subTest(change=index):
+                path.write_bytes(original)
+                self.mutate(path, change)
+                self.assert_rejected('Final Paddle model acceptance did not pass')
+
+    def test_paddle_failed_actual_case_cannot_be_hidden_by_passed_summary(self):
+        self.mutate(self.smoke / 'paddle-models/report.json',
+                    lambda row: row['cases'][0].update(passed=False))
+        self.assert_rejected('Final Paddle model acceptance did not pass.*Unsuccessful')
+
+    def test_self_consistent_forged_model_expectation_fails(self):
+        from scripts.check_paddle_models import compare_ocr
+        path = self.smoke / 'paddle-models/report.json'
+
+        def forge(report):
+            row = report['cases'][0]
+            row['actual'] = row['expected'] = [[], []]
+            row.update(compare_ocr(row['actual'], row['expected']))
+            self.assertIs(row['passed'], True)
+
+        self.mutate(path, forge)
+        self.assert_rejected('Final Paddle model acceptance did not pass.*canonical frozen proof')
+
+    def test_paddle_validation_errors_fail_closed_and_remove_old_receipt(self):
+        for error in (ValueError('invalid report'), KeyError('actual'), TypeError('invalid records')):
+            with self.subTest(error=type(error).__name__), \
+                    patch('scripts.check_paddle_models.validate_report', side_effect=error):
+                self.assert_rejected('Final Paddle model acceptance did not pass')
+
+    def test_native_and_directml_receipts_do_not_require_or_claim_paddle_gate(self):
+        for profile in ('native-cpu', 'directml'):
+            name = next(name for name, target in candidate_asset_names(VERSION).items()
+                        if target == ('windows', 'x64', profile))
+            archive = self.create_candidate(name)
+            self.assertFalse((self.archives / 'test-results' / archive.stem / 'paddle-models/report.json').exists())
+        self.accept()
+        for receipt in self.archives.glob('*.acceptance.json'):
+            report = json.loads(receipt.read_text())
+            if report['build_profile'] in ('native-cpu', 'directml'):
+                self.assertNotIn(PADDLE_MODEL_CHECK, report['checks'])
 
     def test_all_seven_produced_receipts_pass_release_guard(self):
         for name in candidate_asset_names(VERSION):
