@@ -46,16 +46,22 @@ class SettingInterface(QtWidgets.QVBoxLayout):
         )
         self.addWidget(self.mode_combo)
            
-        # Native CPU packages must not pretend GPU acceleration is enabled.
-        from backend.tools.native_ocr import selected_backend
-        native_cpu = selected_backend() == 'native'
+        # A native-coreml package has a real switch: disabling it explicitly
+        # selects the same packaged CPU worker/models, without another runtime.
+        from backend.tools.native_ocr import configured_native_provider, selected_backend
+        native = selected_backend() == 'native'
+        native_cpu = native and configured_native_provider() == 'cpu'
+        native_coreml = native and configured_native_provider() == 'coreml'
+        acceleration_description = tr["Setting"]["HardwareAccelerationDesc"]
+        if native_coreml:
+            acceleration_description += "\nCoreML (CPU + GPU; ANE disabled; no automatic CPU fallback)"
 
         # 是否启用硬件加速
         self.hardware_acceleration = SwitchSettingCard(
             configItem=None if native_cpu else config.hardwareAcceleration,
             icon=FluentIcon.SPEED_HIGH, 
             title=tr["Setting"]["HardwareAcceleration"],
-            content=tr["Setting"]["NativeOCRCPUOnly"] if native_cpu else tr["Setting"]["HardwareAccelerationDesc"],
+            content=tr["Setting"]["NativeOCRCPUOnly"] if native_cpu else acceleration_description,
             parent=parent
         )
         self.addWidget(self.hardware_acceleration)

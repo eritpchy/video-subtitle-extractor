@@ -20,16 +20,22 @@ class HardwareAccelerator:
         self.__onnx_providers = []
         self.__enabled = True
         self.__backend = 'paddle'
+        self.__native_provider = 'cpu'
+        self.__native_capabilities = None
 
     def initialize(self):
-        from backend.tools.native_ocr import selected_backend
+        from backend.tools.native_ocr import configured_native_provider, selected_backend
         self.__backend = selected_backend()
         self.__cuda = False
+        self.__onnx_providers = []
+        self.__native_capabilities = None
         if self.__backend == 'directml':
             self.check_onnx()
             return
         if self.__backend == 'native':
-            self.__cuda = False
+            self.__native_provider = configured_native_provider()
+            # Probe lazily, after --cpu / GUI-disable has been applied. A user
+            # choosing CPU must not need a functioning CoreML provider.
             return
         self.check_paddle()
 
@@ -51,16 +57,22 @@ class HardwareAccelerator:
             self.__onnx_providers = []
 
     def has_accelerator(self):
-        return self.has_cuda() or self.has_directml()
+        return self.has_cuda() or self.has_directml() or self.has_coreml()
 
     @property
     def accelerator_name(self):
+        if self.__backend == 'native' and self.__enabled and self.__native_provider == 'coreml':
+            self.has_coreml()  # Missing provider is an error, not an implicit CPU choice.
+            return 'CoreML (CPU + GPU requested; physical GPU execution not verified)'
         if self.__backend == 'directml' and self.__enabled:
             return 'DirectML' if self.has_directml() else 'DirectML (unavailable; CPU fallback disabled)'
         return 'GPU (CUDA)' if self.has_cuda() else 'CPU'
 
     @property
     def onnx_providers(self):
+        if self.__backend == 'native' and self.__enabled and self.__native_provider == 'coreml':
+            self.has_coreml()
+            return list(self.__native_capabilities['available_providers'])
         return list(self.__onnx_providers) if self.__enabled else []
 
     @property
@@ -69,6 +81,18 @@ class HardwareAccelerator:
 
     def has_directml(self):
         return self.__backend == 'directml' and self.__enabled and 'DmlExecutionProvider' in self.__onnx_providers
+
+    def has_coreml(self):
+        if self.__backend != 'native' or not self.__enabled or self.__native_provider != 'coreml':
+            return False
+        if self.__native_capabilities is None:
+            from backend.tools.native_ocr import require_coreml_capabilities
+            self.__native_capabilities = require_coreml_capabilities()
+        return True  # EP availability only; accelerator_name makes this explicit.
+
+    @property
+    def native_provider(self):
+        return self.__native_provider if self.__enabled else 'cpu'
 
     def has_cuda(self):
         return self.__enabled and self.__cuda

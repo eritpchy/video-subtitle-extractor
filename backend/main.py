@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import subprocess
 from backend.config import *
 from backend.tools.hardware_accelerator import HardwareAccelerator
+from backend.tools.native_ocr import selected_backend
 from backend.tools import reformat
 from backend.tools.ocr import OcrRecogniser, get_coordinates
 from backend.tools import subtitle_ocr
@@ -48,6 +49,11 @@ import pysrt
 def default_extraction_work_dir(video_name):
     root = os.environ.get('VSE_WORK_DIR') or os.path.join(os.path.dirname(BASE_DIR), 'output')
     return os.path.join(root, str(video_name))
+
+
+def use_detection_frame_extraction(hardware_accelerator, mode):
+    """Preserve native CPU/CoreML algorithm parity; acceleration is not routing."""
+    return selected_backend() != 'native' and hardware_accelerator.has_accelerator() and mode == 'accurate'
 
 
 class SubtitleExtractor:
@@ -214,8 +220,10 @@ class SubtitleExtractor:
         subtitle_ocr_process = self.start_subtitle_ocr_async()
         if self.sub_area is not None:
             if platform.system() in ['Windows', 'Linux', 'Darwin']:
-                # 使用GPU且使用accurate模式时才开放此方法：
-                if self.hardware_accelerator.has_accelerator() and config.mode.value == 'accurate':
+                # Native CoreML and explicit native CPU retain the SAME VSF
+                # pipeline/models. CoreML must not silently change the accurate
+                # algorithm merely because an accelerator is requested.
+                if use_detection_frame_extraction(self.hardware_accelerator, config.mode.value):
                     self.extract_frame_by_det()
                 else:
                     self.extract_frame_by_vsf()

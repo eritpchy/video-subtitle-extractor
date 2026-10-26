@@ -19,11 +19,29 @@ from backend.tools.paddle_model_config import PaddleModelConfig
 WORKER = r'''
 import json, os, struct, sys, time
 assert os.environ['ORT_DISABLE_TELEMETRY'] == '1'
+if '--capabilities' in sys.argv:
+ capability=os.environ.get('NATIVE_TEST_CAPABILITY','ok')
+ if capability=='hang': time.sleep(60)
+ if capability=='oversize': print('x'*70000);sys.exit(0)
+ if capability=='error': sys.stderr.write('fixture CoreML unavailable');sys.exit(3)
+ if capability=='bad_json': print('{');sys.exit(0)
+ available=capability!='cpu_only'
+ out={'schema_version':1,'ort_version':'1.31.0','default_request_provider':'cpu',
+      'available_providers':['CPUExecutionProvider']+(['CoreMLExecutionProvider'] if available else []),
+      'supported_request_providers':['cpu']+(['coreml'] if available else []),
+      'coreml':{'available':available,'model_format':'MLProgram','compute_units':'CPUAndGPU','ane_allowed':False,'gpu_execution_verified':False}}
+ if capability=='gpu_claim': out['coreml']['gpu_execution_verified']=True
+ if capability=='fragmented':
+  for ch in json.dumps(out): sys.stdout.write(ch);sys.stdout.flush()
+ else: print(json.dumps(out))
+ sys.exit(0)
 while True:
  h=sys.stdin.buffer.read(4)
  if not h: break
  size,=struct.unpack('<I',h)
  req=json.loads(sys.stdin.buffer.read(size))
+ if os.environ.get('NATIVE_TEST_REQUEST_LOG'):
+  with open(os.environ['NATIVE_TEST_REQUEST_LOG'],'a',encoding='utf-8') as log: log.write(json.dumps(req)+'\n')
  behavior=os.environ.get('NATIVE_TEST_BEHAVIOR','ok')
  if behavior=='hang': time.sleep(60)
  if behavior=='eof':
@@ -33,6 +51,25 @@ while True:
  out={'id':req['id'],'ok':True,'result':[[[[1,2],[20,2],[20,12],[1,12]]],[['你好',.95]]],
       'dt_polys':[[[1,2],[20,3],[19,12],[1,11]]]}
  out.update({key:req[key] for key in ('rec_model','batch_size','cpu_threads')})
+ provider=req['provider'];coreml=provider=='coreml';actual='CoreMLExecutionProvider' if coreml else 'CPUExecutionProvider'
+ if behavior=='empty': out['result']=[[],[]]
+ def session(model,run=True):
+  return {'model':model,'status':'executed' if run else 'not_run','source':'ort_first_run_profile' if coreml else 'explicit_cpu_session',
+   'coreml_ep_executed':coreml and run,'cpu_ep_executed':run,'coreml_kernel_events':3 if coreml and run else 0,
+   'cpu_kernel_events':1 if coreml and run else 0,'observed_providers':(['CoreMLExecutionProvider','CPUExecutionProvider'] if coreml else ['CPUExecutionProvider']) if run else [],'gpu_execution_verified':False}
+ sessions={'det':session('PP-OCRv6_'+req['tier']+'_det'),'rec':None if req['operation']=='detect' else session(req['rec_model'],behavior!='empty')}
+ evidence={'schema_version':1,'requested_provider':provider,'actual_provider':actual,'compute_units':'CPUAndGPU' if coreml else 'CPUOnly',
+  'ane_allowed':False,'gpu_execution_verified':False,'coreml_ep_executed':coreml,'cpu_fallback_observed':coreml,'sessions':sessions}
+ out.update(requested_provider=provider,actual_provider=actual,execution_evidence=evidence)
+ now=time.time_ns();mono=time.monotonic_ns()
+ out['execution_window']={'worker_pid':os.getpid(),'utc_start_ns':now,'utc_end_ns':now,
+  'monotonic_start_ns':mono,'monotonic_end_ns':mono,'monotonic_clock':'fixture'}
+ if behavior=='wrong_provider': out['actual_provider']='CPUExecutionProvider' if coreml else 'CoreMLExecutionProvider'
+ if behavior=='gpu_claim': evidence['gpu_execution_verified']=True
+ if behavior=='no_coreml':
+  sessions['det'].update(coreml_ep_executed=False,coreml_kernel_events=0,observed_providers=['CPUExecutionProvider'])
+ if behavior=='wrong_model': sessions['det']['model']='wrong model'
+ if behavior=='no_evidence': out.pop('execution_evidence')
  if behavior=='bad_id': out['id']=-1
  if behavior=='boolean_id': out['id']=True
  if behavior=='float_batch': out['batch_size']=float(req['batch_size'])
@@ -169,7 +206,7 @@ def test_no_substitution_or_unsupported_provider(native_root, monkeypatch):
     with pytest.raises(FileNotFoundError, match='no installed config.*korean'):
         NativeOcr(PaddleModelConfig(HardwareAccelerator(), 'korean', 'fast'))
     monkeypatch.setenv('VSE_NATIVE_OCR_PROVIDER', 'cuda')
-    with pytest.raises(ValueError, match='CPU only'):
+    with pytest.raises(ValueError, match='Unsupported native OCR provider'):
         selected_backend()
     monkeypatch.setenv('VSE_OCR_BACKEND', 'typo')
     with pytest.raises(ValueError, match='Unsupported VSE_OCR_BACKEND'):

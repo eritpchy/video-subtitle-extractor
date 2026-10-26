@@ -44,7 +44,7 @@ def build_parser():
     parser.add_argument("--mode", choices=("fast", "auto", "accurate"), default="fast")
     parser.add_argument("--area", type=parse_area, default=parse_area("0.65,1,0,1"),
                         help="normalized ymin,ymax,xmin,xmax, measured from top-left (default: bottom 35%%)")
-    parser.add_argument("--cpu", action="store_true", help="disable GPU acceleration")
+    parser.add_argument("--cpu", action="store_true", help="explicitly select CPU, including in a CoreML package; no automatic CPU fallback")
     parser.add_argument("--threads", type=int, default=0, help="VideoSubFinder threads; 0 is automatic")
     parser.add_argument("--overwrite", action="store_true", help="replace an existing output SRT")
     parser.add_argument("--keep-work", type=Path, help="keep intermediate data in this NEW directory")
@@ -122,6 +122,8 @@ def extract(args):
         raise ValueError(f"Unsupported language code: {args.language}")
     if args.threads > (os.cpu_count() or 1):
         raise ValueError(f"--threads cannot exceed the available CPU count ({os.cpu_count() or 1})")
+    # --cpu is a per-run explicit choice. Keep the package provider environment
+    # unchanged; HardwareAccelerator applies this switch before lazy EP probing.
     for item, value in (
         (config.language, args.language), (config.mode, args.mode),
         (config.hardwareAcceleration, not args.cpu),
