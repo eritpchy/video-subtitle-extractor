@@ -1,0 +1,8 @@
+# actionlint 1.7.7 predates this officially GA hosted arm64 label. This exact
+# additive label allowance does not suppress any rule or match arbitrary names.
+# https://github.blog/changelog/2026-02-26-macos-26-is-now-generally-available-for-github-hosted-runners/
+# The legacy config field name is actionlint's supported additional-label API;
+# the workflows still select GitHub-hosted macos-26, not a self-hosted runner.
+self-hosted-runner:
+  labels:
+    - macos-26

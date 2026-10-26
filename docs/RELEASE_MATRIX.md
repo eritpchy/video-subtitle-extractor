@@ -14,11 +14,13 @@ and an explicit CPU option in the same bundled environment. The successful
 seven-profile CPU-acceptance run is a retained baseline, not completion of this
 requirement. Existing published 2.3.0 Native CPU assets remain unchanged. Do not
 rename a CPU-only bundle or equate a requested CoreML provider/compute plan with
-observed GPU execution. Full publication is blocked until this is integrated
-and validated; no extra duplicate Mac CPU environment is planned for final
+observed GPU execution. The production provider/package integration is now in source; full publication
+remains blocked pending real Mac validation; no extra duplicate Mac CPU environment is planned for final
 distribution merely to preserve an internal regression baseline.
 
-The current seven-profile **baseline** candidate set is:
+The new seven-profile candidate set below replaces only the **new** Mac CPU
+artifact with one dual-provider CoreML artifact. The successful earlier run is
+still a CPU-only baseline, not evidence for this new identity:
 
 | Platform | Package profile | Inference runtime |
 | --- | --- | --- |
@@ -28,13 +30,26 @@ The current seven-profile **baseline** candidate set is:
 | Windows x64 | `directml` | Original ONNX Runtime DirectML 1.20.1 / DirectML 1.15.2 |
 | Windows x64 | `native-cpu` | Existing native CPU worker |
 | Linux x64 | `native-cpu` | Existing native CPU worker |
-| macOS arm64 | `native-cpu` | Existing native CPU worker |
+| macOS arm64 | `native-coreml` | Existing pinned ORT 1.31.0; explicit CoreML CPU+GPU and CPU in one package |
 
 Windows builds and package acceptance run on **Server 2022 and Server 2025**;
 only the Server 2022 build of each profile is selected for the canonical set.
 This is not Windows 10/11 or real GPU certification. Native CPU still runs its
 existing model/worker tests; this workflow does not replace GPU packages with it.
 VSF remains pinned to 6.10.7.
+
+**macOS requirement correction:** the reviewed full Qt 6.12.0 payload declares
+an actual maximum Mach-O minimum of **macOS 26.0**, not 14.0/14.4. In particular,
+Apple's own `otool -arch arm64 -l` reports `LC_BUILD_VERSION minos 26.0` for
+`PySide6/QtCore.abi3.so` (SHA256
+`1288c120342b8460a8829856a07abf2d7d63be8f72502c3dcffc146bb780cbec`).
+This is `minos`, not the separate SDK field; 28 original PySide/Shiboken images
+limit the complete payload. The candidate's Info.plist follows the actual
+whole-package scan. New Mac CI uses the official GA `macos-26` arm64 runner,
+including the real app-launcher gate. The old published ZIP and its inaccurate
+14.0 declaration are not rewritten. Direct Python execution on macOS 15 does
+not certify Finder/app-launch compatibility or lower the declared requirement.
+See [GitHub's runner announcement](https://github.blog/changelog/2026-02-26-macos-26-is-now-generally-available-for-github-hosted-runners/).
 
 DirectML waits for the Native workflow to finish, but an unrelated Native test
 failure does not suppress its independent diagnostic evidence. Its converted
@@ -97,6 +112,24 @@ The contamination scenarios retain three-mode video tests without redundantly
 repeating the complete image suite. Packaged Paddle always pins VSE_MODEL_DIR
 to its own verified weights, rather than borrowing a host model directory.
 None of these CPU results certifies a GPU.
+
+Mac `native-coreml` additionally executes the same 168 frozen image cases once
+with explicit CPU and once with CoreML (336 actual calls), preserving both raw
+native results and production display ordering. All 15 fixed FP32 ONNX graphs,
+configs, confidence tolerances and mode choices are unchanged. The final ZIP
+worker SHA, actual PNG input SHA, request ID, process ID, inference window,
+first-run profile reuse and CPU subgraph evidence are recorded. Blank frames do
+not pretend recognition ran. Each of the three real video modes must also run
+through the same production VSF route with CoreML and validate real per-request
+EP evidence, including both clean and contaminated environments. No all-CPU EP
+fallback is silently accepted as CoreML. Explicit `--cpu` and the GUI switch
+remain available in the same package.
+
+CoreML EP events and `CPUAndGPU` configuration are **not** physical GPU dispatch
+proof, nor proof of CoreML internal numeric precision. Those real-device checks,
+the Mac GUI/AX regression and final package evidence are separate release
+blockers. Internal CoreML CPU work remains disclosed. No physical GPU pass or
+speedup is inferred by these candidate receipts.
 
 The isolated original-model integrity verifier passes `-B -X utf8` explicitly:
 Python's `-I` ignores both `PYTHONDONTWRITEBYTECODE` and `PYTHONUTF8`. Launcher

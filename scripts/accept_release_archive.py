@@ -144,6 +144,59 @@ def _workload_evidence(evidence: Evidence, root: Path, relative: str, scope: str
     _passed_audit(evidence.read(root, name, scope), f'{scope}/{name}')
 
 
+def _coreml_video_evidence(evidence: Evidence, root: Path, relative: str, scope: str, *, worker_sha256: str, seen_requests=None):
+    try:
+        from .e2e_smoke import validate_coreml_video_evidence
+    except ImportError:
+        from e2e_smoke import validate_coreml_video_evidence
+    try:
+        from .check_native_models import request_identity
+    except ImportError:
+        from check_native_models import request_identity
+    if seen_requests is None:
+        seen_requests = set()
+    for mode in MODES:
+        directory = relative + f'/bundle-coreml-e2e-{mode}'
+        report = evidence.read(root, directory + '/report.json', scope)
+        command = report.get('command')
+        if (report.get('result') != 'passed' or report.get('mode') != mode
+                or not isinstance(command, list) or any(not isinstance(item, str) for item in command)
+                or any(item == '--cpu' or item.startswith(('--cpu=', '--mode=')) for item in command)
+                or command.count('--mode') != 1 or command.index('--mode') + 1 >= len(command)
+                or command[command.index('--mode') + 1] != mode):
+            raise RuntimeError('Missing genuine CoreML video mode: ' + mode)
+        records = report.get('native_requests')
+        if not isinstance(records, list) or not records or len(records) > 10000:
+            raise RuntimeError('Missing or excessive CoreML video request records')
+        documents, names = [], set()
+        for record in records:
+            name = record.get('path') if isinstance(record, dict) else None
+            if not isinstance(name, str) or not re.fullmatch(r'native-ocr-[1-9][0-9]*-[1-9][0-9]*\.json', name) or name in names:
+                raise RuntimeError('Unsafe/duplicate CoreML video request filename')
+            names.add(name)
+            path = directory + '/native-requests/' + name
+            document = evidence.read(root, path, scope)
+            if document.get('worker_sha256') != worker_sha256:
+                raise RuntimeError('CoreML video evidence came from a different worker executable')
+            if name != f"native-ocr-{document.get('worker_pid')}-{document.get('request', {}).get('id')}.json":
+                raise RuntimeError('CoreML video filename is not bound to its process/request identity')
+            documents.append(document)
+            actual = evidence.index[scope + '/' + path]
+            if actual != {key: record.get(key) for key in ('sha256', 'bytes')}:
+                raise RuntimeError('CoreML video request bytes differ from their producer index')
+        try:
+            models = validate_coreml_video_evidence(report, documents)
+            if report.get('executed_models') != models:
+                raise ValueError('CoreML video model coverage differs from actual sessions')
+            for document in documents:
+                identity = request_identity(document)
+                if identity in seen_requests:
+                    raise ValueError('A CoreML request was replayed as another video mode/environment')
+                seen_requests.add(identity)
+        except (ValueError, KeyError, TypeError) as error:
+            raise RuntimeError('CoreML video execution evidence failed: ' + str(error)) from error
+
+
 def read_manifest(archive: Path) -> dict:
     with zipfile.ZipFile(archive) as bundle:
         names = bundle.namelist()
@@ -209,6 +262,35 @@ def prepare_acceptance(archive: Path, archives: Path, portable: Path) -> tuple[d
                                                    for key in ('commit', 'version', 'build_profile')})
         except (ValueError, KeyError, TypeError) as error:
             raise RuntimeError(f'Final Paddle model acceptance did not pass: {error}') from error
+    elif manifest['build_profile'] == 'native-coreml':
+        try:
+            from .check_native_models import validate_report
+        except ImportError:
+            from check_native_models import validate_report
+        native_report = evidence.read(archives, smoke_relative + '/native-models/report.json', 'package')
+        native_worker_sha = manifest.get('files', {}).get('native-ocr/native-ocr')
+        if (not isinstance(native_worker_sha, str) or not re.fullmatch('[a-f0-9]{64}', native_worker_sha)
+                or native_report.get('worker_sha256') != native_worker_sha):
+            raise RuntimeError('Native correctness evidence does not match the final ZIP worker')
+        if native_report.get('runtime_sha256') != manifest.get('files', {}).get('native-ocr/libonnxruntime.1.dylib'):
+            raise RuntimeError('Native correctness evidence does not match the final ZIP runtime')
+        for name, file_digest in native_report.get('model_files', {}).items():
+            if manifest['files'].get('native-ocr/' + name) != file_digest:
+                raise RuntimeError('Native model evidence differs from final ZIP model inventory')
+        for name, file_digest in native_report.get('production_modules', {}).items():
+            if manifest['files'].get(name) != file_digest:
+                raise RuntimeError('Native production/verification code differs from the final ZIP')
+        try:
+            validate_report(native_report, identity={key: manifest[key] for key in ('commit', 'version', 'build_profile')})
+        except (ValueError, KeyError, TypeError) as error:
+            raise RuntimeError(f'Final Native CPU/CoreML all-model acceptance did not pass: {error}') from error
+        try:
+            from .check_native_models import request_identity
+        except ImportError:
+            from check_native_models import request_identity
+        native_requests_seen = {request_identity(row['request_evidence'])
+                               for group in native_report['providers'].values() for row in group['cases']}
+        _coreml_video_evidence(evidence, archives, smoke_relative, 'package', worker_sha256=native_worker_sha, seen_requests=native_requests_seen)
     portable_relative = archive.stem
     environment = evidence.read(portable, portable_relative + '/portable-environment-report.json', 'portable')
     _bound_report(environment, {'result': 'passed', 'archive_sha256': digest,
@@ -229,11 +311,13 @@ def prepare_acceptance(archive: Path, archives: Path, portable: Path) -> tuple[d
         _bound_report(detail, {'scenario': scenario, 'result': 'passed'}, scenario + '/scenario-report.json')
         _passed_audit(detail.get('audit'), scenario + '/scenario-report.json')
         _workload_evidence(evidence, portable, case_relative, 'portable')
+        if manifest['build_profile'] == 'native-coreml':
+            _coreml_video_evidence(evidence, portable, case_relative, 'portable', worker_sha256=native_worker_sha, seen_requests=native_requests_seen)
     receipt = {'schema': 1, 'archive': archive.name, 'archive_sha256': digest, **identity,
                'checks': {check: 'passed' for check in required_acceptance_checks(manifest['build_profile'])},
                'gpu_inference_verified': False, 'gpu_validation': 'not-run-server-ci',
                'evidence': evidence.index,
-               'scope': 'Final ZIP launcher, explicit CPU video modes, regressions and child-environment isolation; not GPU certification.'}
+               'scope': 'Final ZIP launcher, explicit CPU video modes, regressions and child-environment isolation; native-coreml additionally requires both-provider all-model correctness and actual CoreML EP video execution. Not physical GPU certification.'}
     return receipt, evidence
 
 

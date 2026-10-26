@@ -30,6 +30,8 @@ class ReleaseProfileTests(unittest.TestCase):
         self.assertIn('vse-2.3.0-windows-x64-directml.zip', names)
         self.assertIn('vse-2.3.0-windows-x64-cuda11.8.zip', names)
         self.assertIn('vse-2.3.0-linux-x64-native-cpu.zip', names)
+        self.assertIn('vse-2.3.0-macos-arm64-native-coreml.zip', names)
+        self.assertNotIn('vse-2.3.0-macos-arm64-native-cpu.zip', names)
         self.assertFalse(any('python312' in name or 'cuda10.2' in name for name in names))
 
     def test_historical_cuda10_is_not_faked_or_silently_reintroduced(self):

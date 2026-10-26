@@ -154,10 +154,10 @@ def test_missing_raw_evidence_directory_is_not_a_success(tmp_path):
 def archive_evidence(tmp_path):
     relative = 'test-results/candidate'
     paths = {}
-    for mode in smoke.MODES:
+    for index, mode in enumerate(smoke.MODES, 1):
         directory = tmp_path / relative / f'bundle-coreml-e2e-{mode}'
-        record = directory / 'native-requests/native-ocr-123-1.json'
-        write_json(record, raw_record(mode))
+        record = directory / f'native-requests/native-ocr-123-{index}.json'
+        write_json(record, raw_record(mode, request_id=index))
         report = {'result': 'passed', 'mode': mode, 'requested_provider': 'coreml', 'cpu_forced': False,
                   'gpu_inference_verified': False, 'command': ['python', '-m', 'backend.cli', 'input.mp4', '--mode', mode]}
         smoke.collect_coreml_video_evidence(record.parent, report)
@@ -289,3 +289,23 @@ def test_video_proof_requires_bound_input_integer_id_and_complete_profile_captur
     # because command-line switches and plausible EP names appear in a report.
     mutate_record(archive_evidence, change)
     with pytest.raises(RuntimeError): accept_fixture(archive_evidence)
+
+
+def test_replayed_fast_request_cannot_stand_in_for_auto_video(archive_evidence):
+    _, fast = archive_evidence[2]['fast']
+    report_path, auto = archive_evidence[2]['auto']
+    destination = auto.with_name(fast.name)
+    auto.unlink(); destination.write_bytes(fast.read_bytes())
+    report = json.loads(report_path.read_bytes())
+    report['native_requests'] = [file_record(destination)]
+    write_json(report_path, report)
+    with pytest.raises(RuntimeError, match='replayed'):
+        accept_fixture(archive_evidence)
+
+
+def test_request_seen_set_is_shared_across_clean_and_polluted_environment_gates(archive_evidence):
+    root, relative, _ = archive_evidence
+    evidence, seen = acceptance.Evidence(), set()
+    acceptance._coreml_video_evidence(evidence, root, relative, 'clean', worker_sha256=WORKER_SHA256, seen_requests=seen)
+    with pytest.raises(RuntimeError, match='replayed'):
+        acceptance._coreml_video_evidence(evidence, root, relative, 'polluted', worker_sha256=WORKER_SHA256, seen_requests=seen)

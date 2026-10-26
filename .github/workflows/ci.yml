@@ -40,12 +40,12 @@ jobs:
             name: Windows Server 2022 x64
           - os: windows-2025
             name: Windows Server 2025 x64
-          - os: macos-15
+          - os: macos-26
             name: macOS arm64
     runs-on: ${{ matrix.os }}
     env:
       VSE_MODEL_DIR: ${{ github.workspace }}/build/paddle-seed/models
-      QT_QPA_PLATFORM: ${{ matrix.os == 'macos-15' && 'cocoa' || 'offscreen' }}
+      QT_QPA_PLATFORM: ${{ matrix.os == 'macos-26' && 'cocoa' || 'offscreen' }}
     # Each native platform repeats full launcher acceptance under two host environments.
     timeout-minutes: 75
     steps:

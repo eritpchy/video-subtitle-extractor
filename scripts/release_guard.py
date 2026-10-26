@@ -34,13 +34,16 @@ ACCEPTANCE_CHECKS = (
     'cpu_mode_accurate', 'cpu_mode_auto',
 )
 PADDLE_MODEL_CHECK = 'paddle_all_models_cpu_modes'
+NATIVE_COREML_CHECKS = ('native_all_models_cpu_coreml_modes', 'coreml_mode_fast',
+                        'coreml_mode_accurate', 'coreml_mode_auto')
 
 
 def required_acceptance_checks(build_profile: str) -> tuple[str, ...]:
     profile = PROFILES.get(build_profile)
     if profile is None:
         raise RuntimeError(f'Unknown acceptance build profile: {build_profile}')
-    return ACCEPTANCE_CHECKS + ((PADDLE_MODEL_CHECK,) if profile['backend'] == 'paddle' else ())
+    return ACCEPTANCE_CHECKS + ((PADDLE_MODEL_CHECK,) if profile['backend'] == 'paddle' else ()) + (
+        NATIVE_COREML_CHECKS if build_profile == 'native-coreml' else ())
 
 
 def _unique_json_object(pairs):

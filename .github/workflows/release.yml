@@ -34,7 +34,7 @@ jobs:
     uses: ./.github/workflows/paddle-models.yml
 
   native:
-    name: Retained Native CPU matrix
+    name: Native CPU and dual-provider Mac CoreML matrix
     uses: ./.github/workflows/native-ocr.yml
     with:
       acknowledge_vc_redistribution_license: ${{ inputs.acknowledge_vc_redistribution_license || false }}
@@ -227,4 +227,5 @@ jobs:
             echo 'CUDA 10.2 remains available in the immutable 2.2.0 release, not as a new PP-OCRv6 package.'
             echo 'CUDA 11.8 includes SM61 in the vendor wheel; this is not real GTX 10-series/GPU OCR certification.'
             echo 'Windows evidence covers Server 2022/2025 only. CUDA/DirectML GPU inference was not tested.'
+            echo 'Mac CoreML EP execution and explicit CPU are checked in one package; physical GPU dispatch still requires separate real-device trace evidence before publication.'
           } >> "$GITHUB_STEP_SUMMARY"

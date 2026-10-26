@@ -14,6 +14,8 @@ PROFILES = {
                    'requirements': 'requirements-inference.txt'},
     'native-cpu': {'backend': 'native', 'accelerator': 'cpu', 'suffix': 'native-cpu',
                    'requirements': 'requirements-native-inference.txt'},
+    'native-coreml': {'backend': 'native', 'accelerator': 'coreml', 'suffix': 'native-coreml',
+                      'requirements': 'requirements-native-inference.txt'},
     'paddle-cuda11.8': {'backend': 'paddle', 'accelerator': 'cuda11.8', 'suffix': 'cuda11.8',
                        'requirements': 'requirements-inference.txt',
                        'gpu_index': 'https://www.paddlepaddle.org.cn/packages/stable/cu118/'},
@@ -25,7 +27,8 @@ PROFILES = {
 }
 CANDIDATE_TARGETS = {
     **{(platform, arch, 'native-cpu'): 'native-cpu'
-       for platform, arch in (('linux', 'x64'), ('windows', 'x64'), ('macos', 'arm64'))},
+       for platform, arch in (('linux', 'x64'), ('windows', 'x64'))},
+    ('macos', 'arm64', 'native-coreml'): 'native-coreml',
     **{('windows', 'x64', name): PROFILES[name]['suffix']
        for name in ('paddle-cpu', 'paddle-cuda11.8', 'paddle-cuda12.6', 'directml')},
 }
@@ -40,7 +43,7 @@ LEGACY_PROFILE_GAPS = {
 BLOCKED_PROFILES = {
     'native-coreml': 'The required production Mac package must support real CoreML/GPU acceleration '
                      'and explicit CPU in one environment. CPU-only candidate success is a baseline, '
-                     'not completion; production provider integration and actual Mac GPU evidence '
+                     'not completion; production provider validation and actual Mac GPU evidence '
                      'are still pending. Never relabel a CPU-only package.',
 }
 
@@ -57,7 +60,9 @@ def profile_identity(backend: str, accelerator: str = 'cpu') -> tuple[str, dict]
 
 def archive_name(version: str, platform: str, arch: str, build_profile: str) -> str:
     profile = PROFILES[build_profile]
-    if profile['accelerator'] != 'cpu' and (platform, arch) != ('windows', 'x64'):
+    if profile['accelerator'] == 'coreml' and (platform, arch) != ('macos', 'arm64'):
+        raise ValueError('Native CoreML candidates require macOS arm64; no cross-platform relabeling')
+    if profile['accelerator'] not in ('cpu', 'coreml') and (platform, arch) != ('windows', 'x64'):
         raise ValueError('Restored GPU candidates are Windows x64 only; no unverified cross-platform claims')
     return f"vse-{version}-{platform}-{arch}-{profile['suffix']}.zip"
 

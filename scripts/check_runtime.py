@@ -35,6 +35,8 @@ def main() -> int:
         os.environ['VSE_OCR_BACKEND'] = manifest.get('ocr_backend', 'paddle')
         if os.environ['VSE_OCR_BACKEND'] == 'native':
             os.environ['VSE_NATIVE_OCR_ROOT'] = str(ROOT / 'native-ocr')
+            from scripts.bundle_bootstrap import configure_native_provider
+            configure_native_provider(manifest, os.environ)
         elif os.environ['VSE_OCR_BACKEND'] == 'directml':
             os.environ['VSE_DIRECTML_MODEL_ROOT'] = str(ROOT / 'directml-models')
     from backend.tools.native_ocr import selected_backend

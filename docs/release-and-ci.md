@@ -74,7 +74,12 @@ not a compression claim or an already-certified customer delivery path.
 macOS minimum system declarations must come from the highest actual deployment
 requirement across the bundled Mach-O images, not a wheel filename or the ORT
 SDK alone. Do not infer full-package support for macOS 14.0 from an individual
-14.0 library. This metadata bound is separate from tested OS coverage.
+14.0 library. The reviewed Qt 6.12.0 full payload actually reaches **26.0** in
+28 original PySide/Shiboken bindings (independently confirmed arm64 `otool`
+`minos`, not SDK). New Mac candidate CI therefore uses `macos-26`, and the
+generated app declaration records the scan's actual result. Earlier published
+14+ claims are corrected in new notes, never by replacing old ZIPs. This
+metadata bound is separate from tested OS coverage.
 
 Linux bundles must contain their non-base GUI/native dependency closure and pass
 native X11 checks; build-runner apt installations do not prove that an

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 from functools import lru_cache
 import importlib.util
 import json
@@ -36,6 +37,36 @@ def write_json(path: Path, value):
     path.write_text(json.dumps(value), encoding='utf-8')
 
 
+@lru_cache(maxsize=1)
+def synthetic_native_report():
+    from tests.test_check_native_models import report_fixture
+    return report_fixture()
+
+
+def coreml_workloads(root):
+    reference = synthetic_native_report()
+    for mode in ('fast', 'accurate', 'auto'):
+        directory = root / f'bundle-coreml-e2e-{mode}'
+        row = next(row for row in reference['providers']['coreml']['cases'] if row['mode'] == mode and row['operation'] == 'ocr')
+        record = copy.deepcopy(row['request_evidence'])
+        # Each mocked source environment represents a distinct process/run,
+        # not one image request copied into three real-CLI evidence folders.
+        pid = 1000 + int(hashlib.sha256(str(root).encode()).hexdigest()[:8], 16)
+        record['worker_pid'] = pid
+        record['response']['execution_window']['worker_pid'] = pid
+        for session in record['response']['execution_evidence']['sessions'].values():
+            if session is not None and 'profile_window' in session:
+                session['profile_window']['worker_pid'] = pid
+        filename = f"native-ocr-{record['worker_pid']}-{record['request']['id']}.json"
+        path = directory / 'native-requests' / filename
+        write_json(path, record)
+        write_json(directory / 'report.json', {'result': 'passed', 'mode': mode,
+            'cpu_forced': False, 'requested_provider': 'coreml', 'gpu_inference_verified': False,
+            'command': ['runtime/python', '-m', 'backend.cli', 'video.mp4', '--mode', mode],
+            'executed_models': row['executed_models'],
+            'native_requests': [{'path': filename, 'bytes': path.stat().st_size, 'sha256': sha256(path)}]})
+
+
 class FinalReleaseAcceptanceTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -58,6 +89,12 @@ class FinalReleaseAcceptanceTests(unittest.TestCase):
                     'platform': platform, 'arch': arch, 'build_profile': profile,
                     'ocr_backend': PROFILES[profile]['backend'],
                     'accelerator': PROFILES[profile]['accelerator'], 'files': {}}
+        if profile == 'native-coreml':
+            reference = synthetic_native_report()
+            manifest['files']['native-ocr/native-ocr'] = reference['worker_sha256']
+            manifest['files']['native-ocr/libonnxruntime.1.dylib'] = reference['runtime_sha256']
+            manifest['files'].update({'native-ocr/' + key: value for key, value in reference['model_files'].items()})
+            manifest['files'].update(reference['production_modules'])
         archive = self.archives / name
         payload = archive.stem + ('/Video Subtitle Extractor.app/Contents/Resources' if platform == 'macos' else '')
         with zipfile.ZipFile(archive, 'w') as bundle:
@@ -73,6 +110,9 @@ class FinalReleaseAcceptanceTests(unittest.TestCase):
         if manifest['ocr_backend'] == 'paddle':
             write_json(smoke / 'paddle-models/report.json',
                        copy.deepcopy(synthetic_paddle_report(SHA, VERSION, profile)))
+        elif profile == 'native-coreml':
+            write_json(smoke / 'native-models/report.json', copy.deepcopy(synthetic_native_report()))
+            coreml_workloads(smoke)
         self.workloads(smoke)
         environment = self.portable / archive.stem
         scenarios = []
@@ -81,6 +121,8 @@ class FinalReleaseAcceptanceTests(unittest.TestCase):
             scenarios.append(case)
             write_json(environment / scenario / 'scenario-report.json', case)
             self.workloads(environment / scenario)
+            if profile == 'native-coreml':
+                coreml_workloads(environment / scenario)
         write_json(environment / 'portable-environment-report.json', {
             'result': 'passed', 'archive': str(archive), 'archive_sha256': digest,
             'commit': SHA, 'platform': platform, 'arch': arch,

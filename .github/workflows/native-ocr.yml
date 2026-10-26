@@ -9,7 +9,7 @@ on:
         default: false
         type: boolean
   # Automatic builds are owned by release.yml, which calls this unchanged
-  # Native CPU validation chain alongside restored Windows GPU candidates.
+  # Native CPU (Windows/Linux) and dual-provider Mac CoreML validation chain.
   workflow_call:
     inputs:
       acknowledge_vc_redistribution_license:
@@ -109,7 +109,7 @@ jobs:
           compression-level: 0
           retention-days: 7
   native:
-    name: Native CPU / ${{ matrix.name }}
+    name: ${{ matrix.profile }} / ${{ matrix.name }}
     needs: models
     permissions:
       contents: read
@@ -123,18 +123,22 @@ jobs:
             name: Linux x64
             platform: linux
             arch: x64
+            profile: native-cpu
           - os: windows-2022
             name: Windows Server 2022 x64
             platform: windows
             arch: x64
+            profile: native-cpu
           - os: windows-2025
             name: Windows Server 2025 x64
             platform: windows
             arch: x64
-          - os: macos-15
+            profile: native-cpu
+          - os: macos-26
             name: macOS arm64
             platform: macos
             arch: arm64
+            profile: native-coreml
     runs-on: ${{ matrix.os }}
     # Each native platform repeats full launcher acceptance under two host environments.
     timeout-minutes: 90
@@ -320,6 +324,36 @@ jobs:
           python -c "import pathlib,subprocess,sys; subprocess.run([sys.executable,'-m','pip','install','--no-index','--no-deps','--no-compile',*map(str,sorted(pathlib.Path('build/wheelhouse').glob('*.whl')))],check=True)"
       - name: Install and verify fixed VideoSubFinder release
         run: python scripts/install_videosubfinder.py --version 6.10.7
+      - name: Early real Mac CoreML small/medium compatibility (not full acceptance or GPU proof)
+        if: runner.os == 'macOS'
+        env:
+          VSE_NATIVE_OCR_PROVIDER: coreml
+          VSE_OCR_CPU_THREADS: '2'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from scripts import check_native_models as gate
+          root = Path.cwd()
+          fixtures = (root / 'native/ocr/tests/evidence').resolve()
+          cases = [row for row in gate.frozen.load_cases(fixtures)
+                   if row['mode'] in ('fast', 'accurate') and row['operation'] == 'ocr'
+                   and row['fixture'] in ('fixtures/english.png', 'fixtures/chinese.png')]
+          models = gate.verify_native_model_assets(Path(os.environ['VSE_NATIVE_OCR_ROOT']))
+          results = []
+          with gate.frozen.NetworkGuard() as network:
+              runtime = gate._load_runtime(root, 'coreml')
+              gate._execute(cases, fixtures, 'coreml', runtime,
+                            {name: row['sha256'] for name, row in models['models'].items()}, results.append)
+          report = {'scope': 'source-early-compatibility-only', 'gpu_inference_verified': False,
+                    'cases': results, 'network_attempts': network.attempts}
+          Path('test-results').mkdir(exist_ok=True)
+          Path('test-results/coreml-early-compatibility.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+          print(json.dumps(report, ensure_ascii=False))
+          if len(results) != 4 or any(row.get('passed') is not True for row in results) or network.attempts:
+              raise SystemExit('Real CoreML small/medium compatibility failed; see preserved original request/error evidence')
+          PY
       - name: Native adapter and packaging regression tests
         id: source-tests
         env:
@@ -333,6 +367,8 @@ jobs:
           tests/test_runtime_dependencies.py tests/test_prune_inference_runtime.py
           tests/test_portable_environment.py tests/test_portable_python.py tests/test_macos_icon.py
           tests/test_macos_minimum_version.py
+          tests/test_coreml_package.py tests/test_native_coreml_adapter.py tests/test_check_native_models.py
+          tests/test_native_diagnostics.py tests/test_coreml_e2e_acceptance.py
           tests/test_windows_runtime_isolation.py tests/test_check_runtime.py
           tests/test_windows_app_local_runtime.py tests/test_windows_os_evidence.py tests/test_windows_native_worker_evidence.py
           tests/test_standalone_runtime_probe.py tests/test_windows_verification.py
@@ -378,10 +414,11 @@ jobs:
         run: |
           'Windows customer package: PENDING applicable VC redistribution rights confirmation. Native compilation and runner tests above are separate evidence; no VC redistributable/customer candidate uploaded.' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           throw 'PENDING: customer packaging requires VC redistribution license acknowledgment; runner tests do not grant redistribution rights.'
-      - name: Build self-contained native CPU package
+      - name: Build self-contained Native package with explicit provider identity
         id: package-build
         run: >-
           python scripts/package_release.py --profile native --native-ocr build/native-ocr
+          --accelerator ${{ matrix.platform == 'macos' && 'coreml' || 'cpu' }}
           --wheelhouse build/wheelhouse --output dist-native
       - name: Verify packaged Linux GUI, SRT and dependency isolation under X11
         if: runner.os == 'Linux'
@@ -428,6 +465,24 @@ jobs:
         run: >-
           python scripts/accept_release_archive.py --archives dist-native
           --portable-evidence test-results/${{ matrix.platform }}/portable-environment
+      - name: Build separate Mac diagnostic frontend from the same verified SDK (never in customer ZIP)
+        if: runner.os == 'macOS' && !cancelled() && steps.native-build.outcome == 'success'
+        run: >-
+          python scripts/native_diagnostics/benchmark.py build
+          --sdk build/native-build/ort-sdk --deps build/native-build/sources
+          --opencv-dir build/native-build/opencv-install/lib/cmake/opencv4
+          --output build/native-diagnostic
+      - name: Preserve separate Mac diagnostic executable and build provenance
+        if: always() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-coreml-diagnostic-frontend-${{ github.sha }}
+          path: |
+            build/native-diagnostic/vse-provider-diagnostic
+            build/native-diagnostic/build-inputs.json
+            build/native-diagnostic/build-*.log
+          if-no-files-found: warn
+          retention-days: 7
       - name: Report Windows coverage including failed and skipped stages
         if: always() && runner.os == 'Windows'
         env:
@@ -474,7 +529,7 @@ jobs:
         if: matrix.os != 'windows-2025'
         uses: actions/upload-artifact@v4
         with:
-          name: release-candidate-${{ matrix.platform }}-${{ matrix.arch }}-native-cpu
+          name: release-candidate-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.profile }}
           path: |
             dist-native/*.zip
             dist-native/*.zip.sha256

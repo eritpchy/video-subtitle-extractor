@@ -40,23 +40,42 @@ def safe_file(root, relative):
     return candidate
 
 
-def stage_native_artifact(source: Path, destination: Path, platform: str) -> dict:
+def verify_native_model_assets(root: Path) -> dict:
+    """Verify the same FP32 graphs/configs against the fixed original trust root.
+
+    The shared verifier is dependency-light: importing it neither imports ORT
+    nor selects DirectML. Native/CoreML must not accept a re-authored manifest
+    which silently swaps models or precision.
+    """
+    from backend.tools.directml_ocr import validate_model_assets
+    verified = validate_model_assets(root)
+    return {'files': verified['hashes'],
+            'models': {row['name']: {'sha256': row['onnx_sha256'], 'bytes': row['onnx_bytes']}
+                       for row in verified['pins']['models']}}
+
+
+def stage_native_artifact(source: Path, destination: Path, platform: str, *, provider: str = 'cpu') -> dict:
     """Copy only inventoried, hash-verified runtime files; materialize SONAME once."""
     source = source.resolve(strict=True)
-    inventory_path = safe_file(source, 'size-audit.json') if platform == 'windows' else source / 'size-audit.json'
+    if provider not in ('cpu', 'coreml') or (provider == 'coreml' and platform != 'macos'):
+        raise ValueError('Native CoreML artifacts require macOS; CPU remains explicitly available')
+    inventory_path = safe_file(source, 'size-audit.json')
     inventory_bytes = inventory_path.read_bytes()
     inventory = json.loads(inventory_bytes.decode('utf-8'))
     if (inventory.get('runner_test_only') or inventory.get('provenance', {}).get('runner_test_only')
             or (source / 'RUNNER-TEST-ONLY.json').exists()):
         raise ValueError('Runner-test-only artifact cannot become a customer package; redistribution rights pending')
     records = inventory['files']
-    if platform == 'windows' and (not isinstance(records, list) or
+    if not isinstance(records, list) or (
             any(not isinstance(record, dict) or not isinstance(record.get('path'), str) for record in records)):
-        raise ValueError('Malformed Windows native inventory files')
+        raise ValueError('Malformed native inventory files')
     names = [record['path'] for record in records]
+    if any(any(part.startswith(('vse-provider-diagnostic', 'native-ocr-precision'))
+               or part == 'native_diagnostics' for part in PurePosixPath(name).parts) for name in names):
+        raise ValueError('Build-side diagnostic frontend must not enter the customer native artifact')
     if len(names) != len(set(names)):
         raise ValueError('Duplicate native inventory path')
-    if platform == 'windows' and (len(names) != len({name.lower() for name in names})
+    if platform in ('windows', 'macos') and (len(names) != len({name.lower() for name in names})
                                   or 'size-audit.json' in {name.lower() for name in names}):
         raise ValueError('Duplicate/self-referential Windows native inventory path')
     executable = 'native-ocr.exe' if platform == 'windows' else 'native-ocr'
@@ -79,8 +98,29 @@ def stage_native_artifact(source: Path, destination: Path, platform: str) -> dic
             raise ValueError(f'Native model/config missing: {row["name"]}')
         if sha256(validated[model]) != row['onnx_sha256'] or sha256(validated[config]) != row['config_sha256']:
             raise ValueError(f'Native model/config checksum mismatch: {row["name"]}')
-    if platform == 'windows' and sha256(inventory_path) != hashlib.sha256(inventory_bytes).hexdigest():
-        raise ValueError('Windows native inventory changed during validation')
+    capability = None
+    if provider == 'coreml':
+        # Require the native build's real bounded probe, not an inferred feature
+        # flag from a package name. This establishes capability only, NOT GPU
+        # execution, model correctness, or release readiness.
+        from backend.tools.native_ocr import validate_native_capabilities
+        capability_path = validated.get('native-capabilities.json')
+        if capability_path is None or capability_path.stat().st_size > 65536:
+            raise ValueError('CoreML artifact lacks its inventoried real worker capability probe')
+        capability = validate_native_capabilities(json.loads(capability_path.read_bytes()))
+        if capability['coreml']['available'] is not True:
+            raise ValueError('Cannot relabel a worker without CoreML capability as native-coreml')
+        provenance = inventory.get('provenance', {}).get('native_capabilities', {})
+        runtime = validated.get('libonnxruntime.1.dylib')
+        expected_probe = {'path': 'native-capabilities.json', 'sha256': sha256(capability_path),
+                          'worker_sha256': sha256(validated[executable]),
+                          'runtime_sha256': sha256(runtime) if runtime is not None else None,
+                          'telemetry_disabled_before_exec': True}
+        if runtime is None or any(provenance.get(key) != value for key, value in expected_probe.items()):
+            raise ValueError('CoreML capability provenance is not bound to the actual worker/runtime')
+        verify_native_model_assets(source)
+    if sha256(inventory_path) != hashlib.sha256(inventory_bytes).hexdigest():
+        raise ValueError('Native inventory changed during validation')
     destination.mkdir(parents=True, exist_ok=False)
     copied = {}
     for relative, path in validated.items():
@@ -94,12 +134,17 @@ def stage_native_artifact(source: Path, destination: Path, platform: str) -> dic
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
         copied[target_relative] = sha256(target)
+        expected_digest = next(record['sha256'] for record in records if record['path'] == relative)
+        if copied[target_relative] != expected_digest:
+            raise ValueError('Native artifact changed during staging: ' + relative)
     if platform == 'windows':
         # The worker's live loaded-file audit needs its original hash inventory.
         # It cannot inventory itself; the outer bundle manifest authenticates
         # these unchanged bytes, just as it authenticates the other payload.
         (destination / 'size-audit.json').write_bytes(inventory_bytes)
         copied['size-audit.json'] = hashlib.sha256(inventory_bytes).hexdigest()
-    return {'profile': 'native-cpu', 'model_count': 15, 'files': copied,
+    return {'profile': 'native-' + provider, 'requested_provider': provider,
+            'capability': capability, 'gpu_inference_verified': False,
+            'model_count': 15, 'files': copied,
             'upstream_artifact_release_ready': inventory.get('release_ready', False),
             'note': 'Final platform native closure and clean-client verification remain mandatory.'}

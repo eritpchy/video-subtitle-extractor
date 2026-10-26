@@ -31,6 +31,9 @@ NATIVE_SEARCH_VARIABLES = (
     'FLAGS_curand_dir', 'FLAGS_cusparse_dir', 'FLAGS_cusparselt_dir',
     'FLAGS_nccl_dir', 'FLAGS_tensorrt_dir', 'FLAGS_win_cuda_bin_dir',
     'FLAGS_nvidia_package_dir', 'CUDA_PATH', 'CUDA_HOME', 'CUDNN_PATH', 'CUDNN_HOME',
+    # Capture is explicitly opt-in only in the standalone diagnostic command.
+    # Normal GUI/CLI launch must not inherit a host profiler-enabling switch.
+    'MTL_CAPTURE_ENABLED',
 )
 
 
@@ -113,6 +116,27 @@ def configure_runtime_tools(root: Path, manifest: dict) -> None:
     os.environ.update(VSE_VSF_BINARY=str(binary), VSE_VSF_DIR=str(binary.parent), IMAGEIO_FFMPEG_EXE=str(encoder))
 
 
+def configure_native_provider(manifest: dict, environment: dict) -> None:
+    """Pin package policy, not an inference result; --cpu remains an explicit choice.
+
+    Foreign valid defaults cannot silently turn the accelerated package into a
+    CPU-only package. Unsupported external requests still fail visibly in the
+    adapter rather than being disguised as a successful fallback.
+    """
+    accelerator = manifest.get('accelerator', 'cpu')
+    if accelerator == 'coreml':
+        if (manifest.get('build_profile') != 'native-coreml'
+                or (manifest.get('platform'), manifest.get('arch')) != ('macos', 'arm64')
+                or manifest.get('native_ocr', {}).get('profile') != 'native-coreml'):
+            raise RuntimeError('Invalid native-coreml package identity')
+    elif accelerator != 'cpu':
+        raise RuntimeError('Unsupported bundled native accelerator')
+    inherited = environment.get('VSE_NATIVE_OCR_PROVIDER', '').strip().lower()
+    if inherited in ('', 'cpu', 'coreml'):
+        environment['VSE_NATIVE_OCR_PROVIDER'] = accelerator
+    environment['ORT_DISABLE_TELEMETRY'] = '1'
+
+
 def verify_windows_runtime_configuration(root: Path, manifest: dict) -> None:
     """Refuse an incomplete path-isolation payload before launching children."""
     required = ('runtime/python312._pth', 'runtime/Lib/site-packages/sitecustomize.py',
@@ -125,7 +149,7 @@ def verify_windows_runtime_configuration(root: Path, manifest: dict) -> None:
 def environment_report(root: Path, manifest: dict) -> dict:
     selected = ('PATH', *NATIVE_SEARCH_VARIABLES, 'PYTHONHOME', 'PYTHONPATH', 'PYTHONUSERBASE',
                 'PYTHONNOUSERSITE', 'PYTHONUTF8', 'PYTHONIOENCODING', 'CONDA_PREFIX', 'CONDA_DEFAULT_ENV', 'VIRTUAL_ENV',
-                'VSE_CONFIG_FILE', 'VSE_WORK_DIR', 'VSE_OCR_BACKEND', 'VSE_NATIVE_OCR_ROOT', 'VSE_DIRECTML_MODEL_ROOT', 'VSE_MODEL_DIR',
+                'VSE_CONFIG_FILE', 'VSE_WORK_DIR', 'VSE_OCR_BACKEND', 'VSE_NATIVE_OCR_ROOT', 'VSE_NATIVE_OCR_PROVIDER', 'VSE_DIRECTML_MODEL_ROOT', 'VSE_MODEL_DIR',
                 'VSE_VSF_BINARY', 'VSE_VSF_DIR', 'IMAGEIO_FFMPEG_EXE')
     return {'schema': 1, 'bundle_root': str(root), 'platform': manifest['platform'], 'executable': sys.executable,
             'prefix': sys.prefix, 'base_prefix': sys.base_prefix, 'sys_path': sys.path,
@@ -248,12 +272,23 @@ def run_paddle_model_integrity(root: Path, python: Path) -> None:
                     str(root / 'backend/models')], check=True)
 
 
+def run_native_model_acceptance(root: Path, python: Path, fixtures: Path, results: Path, env: dict) -> None:
+    fixtures = fixtures.expanduser().resolve(strict=True)
+    if fixtures.is_relative_to(root.resolve()):
+        raise RuntimeError('Native frozen fixtures must remain outside the customer package')
+    subprocess.run([str(python), str(root / 'scripts/check_native_models.py'),
+                    '--app-root', str(root), '--fixtures', str(fixtures), '--provider', 'both',
+                    '--report', str(results / 'native-models/report.json')],
+                   cwd=root, check=True, env=env, timeout=3600)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--verify', action='store_true', help='Audit the included runtime and run real GUI/OCR/video regressions; no installation')
     parser.add_argument('--results-dir', type=Path, help='Writable verification evidence directory outside the application')
     parser.add_argument('--runtime-audit-dir', type=Path, help='Prepared trusted verification hooks/evidence outside application')
     parser.add_argument('--paddle-model-fixtures', type=Path, help='Build-side frozen fixtures for full Paddle CPU model/mode acceptance; never shipped to customers')
+    parser.add_argument('--native-model-fixtures', type=Path, help='Build-side frozen fixtures for Native CPU/CoreML model/mode acceptance; never customer payload')
     parser.add_argument('--cli', action='store_true', help='Pass remaining arguments to the subtitle CLI instead of the GUI')
     arguments = list(sys.argv[1:] if argv is None else argv)
     # Once --cli is selected, even --help belongs to the application CLI. Do
@@ -266,6 +301,8 @@ def main(argv: list[str] | None = None) -> int:
         args, forwarded = parser.parse_known_args(arguments)
     if args.paddle_model_fixtures is not None and not args.verify:
         parser.error('--paddle-model-fixtures requires --verify')
+    if args.native_model_fixtures is not None and not args.verify:
+        parser.error('--native-model-fixtures requires --verify')
     root = Path(__file__).resolve().parent
     manifest_path = root / 'bundle-manifest.json'
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
@@ -301,10 +338,11 @@ def main(argv: list[str] | None = None) -> int:
         os.environ['VSE_MODEL_DIR'] = str(root / 'backend/models')
     if args.paddle_model_fixtures is not None and backend != 'paddle':
         raise RuntimeError('Paddle model fixtures require a Paddle CPU/CUDA package')
+    if args.native_model_fixtures is not None and manifest.get('build_profile') != 'native-coreml':
+        raise RuntimeError('Dual-provider native model acceptance requires native-coreml')
     if backend == 'native':
         os.environ['VSE_NATIVE_OCR_ROOT'] = str(root / 'native-ocr')
-        # Do not override a requested unsupported GPU provider: adapter rejects it.
-        os.environ['ORT_DISABLE_TELEMETRY'] = '1'
+        configure_native_provider(manifest, os.environ)
     else:
         # A fixed Paddle profile must not retain an unrelated foreign worker.
         os.environ.pop('VSE_NATIVE_OCR_ROOT', None)
@@ -340,11 +378,17 @@ def main(argv: list[str] | None = None) -> int:
         env = dict(os.environ, QT_QPA_PLATFORM=qt_platform, VSE_OFFLINE='1', VSE_SMOKE_SCREENSHOT_DIR=str(results / 'gui'))
         if args.paddle_model_fixtures is not None:
             run_paddle_model_acceptance(root, python, args.paddle_model_fixtures, results, env)
+        if args.native_model_fixtures is not None:
+            run_native_model_acceptance(root, python, args.native_model_fixtures, results, env)
         subprocess.run([str(python), 'gui.py', '--smoke-test'], check=True, env=env, timeout=120)
         subprocess.run([str(python), 'scripts/e2e_smoke.py', '--output', str(results / 'bundle-e2e')], check=True, env=env, timeout=960)
         for mode in ('accurate', 'auto'):
             subprocess.run([str(python), 'scripts/e2e_smoke.py', '--mode', mode,
                             '--output', str(results / f'bundle-e2e-{mode}')], check=True, env=env, timeout=960)
+        if manifest.get('build_profile') == 'native-coreml':
+            for mode in ('fast', 'accurate', 'auto'):
+                subprocess.run([str(python), 'scripts/e2e_smoke.py', '--mode', mode, '--provider', 'coreml',
+                                '--output', str(results / f'bundle-coreml-e2e-{mode}')], check=True, env=env, timeout=960)
         subprocess.run([str(python), 'scripts/e2e_issues.py', '--output', str(results / 'bundle-issues')], check=True, env=env, timeout=3660)
         write_size_report(root, manifest, 'verified-self-contained', results)
         return 0

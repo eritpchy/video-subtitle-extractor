@@ -294,7 +294,7 @@ class WorkflowContractTests(unittest.TestCase):
     def test_license_gate_stays_before_package_and_after_source_video_checks(self):
         text = (ROOT / '.github/workflows/native-ocr.yml').read_text()
         self.assertLess(text.index('Windows native multiline, AV1'), text.index('Windows customer-package license gate'))
-        self.assertLess(text.index('Windows customer-package license gate'), text.index('Build self-contained native CPU package'))
+        self.assertLess(text.index('Windows customer-package license gate'), text.index('Build self-contained Native package with explicit provider identity'))
         self.assertIn("throw 'PENDING: customer packaging requires VC redistribution license acknowledgment", text)
 
 

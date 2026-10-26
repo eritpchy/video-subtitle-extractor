@@ -70,6 +70,8 @@ def inference_model_directories() -> frozenset[str]:
 def include_source(relative: Path, target_platform: str, target_arch: str) -> bool:
     if any(part in EXCLUDED_PARTS for part in relative.parts) or relative.suffix in {".pyc", ".pyo", ".log"}:
         return False
+    if relative.parts[:2] == ('scripts', 'native_diagnostics'):
+        return False  # Separate build-side profiling frontend; never customer payload.
     if relative.parts[:2] == ("backend", "models") and len(relative.parts) > 3:
         if "/".join(relative.parts[2:4]) not in inference_model_directories():
             return False
@@ -301,7 +303,8 @@ def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT, *, profile:
                 shutil.copy2(source, stage / relative)
         shutil.copy2(root / "scripts/bundle_bootstrap.py", stage / "bootstrap.py")
         (stage / 'requirements-lock.txt').write_text('\n'.join(lock) + '\n', encoding='utf-8')
-        native_info = stage_native_artifact(native_ocr, stage / 'native-ocr', target_platform) if profile == 'native' else None
+        native_info = stage_native_artifact(native_ocr, stage / 'native-ocr', target_platform,
+                                           **({'provider': accelerator} if accelerator != 'cpu' else {})) if profile == 'native' else None
         paddle_info = None
         if profile == 'paddle':
             try:
@@ -448,6 +451,9 @@ def verify_bundle(archive_path: Path, smoke: bool) -> None:
                     # customer payload or a source-code runtime substitute.
                     fixtures = (ROOT / 'native/ocr/tests/evidence').resolve(strict=True)
                     arguments += ['--paddle-model-fixtures', str(fixtures)]
+                elif manifest.get('build_profile') == 'native-coreml':
+                    fixtures = (ROOT / 'native/ocr/tests/evidence').resolve(strict=True)
+                    arguments += ['--native-model-fixtures', str(fixtures)]
                 command = launcher_command(root, manifest['platform'], arguments)
                 subprocess.run(command, check=True, cwd=root, env=env)
                 required = ('PySide6.QtWidgets', 'cv2', 'qfluentwidgets') + ({'paddle': ('paddle',), 'directml': ('onnxruntime',)}.get(manifest.get('ocr_backend', 'paddle'), ()))
@@ -474,10 +480,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wheelhouse", type=Path)
     parser.add_argument("--profile", choices=("paddle", "native", "directml"), default="paddle")
-    parser.add_argument("--accelerator", choices=('cpu', 'cuda11.8', 'cuda12.6'), default='cpu')
+    parser.add_argument("--accelerator", choices=('cpu', 'coreml', 'cuda11.8', 'cuda12.6'), default='cpu')
     parser.add_argument("--onnx-models", type=Path, help="Verified complete 15-model converted artifact for DirectML")
     parser.add_argument("--paddle-models", type=Path, help="Verified complete 15-model Paddle source tree; no client downloads")
-    parser.add_argument("--native-ocr", type=Path, help="Verified complete native CPU artifact (build-side only)")
+    parser.add_argument("--native-ocr", type=Path, help="Verified complete native worker/models artifact (build-side only)")
     parser.add_argument("--output", type=Path, default=Path("dist"))
     parser.add_argument("--verify", type=Path, help="Verify all bundle ZIPs in this directory")
     parser.add_argument("--smoke", action="store_true", help="Test included interpreter/runtime with no client installation or host Python")
