@@ -302,7 +302,17 @@ class MacSettingControlsTests(ThemeTestCase):
         card = self.card(config.themeMode)
         for theme in (Theme.DARK, Theme.LIGHT):
             listener._applyTheme(theme, force=True)
-            requested = QtGui.QPalette(card.comboBox.palette())
+            actual = card.comboBox.palette()
+            requested = QtGui.QPalette()
+            requested.setResolveMask(0)
+            # Copy only the controlled roles. A native widget/ancestor may
+            # already have resolved Link; that is not this example's premise.
+            for group in COLOR_GROUPS:
+                for name in ("Text", "ButtonText", "WindowText", "Base", "Button",
+                             "Window", "Highlight", "HighlightedText"):
+                    role = getattr(QtGui.QPalette.ColorRole, name)
+                    requested.setBrush(group, role, actual.brush(group, role))
+                self.assertFalse(requested.isBrushSet(group, QtGui.QPalette.ColorRole.Link))
             # Real Qt resolution, modelling distinct native class defaults.
             combo_native, view_native = QtGui.QPalette(), QtGui.QPalette()
             combo_native.setColor(QtGui.QPalette.ColorRole.Link, QtGui.QColor("#ff0000"))
