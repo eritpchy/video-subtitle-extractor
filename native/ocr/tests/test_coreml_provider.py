@@ -32,7 +32,7 @@ def test_legacy_cpu_calls_remain_cpu_and_engine_cache_includes_provider():
 def test_capabilities_dont_require_models_or_claim_gpu_execution():
     source = (ROOT / 'worker.cpp').read_text(encoding='utf-8')
     main = source[source.index('int wmain'):]
-    assert main.index('provider_capabilities().dump()') < main.index('if (models.empty() || config.empty())')
+    assert main.index('auto capabilities = provider_capabilities()') < main.index('if (models.empty() || config.empty())')
     assert '"default_request_provider", "cpu"' in source
     assert '"supported_request_providers", supported' in source
     helper = (ROOT / 'provider_evidence.hpp').read_text(encoding='utf-8')
@@ -81,6 +81,29 @@ def test_new_compiled_helper_has_provenance_and_tests_are_not_packaged():
     assert 'never packaged' in cmake
 
 
+def test_metal_capture_requires_explicit_entrypoint_single_frame_and_cleanup():
+    source = (ROOT / 'worker.cpp').read_text(encoding='utf-8')
+    main = source[source.index('int wmain'):]
+    assert '--diagnostic-metal-capabilities' in main
+    assert '--diagnostic-metal-capture' in main
+    assert 'else if (metal_enabled && *metal_enabled)' in main
+    assert main.index('MTL_CAPTURE_ENABLED is forbidden') < main.index('OrtGetApiBase()->GetApi')
+    assert 'metal_capture && std::cin.peek() != std::char_traits<char>::eof()' in main
+    assert 'exactly one framed request followed by EOF' in main
+    assert 'fs::perms::owner_all' in main
+    assert 'if (enabled) diagnostic_capture::stop()' in main
+    assert 'result["timing_eligible"] = false' in main
+    assert 'capture["gpu_execution_verified"] = false' in main
+    assert 'return result.value("ok", false) ? 0 : 2' in main
+    build_source = (ROOT / 'build.py').read_text(encoding='utf-8')
+    assert "'metal_capture_sources_sha256'" in build_source
+    cmake = (ROOT / 'CMakeLists.txt').read_text(encoding='utf-8')
+    assert 'enable_language(OBJCXX)' in cmake
+    assert 'OBJCXX_STANDARD 17' in cmake
+    assert 'COMPILE_OPTIONS "-fobjc-arc"' in cmake
+    assert 'metal_capture_stub.cpp' in cmake
+
+
 def capabilities():
     return {'schema_version': 1, 'ort_version': '1.31.0',
             'available_providers': ['CPUExecutionProvider'],
@@ -97,12 +120,14 @@ def test_build_probe_optout_is_set_before_process_creation(tmp_path, monkeypatch
     monkeypatch.setenv('ORT_DISABLE_TELEMETRY', '0')
     monkeypatch.setenv('LD_PRELOAD', '/untrusted')
     monkeypatch.setenv('DYLD_LIBRARY_PATH', '/untrusted')
+    monkeypatch.setenv('MTL_CAPTURE_ENABLED', '1')
 
     def run(command, **kwargs):
         assert command == [str(tmp_path / 'native-ocr'), '--capabilities']
         assert kwargs['env']['ORT_DISABLE_TELEMETRY'] == '1'
         assert 'LD_PRELOAD' not in kwargs['env']
         assert 'DYLD_LIBRARY_PATH' not in kwargs['env']
+        assert 'MTL_CAPTURE_ENABLED' not in kwargs['env']
         assert kwargs['timeout'] == 30 and kwargs['check']
         return SimpleNamespace(stdout=json.dumps(capabilities()))
 

@@ -5,6 +5,7 @@
 #include "json.hpp"
 #include "onnxruntime_c_api.h"
 #include "provider_evidence.hpp"
+#include "metal_capture.hpp"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -950,20 +951,37 @@ int main(int argc, char **argv) {
   _setmode(_fileno(stdout), _O_BINARY);
 #endif
   try {
+    auto argument_is = [&](int index, const char *name) {
+      return index < argc && fs::path(argv[index]) == fs::path(name);
+    };
+    const bool metal_probe = argc == 2 &&
+        argument_is(1, "--diagnostic-metal-capabilities");
+    bool metal_capture = false;
+    for (int i = 1; i < argc; i += 2)
+      metal_capture |= argument_is(i, "--diagnostic-metal-capture");
+    const char *metal_enabled = std::getenv("MTL_CAPTURE_ENABLED");
+    if (metal_probe || metal_capture) {
+      if (!metal_enabled || std::string(metal_enabled) != "1")
+        throw std::runtime_error("explicit Metal diagnostics require MTL_CAPTURE_ENABLED=1 before process creation");
+    } else if (metal_enabled && *metal_enabled) {
+      throw std::runtime_error("MTL_CAPTURE_ENABLED is forbidden during normal worker execution; remove it or select an explicit diagnostic entrypoint");
+    }
     api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
     if (!api)
       throw std::runtime_error("ORT API unavailable");
-#ifdef _WIN32
-    if (argc == 2 && std::wstring(argv[1]) == L"--capabilities") {
-#else
-    if (argc == 2 && std::string(argv[1]) == "--capabilities") {
-#endif
-      std::cout << provider_capabilities().dump() << '\n';
+    if ((argc == 2 && argument_is(1, "--capabilities")) || metal_probe) {
+      auto capabilities = provider_capabilities();
+      if (metal_probe) {
+        capabilities["metal_capture"] = diagnostic_capture::capabilities();
+        capabilities["diagnostic_only"] = true;
+        capabilities["timing_eligible"] = false;
+      }
+      std::cout << capabilities.dump() << '\n';
       return 0;
     }
     ParentGuard parent_guard;
     int env_threads = default_threads();
-    fs::path models, config;
+    fs::path models, config, diagnostic_output;
     for (int i = 1; i < argc; i += 2) {
       if (i + 1 >= argc)
         throw std::runtime_error("missing argument");
@@ -972,17 +990,28 @@ int main(int argc, char **argv) {
         models = fs::path(argv[i + 1]);
       else if (std::wstring(argv[i]) == L"--config")
         config = fs::path(argv[i + 1]);
+      else if (std::wstring(argv[i]) == L"--diagnostic-metal-capture")
+        diagnostic_output = fs::path(argv[i + 1]);
 #else
       if (std::string(argv[i]) == "--models")
         models = fs::u8path(argv[i + 1]);
       else if (std::string(argv[i]) == "--config")
         config = fs::u8path(argv[i + 1]);
+      else if (std::string(argv[i]) == "--diagnostic-metal-capture")
+        diagnostic_output = fs::u8path(argv[i + 1]);
 #endif
       else
         throw std::runtime_error("unknown argument");
     }
     if (models.empty() || config.empty())
       throw std::runtime_error("usage: native-ocr --models DIR --config DIR");
+    if (metal_capture) {
+      if (diagnostic_output.empty())
+        throw std::runtime_error("Metal capture requires a new output directory");
+      diagnostic_output = fs::absolute(diagnostic_output);
+      if (fs::exists(diagnostic_output) || fs::is_symlink(diagnostic_output))
+        throw std::runtime_error("Metal capture refuses an existing output directory");
+    }
     OrtEnv *env = nullptr;
     check(api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "vse-native-ocr", &env));
     auto guard = std::unique_ptr<OrtEnv, void (*)(OrtEnv *)>(
@@ -993,8 +1022,11 @@ int main(int argc, char **argv) {
     for (;;) {
       unsigned char header[4];
       std::cin.read((char *)header, 4);
-      if (std::cin.gcount() == 0 && std::cin.eof())
+      if (std::cin.gcount() == 0 && std::cin.eof()) {
+        if (metal_capture)
+          throw std::runtime_error("Metal capture requires exactly one framed request followed by EOF");
         return 0;
+      }
       if (std::cin.gcount() != 4)
         throw std::runtime_error("truncated frame header");
       uint32_t size = uint32_t(header[0]) | (uint32_t(header[1]) << 8) |
@@ -1005,7 +1037,13 @@ int main(int argc, char **argv) {
       if (!std::cin.read(payload.data(), size))
         throw std::runtime_error("truncated frame body");
       J result = {{"id", nullptr}, {"ok", false}};
+      if (metal_capture) {
+        result["diagnostic_only"] = true;
+        result["timing_eligible"] = false;
+      }
       try {
+        if (metal_capture && std::cin.peek() != std::char_traits<char>::eof())
+          throw std::runtime_error("Metal capture accepts exactly one framed request followed by EOF");
         J request =
             J::parse(payload, [](int depth, J::parse_event_t, const J &) {
               if (depth > 32)
@@ -1022,6 +1060,8 @@ int main(int argc, char **argv) {
               it.key() != "operation" && it.key() != "batch_size" &&
               it.key() != "cpu_threads" && it.key() != "rec_model")
             throw std::runtime_error("unknown request field: " + it.key());
+        if (metal_capture && !request.contains("provider"))
+          throw std::runtime_error("Metal capture requires an explicit cpu or coreml provider; no default provider is inferred");
         auto provider = request.value("provider", std::string("cpu"));
         result["requested_provider"] = provider;
         require_provider(provider);
@@ -1049,12 +1089,45 @@ int main(int argc, char **argv) {
                                             cpu_threads, detect_only, provider);
           engine_key = key;
         }
+        if (metal_capture) {
+          const auto capability = diagnostic_capture::capabilities();
+          if (!capability.at("available").get<bool>())
+            throw std::runtime_error("Metal capture is unavailable; no fallback or alternative profiler");
+          // Compile/load both sessions before capture. This diagnostic is not
+          // a cold-start timing and must not attribute lazy compilation to Run.
+          if (!detect_only && !engine->rec)
+            engine->rec = std::make_unique<Session>(
+                env, engine->rec_path, engine->threads, provider);
+          if (!fs::create_directory(diagnostic_output))
+            throw std::runtime_error("cannot create new Metal evidence directory");
+          fs::permissions(diagnostic_output, fs::perms::owner_all,
+                          fs::perm_options::replace);
+        }
+        struct CaptureStopGuard {
+          bool enabled;
+          ~CaptureStopGuard() { if (enabled) diagnostic_capture::stop(); }
+        } capture_guard{metal_capture};
+        if (metal_capture)
+          result["diagnostic_metal_capture"] = diagnostic_capture::start(
+              diagnostic_output / "metal-capture.gputrace");
         ExecutionClock inference_start;
         auto prediction =
             engine->predict(image, timeout, detect_only, batch_size);
+        ExecutionClock inference_end;
         result["execution_window"] = execution_window(
-            inference_start, ExecutionClock(),
+            inference_start, inference_end,
             "OCR pipeline including pre/postprocessing, model Runs and lazy recognizer initialization; excludes image decoding and initial detector/session setup");
+        if (metal_capture) {
+          diagnostic_capture::stop();
+          capture_guard.enabled = false;
+          auto &capture = result["diagnostic_metal_capture"];
+          capture["stopped"] = true;
+          capture["worker_pid"] = result["execution_window"]["worker_pid"];
+          capture["request_id"] = result["id"];
+          capture["timing_eligible"] = false;
+          capture["gpu_execution_verified"] = false;
+          capture["scope"] = "single explicit IPC request OCR pipeline after detector/recognizer session setup; selected Metal device-object coverage and executed CoreML GPU attribution remain unverified";
+        }
         result[detect_only ? "dt_polys" : "result"] = prediction;
         result["cpu_threads"] = cpu_threads;
         result["batch_size"] = batch_size;
@@ -1081,7 +1154,9 @@ int main(int argc, char **argv) {
       std::cout.write(out.data(), out.size());
       std::cout.flush();
       if (!std::cout)
-        return 0;
+        return metal_capture ? 2 : 0;
+      if (metal_capture)
+        return result.value("ok", false) ? 0 : 2;
     }
   } catch (const std::exception &e) {
     std::cerr << "native-ocr: " << e.what() << '\n';

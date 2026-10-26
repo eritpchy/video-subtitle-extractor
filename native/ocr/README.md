@@ -166,6 +166,37 @@ the first successful model Run. These allow external trace correlation; neither 
 hardware attribution. Same-device CPU/CoreML parity, actual GPU evidence and total
 video performance remain Mac acceptance gates, not results of a Linux build.
 
+### Explicit single-request Metal diagnostic on the same final worker
+
+Normal GUI/CLI, capability probes, smoke tests and benchmarks remove
+`MTL_CAPTURE_ENABLED`; the worker rejects a nonempty inherited value unless an
+explicit diagnostic entrypoint is selected. Linking Apple's system Metal and
+Foundation frameworks does not start capture. No capture API is called during
+normal requests.
+
+For an independently authorized evidence run only, set both
+`ORT_DISABLE_TELEMETRY=1` and `MTL_CAPTURE_ENABLED=1` **before exec**:
+
+- `--diagnostic-metal-capabilities` reports capture support without models or
+  starting capture. Normal `--capabilities` is unchanged.
+- `--diagnostic-metal-capture NEWDIR --models DIR --config DIR` requires exactly
+  one framed IPC request with an explicit `cpu` or `coreml` provider, followed by
+  EOF. The external diagnostic harness binds
+  that request to one hash-verified frozen fixture and the pinned model assets.
+  Existing output directories and extra requests are refused before capture.
+
+On a supported Mac, both OCR sessions are initialized before a private new
+owner-only output directory is created. Capture covers the single `predict` call,
+stops on success or exception, and writes only `metal-capture.gputrace` there. The
+worker responds once and exits; there is no profiler or CPU substitution. The
+response adds `diagnostic_only=true`, `timing_eligible=false`, and explicit
+`diagnostic_metal_capture` metadata. This run is **never performance data**.
+Trace contents may include model/tensor data. A trace or selected physical GPU
+identifier is not proof of matching CoreML's device object or executed GPU
+inference; `gpu_execution_verified` remains false. No external-process tracing,
+system permissions/settings change, debugger attachment or network operation is
+performed. Non-Mac builds report capture unavailable and refuse capture.
+
 OCR returns `result: [boxes, [[text, confidence], ...]]`. Detection returns top-level
 raw `dt_polys` without recognition filtering or axis-aligned conversion. Crucially,
 standalone `detect` uses actual V6 TextDetection **960/max, .2/.45/1.4** defaults;

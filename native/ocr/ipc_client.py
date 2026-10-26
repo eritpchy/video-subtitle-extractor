@@ -45,6 +45,7 @@ class Worker:
         self.timeout = timeout
         self.errors = tempfile.TemporaryFile()
         env = os.environ.copy()
+        env.pop('MTL_CAPTURE_ENABLED', None)
         # Poisoning inherited Python search paths must not affect a native worker.
         env.update(PYTHONHOME='/nonexistent/native-ocr-no-python', PYTHONPATH='/nonexistent/native-ocr-no-python', ORT_DISABLE_TELEMETRY='1', VSE_OCR_PARENT_PID=str(os.getpid()))
         self.proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.errors, env=env)
@@ -137,6 +138,7 @@ def raw_case(command, name, data, expect_zero=False):
         # before process/library initialization, not just inside worker main or
         # after CreateEnv. Never rely on the caller having run the CI workflow.
         environment = dict(os.environ, ORT_DISABLE_TELEMETRY='1')
+        environment.pop('MTL_CAPTURE_ENABLED', None)
         result = subprocess.run(command, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 timeout=30, env=environment)
         passed = result.returncode == 0 if expect_zero else result.returncode > 0

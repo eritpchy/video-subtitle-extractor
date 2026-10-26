@@ -49,3 +49,24 @@ def test_raw_protocol_probe_sets_ort_privacy_before_real_child_exec(monkeypatch,
     report = ipc_client.raw_case(command, 'privacy-before-init', b'', expect_zero=True)
     assert report['passed'] and report['returncode'] == 0
     assert os.environ.get('ORT_DISABLE_TELEMETRY') == inherited
+
+
+def test_raw_normal_probe_removes_inherited_metal_capture(monkeypatch):
+    import os
+    monkeypatch.setenv('MTL_CAPTURE_ENABLED', '1')
+    command = [sys.executable, '-I', '-B', '-S', '-c',
+               'import os,sys; sys.exit(0 if "MTL_CAPTURE_ENABLED" not in os.environ else 9)']
+    report = ipc_client.raw_case(command, 'normal-not-captured', b'', expect_zero=True)
+    assert report['passed']
+    assert os.environ['MTL_CAPTURE_ENABLED'] == '1'
+
+
+def test_normal_worker_removes_capture_before_real_child_exec(monkeypatch):
+    import os
+    monkeypatch.setenv('MTL_CAPTURE_ENABLED', '1')
+    command = [sys.executable, '-I', '-B', '-S', '-c',
+               'import os,sys; sys.stdin.buffer.read(); sys.exit(0 if "MTL_CAPTURE_ENABLED" not in os.environ else 9)']
+    worker = ipc_client.Worker(command)
+    code, stderr = worker.close()
+    assert code == 0, stderr
+    assert os.environ['MTL_CAPTURE_ENABLED'] == '1'

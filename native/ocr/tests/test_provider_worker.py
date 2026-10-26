@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 import pytest
-from ipc_client import Worker
+from ipc_client import Worker, frame
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -50,6 +50,7 @@ def test_actual_cpu_cache_blank_detect_and_provider_refusal(artifact):
     try:
         first = worker.request(request)
         assert first['ok'], first
+        assert 'diagnostic_metal_capture' not in first and 'timing_eligible' not in first
         evidence = first['execution_evidence']
         assert first['requested_provider'] == 'cpu'
         assert first['actual_provider'] == 'CPUExecutionProvider'
@@ -129,3 +130,68 @@ def test_actual_coreml_first_profile_reuse_and_blank(artifact):
     finally:
         code, stderr = worker.close()
         assert code == 0, stderr
+
+
+def test_actual_metal_entrypoints_are_explicit_and_nonmac_is_unavailable(artifact, tmp_path):
+    path, executable = artifact
+    normal_env = dict(os.environ, ORT_DISABLE_TELEMETRY='1')
+    normal_env.pop('MTL_CAPTURE_ENABLED', None)
+    capture_env = dict(normal_env, MTL_CAPTURE_ENABLED='1')
+    rejected = subprocess.run([str(executable), '--capabilities'], env=capture_env,
+                              capture_output=True, text=True, timeout=30)
+    assert rejected.returncode == 2 and 'forbidden during normal worker' in rejected.stderr
+    missing = subprocess.run([str(executable), '--diagnostic-metal-capabilities'], env=normal_env,
+                             capture_output=True, text=True, timeout=30)
+    assert missing.returncode == 2 and 'require MTL_CAPTURE_ENABLED=1' in missing.stderr
+    probe = subprocess.run([str(executable), '--diagnostic-metal-capabilities'], env=capture_env,
+                           capture_output=True, text=True, check=True, timeout=30)
+    capability = json.loads(probe.stdout)
+    assert capability['diagnostic_only'] is True and capability['timing_eligible'] is False
+    assert capability['gpu_execution_verified'] is False
+    if sys.platform != 'darwin':
+        assert capability['metal_capture']['available'] is False
+
+
+def test_actual_metal_capture_rejects_extra_requests_and_existing_output(artifact, tmp_path):
+    path, executable = artifact
+    env = dict(os.environ, ORT_DISABLE_TELEMETRY='1', MTL_CAPTURE_ENABLED='1')
+    request = {'id': 'one-fixed-fixture', 'tier': 'small', 'provider': 'cpu',
+               'path': str(ROOT / 'tests/evidence/fixtures/english.png')}
+    output = tmp_path / 'new-capture'
+    command = [str(executable), '--diagnostic-metal-capture', str(output),
+               '--models', str(path / 'models'), '--config', str(path / 'config')]
+    empty = subprocess.run(command, input=b'', env=env, capture_output=True, timeout=30)
+    assert empty.returncode == 2 and b'exactly one framed request' in empty.stderr
+    assert not output.exists()
+    extra = subprocess.run(command, input=frame(request) * 2, env=env, capture_output=True, timeout=30)
+    assert extra.returncode == 2
+    length = int.from_bytes(extra.stdout[:4], 'little')
+    response = json.loads(extra.stdout[4:4 + length])
+    assert response['ok'] is False and 'exactly one framed request' in response['error']
+    assert response['timing_eligible'] is False
+    assert not output.exists()
+    missing_provider = {key: value for key, value in request.items() if key != 'provider'}
+    explicit = subprocess.run(command, input=frame(missing_provider), env=env,
+                              capture_output=True, timeout=30)
+    assert explicit.returncode == 2
+    length = int.from_bytes(explicit.stdout[:4], 'little')
+    response = json.loads(explicit.stdout[4:4 + length])
+    assert response['ok'] is False and 'explicit cpu or coreml provider' in response['error']
+    assert not output.exists()
+    output.mkdir()
+    sentinel = output / 'keep.txt'
+    sentinel.write_text('never overwrite')
+    existing = subprocess.run(command, input=frame(request), env=env, capture_output=True, timeout=30)
+    assert existing.returncode == 2 and b'existing output' in existing.stderr
+    assert sentinel.read_text() == 'never overwrite'
+    if sys.platform != 'darwin':
+        new_output = tmp_path / 'nonmac-capture'
+        command[2] = str(new_output)
+        unavailable = subprocess.run(command, input=frame(request), env=env,
+                                     capture_output=True, timeout=30)
+        assert unavailable.returncode == 2
+        length = int.from_bytes(unavailable.stdout[:4], 'little')
+        response = json.loads(unavailable.stdout[4:4 + length])
+        assert response['ok'] is False and 'Metal capture is unavailable' in response['error']
+        assert response['timing_eligible'] is False
+        assert not new_output.exists()

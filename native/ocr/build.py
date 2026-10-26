@@ -175,7 +175,7 @@ def record_capabilities(stage, executable, runtime):
     """
     env = dict(os.environ, ORT_DISABLE_TELEMETRY='1')
     for key in list(env):
-        if key in ('LD_PRELOAD', 'LD_LIBRARY_PATH') or key.startswith('DYLD_'):
+        if key in ('LD_PRELOAD', 'LD_LIBRARY_PATH', 'MTL_CAPTURE_ENABLED') or key.startswith('DYLD_'):
             del env[key]
     completed = subprocess.run([str(stage / executable), '--capabilities'],
                                check=True, capture_output=True, text=True,
@@ -298,6 +298,9 @@ def build(a):
                       'onnxruntime': {'version': sdk_manifest['version'], 'target': target, **sdk_record},
                       'build_inputs': {'worker_sha256': sha256(ROOT / 'worker.cpp'),
                                        'provider_evidence_sha256': sha256(ROOT / 'provider_evidence.hpp'),
+                                       'metal_capture_sources_sha256': {
+                                           name: sha256(ROOT / name) for name in
+                                           ('metal_capture.hpp', 'metal_capture.mm', 'metal_capture_stub.cpp')},
                                        'cmake_sha256': sha256(ROOT / 'CMakeLists.txt')}}
         (stage / 'dependency-source-manifest.json').write_text(json.dumps(dependency, indent=2) + '\n', encoding='utf-8')
         copy_notices(source, sdk, stage, sdk_record)
