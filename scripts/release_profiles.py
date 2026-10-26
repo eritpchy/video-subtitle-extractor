@@ -37,7 +37,12 @@ LEGACY_PROFILE_GAPS = {
 # The user approved retaining the immutable old CUDA 10.2 download rather than
 # downgrading current models or relabeling another runtime. This is not approval
 # to publish, change a version, or modify any existing tag/release asset.
-BLOCKED_PROFILES = {}
+BLOCKED_PROFILES = {
+    'native-coreml': 'The required production Mac package must support real CoreML/GPU acceleration '
+                     'and explicit CPU in one environment. CPU-only candidate success is a baseline, '
+                     'not completion; production provider integration and actual Mac GPU evidence '
+                     'are still pending. Never relabel a CPU-only package.',
+}
 
 
 def profile_identity(backend: str, accelerator: str = 'cpu') -> tuple[str, dict]:

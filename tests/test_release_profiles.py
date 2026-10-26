@@ -34,7 +34,8 @@ class ReleaseProfileTests(unittest.TestCase):
 
     def test_historical_cuda10_is_not_faked_or_silently_reintroduced(self):
         self.assertIn('paddle-cuda10.2', LEGACY_PROFILE_GAPS)
-        self.assertEqual(BLOCKED_PROFILES, {})  # User-approved migration; not publication authorization.
+        self.assertNotIn('paddle-cuda10.2', BLOCKED_PROFILES)  # User-approved migration.
+        self.assertIn('native-coreml', BLOCKED_PROFILES)  # New required Mac acceleration is not yet fulfilled.
         with self.assertRaises(ValueError):
             profile_identity('paddle', 'cuda10.2')
 

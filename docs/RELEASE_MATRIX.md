@@ -8,7 +8,17 @@ move a tag, overwrite an existing asset, or change the application version.
 Every candidate records its actual source commit, not the already published
 2.3.0 commit. Publishing a later approved version is a separate operation.
 
-The approved current candidate set is:
+**Required Mac acceleration is still a release blocker.** The final new Mac
+package must have an honest `native-coreml` identity, actual CoreML/GPU evidence,
+and an explicit CPU option in the same bundled environment. The successful
+seven-profile CPU-acceptance run is a retained baseline, not completion of this
+requirement. Existing published 2.3.0 Native CPU assets remain unchanged. Do not
+rename a CPU-only bundle or equate a requested CoreML provider/compute plan with
+observed GPU execution. Full publication is blocked until this is integrated
+and validated; no extra duplicate Mac CPU environment is planned for final
+distribution merely to preserve an internal regression baseline.
+
+The current seven-profile **baseline** candidate set is:
 
 | Platform | Package profile | Inference runtime |
 | --- | --- | --- |

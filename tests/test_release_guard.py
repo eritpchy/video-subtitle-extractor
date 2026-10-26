@@ -312,8 +312,10 @@ class ReleaseAssetGuardTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Missing explicit GPU'):
             self.validate()
 
-    def test_full_approved_current_matrix_has_exactly_seven_profiles(self):
-        self.assertEqual(len(self.validate(matrix='full')), 21)
+    def test_seven_profile_baseline_is_not_full_mac_acceleration_readiness(self):
+        self.assertEqual(len(self.validate()), 21)
+        with self.assertRaisesRegex(RuntimeError, 'native-coreml'):
+            self.validate(matrix='full')
         self.assertFalse(any('cuda10.2' in name for name in candidate_asset_names(VERSION)))
 
     def test_new_unresolved_current_profile_blocker_fails_closed(self):
@@ -358,11 +360,22 @@ class ReleaseAssetGuardTests(unittest.TestCase):
         argv = ['release_guard.py', '--tag', VERSION, '--sha', SHA, '--publish', 'release',
                 '--matrix', 'full', '--assets', str(self.directory)]
         with patch('sys.argv', argv), patch('scripts.release_guard.read_version', return_value=VERSION), \
+                patch('scripts.release_guard.BLOCKED_PROFILES', {}), \
                 patch('scripts.release_guard.preflight', side_effect=RuntimeError('release already exists')) as remote, \
                 patch('scripts.release_guard.subprocess.run') as publish, \
                 self.assertRaisesRegex(RuntimeError, 'already exists'):
             main()
         remote.assert_called_once_with(VERSION, SHA)
+        publish.assert_not_called()
+
+    def test_required_mac_acceleration_blocks_publication_before_network(self):
+        argv = ['release_guard.py', '--tag', VERSION, '--sha', SHA, '--publish', 'release',
+                '--matrix', 'full', '--assets', str(self.directory)]
+        with patch('sys.argv', argv), patch('scripts.release_guard.preflight') as remote, \
+                patch('scripts.release_guard.subprocess.run') as publish, \
+                self.assertRaisesRegex(RuntimeError, 'native-coreml'):
+            main()
+        remote.assert_not_called()
         publish.assert_not_called()
 
 
