@@ -54,14 +54,35 @@ or the final integrity checks.
 
 ## What the probe can establish
 
-The probe derives a **new same-configuration environment** from the baseline-306
-fixture constructor, original sanitizer and the current run's actual
-`environment-report.json`. That report is intentionally selective, not a full
+The probe derives a **byte-cloned fixture with explicit path relocation** from
+the baseline-306 fixture constructor, original sanitizer and the current run's
+actual `environment-report.json`. That report is intentionally selective, not a full
 environment dump. Record provenance and missing fields; do not claim byte-for-
 byte identity with the old failure instant, or with an unrecorded complete
 environment. Retain only necessary safe values, non-sensitive key names and
 filtering booleans. Never dump tokens or the entire inherited environment.
 Do not write fresh probe/audit records into the frozen original evidence.
+
+After checking the original fixture metadata and selected environment, each
+scenario gets its own complete, independent byte copy of its finished fixture,
+including existing cache/configuration bytes and empty directories. No hardlink,
+reparse point, cache deletion, or file-content path rewriting is used. Before/
+after source inventories and the initial clone inventory must match, including
+all file SHA/size and directory entries. Required disk space is checked before
+copying; no host cleanup is attempted. Only the explicit single-path fixture
+variables (HOME, USERPROFILE, APPDATA, LOCALAPPDATA, XDG config/cache, VSE config/
+work, and Paddle cache) are relocated by path-component membership. Unknown
+fields containing original fixture references, path lists, or escapes fail
+closed. Payload PATH, SystemRoot, PowerShell identity, timeout, command and cwd
+remain unchanged. Embedded old paths inside copied files remain original bytes;
+this is not an assertion of identical path-dependent behavior.
+
+The two PowerShell controls in a scenario share its writable diagnostic clone;
+the second may use warmed cache. They never share the other scenario's clone.
+Complete clone changes are recorded after each control and on the parent failure
+path, including additions/removals/modifications and directories. No cache-file
+allowlist exempts original evidence: its original file snapshot remains an exact
+equality gate, supplemented by an exact directory-list gate.
 
 “No added prewarming” does **not** mean a cold WMI/CIM service: the unchanged
 wrapper already calls `platform.platform()`, and CPython 3.12 can query WMI
@@ -86,3 +107,21 @@ diagnostic upload allowlist. No customer EXE, object/library, original ZIP or
 byte volume is uploaded or published. New diagnostic results require the actual
 Server run; this document does not claim that those probes have already
 executed or passed.
+
+## Preserved failed diagnostic attempt
+
+Run `40318600800` at `db539b60e78061bfb2708e93c2bdf2bc8ad954e0`
+passed the new original two-scenario acceptance and four post-probe queries but
+**failed overall**: the post probes still used the original fixture AppData, and
+two new 64-byte `StartupProfileData-NonInteractive` files were caught by the
+immutable evidence gate. Artifact `12648494695` is 7,377,206 bytes, SHA256
+`4b6589ed7fab2c4dcd778825f2e80892f276968ffb4dd203f52538bd82a36fb3`.
+The fixed-byte original ZIP, volume parts and restored payload stayed unchanged;
+that does not erase the diagnostic isolation failure. This clone correction
+preserves both earlier failed attempts and still requires a fresh Server result.
+
+Microsoft documents [startup cache recreation](https://learn.microsoft.com/en-us/powershell/scripting/dev-cross-plat/performance/startup-performance);
+`-NoProfile` does not establish absence of runtime cache writes. We do not delete
+cache, change permissions/security settings or disable optimization to hide the
+observed behavior. The successful new stage timings do not identify the cause
+of the earlier, uninstrumented 60-second timeout.

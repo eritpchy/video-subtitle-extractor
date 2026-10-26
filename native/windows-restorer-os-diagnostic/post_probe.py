@@ -15,8 +15,10 @@ import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
+import re
+from pathlib import Path, PureWindowsPath
 import stat
+import shutil
 import struct
 import subprocess
 import sys
@@ -42,6 +44,8 @@ LOG_VALUES = frozenset(('SYSTEMROOT WINDIR PATH TEMP TMP HOME USERPROFILE APPDAT
 OVERLAY = frozenset(('PATH PYTHONPATH PYTHONNOUSERSITE PYTHONUTF8 VSE_CONFIG_FILE VSE_WORK_DIR '
     'VSE_OCR_BACKEND VSE_MODEL_DIR VSE_VSF_BINARY VSE_VSF_DIR IMAGEIO_FFMPEG_EXE').split())
 FORBIDDEN_PREFIXES = ('VSE_RUNTIME_AUDIT_',)
+FIXTURE_PATHS = frozenset(('HOME USERPROFILE APPDATA LOCALAPPDATA XDG_CONFIG_HOME XDG_CACHE_HOME '
+    'VSE_CONFIG_FILE VSE_WORK_DIR PADDLE_PDX_CACHE_HOME').split())
 
 
 def sha(path):
@@ -72,6 +76,117 @@ def snapshot(paths):
             if not stat.S_ISREG(info.st_mode): raise ValueError('Evidence is not a regular file')
             result[str(path)] = {'bytes': info.st_size, 'sha256': sha(path)}
     return result
+
+
+def tree_inventory(root):
+    """Exact clone bytes and directory structure; never follow links/aliases."""
+    root = Path(root)
+    rows = {}
+    pending = [root]
+    while pending:
+        path = pending.pop()
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode) or getattr(info, 'st_file_attributes', 0) & 0x400:
+            raise ValueError('Fixture contains a reparse/symlink')
+        name = path.relative_to(root).as_posix()
+        if stat.S_ISDIR(info.st_mode):
+            rows[name] = {'kind': 'directory'}
+            pending.extend(path.iterdir())
+        elif stat.S_ISREG(info.st_mode):
+            if info.st_nlink != 1: raise ValueError('Fixture contains a hardlink')
+            rows[name] = {'kind': 'file', 'bytes': info.st_size, 'sha256': sha(path)}
+        else: raise ValueError('Fixture contains a special entry')
+    if rows.get('.') != {'kind': 'directory'}: raise ValueError('Fixture root must be a plain directory')
+    return rows
+
+
+def inventory_sha(rows):
+    return hashlib.sha256(json.dumps(rows, sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()
+
+
+def tree_changes(before, after):
+    return {'added': {k: after[k] for k in sorted(after.keys() - before.keys())},
+            'removed': {k: before[k] for k in sorted(before.keys() - after.keys())},
+            'changed': {k: {'before': before[k], 'after': after[k]} for k in sorted(before.keys() & after.keys()) if before[k] != after[k]}}
+
+
+def directory_snapshot(paths):
+    # Supplement, not an exception to the existing immutable-file snapshot.
+    result = []
+    for base in paths:
+        for path in ([base, *base.rglob('*')] if base.is_dir() else [base]):
+            info = path.lstat()
+            if stat.S_ISLNK(info.st_mode) or getattr(info, 'st_file_attributes', 0) & 0x400:
+                raise ValueError('Evidence directory is a link/reparse point')
+            if stat.S_ISDIR(info.st_mode): result.append(str(path))
+    return sorted(result)
+
+
+def clone_fixture(source, destination):
+    source, destination = Path(source), Path(destination)
+    if destination.resolve().is_relative_to(source.resolve()) or source.resolve().is_relative_to(destination.resolve()):
+        raise ValueError('Clone must be separate from original fixture')
+    before = tree_inventory(source)
+    needed = sum(row.get('bytes', 0) for row in before.values()) + len(before) * 65536 + 64 * 1024**2
+    available = shutil.disk_usage(destination.parent).free
+    if available < needed: raise RuntimeError('Insufficient space for independent fixture clone; no host cleanup')
+    destination.mkdir()  # Existing target is never reused or overwritten.
+    for name, row in sorted(before.items(), key=lambda item: (len(Path(item[0]).parts), item[0])):
+        if name == '.': continue
+        target = destination / name
+        if row['kind'] == 'directory': target.mkdir()
+        else:
+            with (source / name).open('rb') as reader, target.open('xb') as writer:
+                remaining = row['bytes']; digest = hashlib.sha256()
+                while remaining:
+                    block = reader.read(min(remaining, 1024**2))
+                    if not block: raise ValueError('Fixture source shrank during copy')
+                    writer.write(block); digest.update(block); remaining -= len(block)
+                if reader.read(1) or digest.hexdigest() != row['sha256']:
+                    raise ValueError('Fixture source bytes changed during copy')
+            if target.samefile(source / name): raise ValueError('Clone must not share a source file identity')
+    after = tree_inventory(destination)
+    if after != before or tree_inventory(source) != before:
+        raise ValueError('Original fixture or independent byte clone changed during copy')
+    return {'source': str(source), 'path': str(destination), 'inventory': before,
+            'inventory_sha256': inventory_sha(before), 'file_bytes': sum(row.get('bytes', 0) for row in before.values()),
+            'required_free_bytes': needed, 'actual_free_bytes_before': available,
+            'source_unchanged_verified': True, 'independent_file_identities': True,
+            'contents_rewritten': False, 'cache_removed': False}
+
+
+def relocate_fixture_environment(environment, old, new):
+    # PureWindowsPath supplies Windows component/case semantics in offline tests
+    # too. No global text replacement of PATH, unknown values or file contents.
+    old_path, new_path = PureWindowsPath(str(old)), PureWindowsPath(str(new))
+    if not old_path.is_absolute() or not new_path.is_absolute():
+        # Native POSIX paths are only for offline filesystem tests.
+        old_path, new_path = Path(old), Path(new)
+        if not old_path.is_absolute() or not new_path.is_absolute(): raise ValueError('Absolute fixture roots required')
+    result = dict(environment); changes = []
+    for key, value in environment.items():
+        path_type = type(old_path)
+        path = path_type(value)
+        try: relative = path.relative_to(old_path)
+        except ValueError: relative = None
+        if relative is not None:
+            if key.upper() not in FIXTURE_PATHS or ';' in value or any(part == '..' for part in path.parts):
+                raise ValueError('Unexpected or non-single-path fixture environment reference')
+            replacement = str(new_path / relative)
+            result[key] = replacement
+            changes.append({'name': key, 'before': value, 'after': replacement})
+        elif key.upper() in FIXTURE_PATHS:
+            raise ValueError('Required fixture-scoped environment value escapes original fixture')
+        elif re.search(re.escape(str(old_path).replace('\\', '/')) + r"(?:[/;\"'\s]|$)", value.replace('\\', '/'), re.IGNORECASE):
+            # Unknown/path-list embedding cannot silently retain an old write
+            # location. No arbitrary environment value is included in the error.
+            raise ValueError('Residual original fixture reference in non-relocatable field')
+    if {key.upper() for key in environment} & FIXTURE_PATHS != FIXTURE_PATHS:
+        raise ValueError('Incomplete known fixture-root environment')
+    for key in environment:
+        if key.upper() not in FIXTURE_PATHS and result[key] != environment[key]:
+            raise ValueError('Non-fixture environment was altered')
+    return result, changes
 
 
 def original_command(path):
@@ -251,16 +366,21 @@ def native_control(module):
     return record
 
 
-def child(root, output):
+def child(root, output, fixture_clone=None, fixture_inventory_sha256=None):
     """Run with the verified bundle's Python, -I -B, no old audit-hook writes."""
     if output.resolve().is_relative_to(root.resolve()):
         raise ValueError('Diagnostic output must be outside the restored payload')
     output.mkdir()
     report = {'result': 'failed', 'python': sys.executable, 'isolated': sys.flags.isolated,
-              'bytecode_disabled': sys.dont_write_bytecode, 'probes': []}
+              'bytecode_disabled': sys.dont_write_bytecode, 'probes': [], 'fixture_observations': []}
     try:
         if os.name != 'nt' or not sys.flags.isolated or not sys.dont_write_bytecode:
             raise RuntimeError('Isolated native Windows bundled interpreter required')
+        if fixture_clone is None or fixture_clone.resolve().parent != output.parent.resolve() or fixture_clone.name != 'fixture-clone-' + output.name:
+            raise ValueError('Dedicated case-specific diagnostic clone required')
+        prior_tree = tree_inventory(fixture_clone)
+        if inventory_sha(prior_tree) != fixture_inventory_sha256: raise ValueError('Fixture clone changed before child probe')
+        write_json(output / 'fixture-tree-before.json', prior_tree)
         source = root / 'scripts/windows_verification.py'; command = original_command(source)
         module = load('accepted_os_verification', source)
         executable, report['powershell'] = system_powershell(os.environ)
@@ -273,6 +393,12 @@ def child(root, output):
                                       'python': {'pointer_bits': struct.calcsize('P') * 8}}, RUNNER)
         for label, script, marked in (('original-control', command, False), ('stage-marked', marked_command(command), True)):
             report['probes'].append(run_capture(executable, script, root, dict(os.environ), output / label, marked, validate))
+            current_tree = tree_inventory(fixture_clone)
+            write_json(output / label / 'fixture-tree-after.json', current_tree)
+            report['fixture_observations'].append({'after': label, 'before_sha256': inventory_sha(prior_tree),
+                'after_sha256': inventory_sha(current_tree), 'changes': tree_changes(prior_tree, current_tree),
+                'scope': 'writable independent diagnostic clone; later marked query may use warmed cache'})
+            prior_tree = current_tree
         report['native_control'] = native_control(module)
         if sha(executable) != report['powershell']['sha256']: raise RuntimeError('PowerShell executable changed')
         if any(row['result'] != 'passed' for row in report['probes']): raise RuntimeError('At least one independent OS control failed')
@@ -306,14 +432,27 @@ def derive_environment(portable, bootstrap, root, work, output, scenario, inheri
         raise ValueError('Unexpected captured environment keys; refusing arbitrary/secret overlays')
     if selected.get('PATH') != environment['PATH'] or selected.get('VSE_CONFIG_FILE') != environment['VSE_CONFIG_FILE'] or selected.get('VSE_WORK_DIR') != environment['VSE_WORK_DIR']:
         raise ValueError('New attempt PATH/config/work differ from derived baseline configuration')
+    # These two original bootstrap selectors are cleared before Paddle capture
+    # and absent from the authoritative environment report. Do not retain the
+    # constructor's deliberately foreign values merely because they are absent.
+    removed_selectors = [key for key in ('VSE_NATIVE_OCR_ROOT', 'VSE_DIRECTML_MODEL_ROOT') if key in environment]
+    for key in removed_selectors: environment.pop(key)
     environment.update(selected)
     environment['PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK'] = 'True'
     environment = without_hooks(environment)
+    clone = clone_fixture(old, output / ('fixture-clone-' + scenario))
+    write_json(output / (scenario + '-fixture-clone-start.json'), clone)
+    environment, relocations = relocate_fixture_environment(environment, old, Path(clone['path']))
     record = safe_environment_record(environment, inherited)
+    record.update(fixture_clone={k: v for k, v in clone.items() if k != 'inventory'},
+                  absent_original_backend_selectors_removed=removed_selectors,
+                  relocated_fixture_fields=relocations,
+                  scope='byte-cloned-fixture-explicit-path-relocation-not-same-path-or-old-instant',
+                  embedded_file_contents_preserved_verbatim=True)
     record.update(captured_environment_report_sha256=sha(case / 'environment-report.json'),
                   fixture_sha256=sha(case / 'fixture.json'), observed_overlay_names=sorted(selected),
                   values_not_in_environment_report_source='same-job filtered host plus exact baseline fixture constructor and sanitizer',
-                  intentional_difference='No Python/runtime audit hooks; bundled diagnostic starts -I -B; PS cwd remains restored root')
+                  intentional_difference='Only fixture-root environment paths relocated to independent byte clone; no Python/runtime audit hooks; -I -B; PS cwd remains restored root')
     return environment, record
 
 
@@ -333,14 +472,17 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--child', action='store_true')
     parser.add_argument('--root', type=Path)
+    parser.add_argument('--fixture-clone', type=Path)
+    parser.add_argument('--fixture-inventory-sha256')
     parser.add_argument('--work-directory', type=Path)
     parser.add_argument('--report-directory', type=Path)
     parser.add_argument('--baseline-source', type=Path)
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args(argv)
     if args.child:
-        if args.root is None: parser.error('--child needs --root')
-        return child(args.root.resolve(strict=True), args.output.absolute())
+        if args.root is None or args.fixture_clone is None or args.fixture_inventory_sha256 is None:
+            parser.error('--child needs --root, --fixture-clone and --fixture-inventory-sha256')
+        return child(args.root.resolve(strict=True), args.output.absolute(), args.fixture_clone, args.fixture_inventory_sha256)
     if not all((args.work_directory, args.report_directory, args.baseline_source)):
         parser.error('Post-only orchestrator needs completed work/report and baseline source')
     output = args.output.resolve()
@@ -355,7 +497,13 @@ def main(argv=None):
                       'four_job_raw_library_id': 'libfile_6002b22312008191b4389dc84f7d2a43',
                       'four_job_raw_bytes': 14555022,
                       'four_job_raw_sha256': '457321932e547d0a599f5b0787497a418c46f4aaeff9c92aa1a521d44c29f3c8'},
-        'prior_failure_reclassified': False, 'new_run_id': os.environ.get('GITHUB_RUN_ID'),
+        'prior_failure_reclassified': False,
+        'prior_post_probe': {'run': 40318600800, 'commit': 'db539b60e78061bfb2708e93c2bdf2bc8ad954e0',
+            'result': 'failed', 'original_acceptance': 'passed', 'controls_passed': 4,
+            'failure': 'post probes wrote startup cache into frozen original fixtures',
+            'artifact_id': 12648494695, 'artifact_bytes': 7377206,
+            'artifact_sha256': '4b6589ed7fab2c4dcd778825f2e80892f276968ffb4dd203f52538bd82a36fb3'},
+        'new_run_id': os.environ.get('GITHUB_RUN_ID'),
         'new_commit': os.environ.get('GITHUB_SHA'), 'no_added_pre_acceptance_probe': True,
         'cold_WMI_state_claimed': False, 'old_full_environment_reconstructed': False,
         'gpu_inference_verified': False, 'scenarios': [], 'after_errors': []}
@@ -373,6 +521,8 @@ def main(argv=None):
         report['new_original_scenario_results'] = [{k: row[k] for k in ('scenario', 'result')} for row in launcher['scenarios']]
         frozen_paths = [work / 'accepted-restorer-report.json', work / 'launcher-evidence', args.report_directory.resolve(strict=True)]
         frozen = snapshot(frozen_paths)
+        frozen_directories = directory_snapshot(frozen_paths)
+        write_json(output / 'frozen-original-directories.json', frozen_directories)
         write_json(output / 'frozen-original-evidence.json', frozen)
         (output / 'original-accepted-restorer-report.json').write_bytes((work / 'accepted-restorer-report.json').read_bytes())
         # Original attempt is now frozen. Only now import helpers/check archive
@@ -414,7 +564,9 @@ def main(argv=None):
             try:
                 environment, case['environment'] = derive_environment(portable, bootstrap, root, work, output, scenario, dict(os.environ))
                 command = [str(root / 'runtime/python.exe'), '-I', '-B', '-X', 'utf8', str(Path(__file__).resolve()),
-                           '--child', '--root', str(root), '--output', str(output / scenario)]
+                           '--child', '--root', str(root), '--output', str(output / scenario),
+                           '--fixture-clone', case['environment']['fixture_clone']['path'],
+                           '--fixture-inventory-sha256', case['environment']['fixture_clone']['inventory_sha256']]
                 case['command'] = command
                 with (output / (scenario + '-child.log')).open('wb') as log:
                     result = subprocess.run(command, cwd=root, env=environment, stdout=log, stderr=subprocess.STDOUT, timeout=240)
@@ -424,6 +576,16 @@ def main(argv=None):
                 if result.returncode != 0 or child_report.get('result') != 'passed': raise RuntimeError('Post-only OS probes failed; original result retained')
                 case['result'] = 'passed'
             except Exception as error: case['error'] = f'{type(error).__name__}: {error}'
+            finally:
+                if 'environment' in case and 'fixture_clone' in case['environment']:
+                    try:
+                        final_clone = tree_inventory(Path(case['environment']['fixture_clone']['path']))
+                        write_json(output / (scenario + '-fixture-clone-final.json'), final_clone)
+                        initial_clone = json.loads((output / (scenario + '-fixture-clone-start.json')).read_bytes())['inventory']
+                        case['fixture_clone_changes'] = tree_changes(initial_clone, final_clone)
+                    except Exception as error:
+                        case['result'] = 'failed'
+                        case['clone_after_error'] = f'{type(error).__name__}: {error}'
         if any(case['result'] != 'passed' for case in report['scenarios']): raise RuntimeError('One or more post-only scenarios failed')
         if original['result'] != 'passed': raise RuntimeError('New original acceptance failed; post probes cannot upgrade it')
         policy.validate_run_report(original, pins, PROFILE, RUNNER)
@@ -433,6 +595,7 @@ def main(argv=None):
         if frozen is not None:
             try:
                 if snapshot(frozen_paths) != frozen: raise ValueError('Original attempt evidence changed during post probes')
+                if directory_snapshot(frozen_paths) != frozen_directories: raise ValueError('Original evidence directory structure changed during post probes')
                 report['original_evidence_unchanged'] = True
             except Exception as error: report['after_errors'].append({'check': 'frozen-original-evidence', 'error': str(error)})
         if expected is not None:

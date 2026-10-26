@@ -6,7 +6,8 @@ import fnmatch
 import hashlib
 import importlib.util
 import json
-from pathlib import Path
+import os
+from pathlib import Path, PureWindowsPath
 import subprocess
 import tempfile
 import types
@@ -202,21 +203,58 @@ class ProbeTests(unittest.TestCase):
             fixture = {'fixture_root': str(template), 'cwd': str(template / 'cwd'), 'list': [str(template / 'home')]}
             original = {'fixture_root': str(old), 'cwd': str(old / 'cwd'), 'list': [str(old / 'home')]}
             (case / 'fixture.json').write_text(json.dumps(original))
+            old.mkdir(); (old / 'empty').mkdir(); (old / 'existing-cache').write_bytes(b'cache remains')
             selected = {'PATH': 'safe', 'VSE_CONFIG_FILE': str(old / 'config'), 'VSE_WORK_DIR': str(old / 'work'), 'PYTHONPATH': 'oldhook'}
             observed = {'bundle_root': str(app), 'platform': 'windows', 'environment': selected}
             (case / 'environment-report.json').write_text(json.dumps(observed))
-            env = {'PATH': 'safe', 'VSE_CONFIG_FILE': str(template / 'config'), 'VSE_WORK_DIR': str(template / 'work'), 'HOME': str(template / 'home')}
+            env = {key: str(template / key.lower()) for key in probe.FIXTURE_PATHS}
+            env.update(PATH='safe', VSE_CONFIG_FILE=str(template / 'config'), VSE_WORK_DIR=str(template / 'work'), HOME=str(template / 'home'))
             portable = types.SimpleNamespace(fixture_environment=Mock(return_value=(env, fixture)))
             bootstrap = types.SimpleNamespace(sanitize_environment=lambda r, e, target: e)
             derived, record = probe.derive_environment(portable, bootstrap, app, work, output, scenario, {'GITHUB_TOKEN': 'secret', 'SystemRoot': 'C:/Windows'})
             self.assertNotIn('PYTHONPATH', derived); self.assertNotIn('GITHUB_TOKEN', derived)
-            self.assertEqual(derived['HOME'], str(old / 'home'))
+            self.assertEqual(derived['HOME'], str(output / ('fixture-clone-' + scenario) / 'home'))
+            self.assertEqual(probe.tree_inventory(old), probe.tree_inventory(Path(record['fixture_clone']['path'])))
+            self.assertEqual(len(record['relocated_fixture_fields']), len(probe.FIXTURE_PATHS))
             self.assertNotIn('secret', json.dumps(record)); self.assertEqual(record['fixture_sha256'], probe.sha(case / 'fixture.json'))
             inherited = portable.fixture_environment.call_args.args[2]
             self.assertNotIn('GITHUB_TOKEN', inherited)
             observed['environment']['GITHUB_TOKEN'] = 'secret'
             (case / 'environment-report.json').write_text(json.dumps(observed))
             with self.assertRaisesRegex(ValueError, 'Unexpected captured'): probe.derive_environment(portable, bootstrap, app, work, output, scenario, {})
+
+    def test_real_fixture_constructor_and_sanitizer_relocate_all_nine_fields(self):
+        from scripts import verify_portable_environment as portable
+        from scripts import bundle_bootstrap as bootstrap
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary); app = base / 'app'; app.mkdir(); work = base / 'original-work'; output = base / 'post'; output.mkdir()
+            for scenario in probe.SCENARIOS:
+                case = work / 'launcher-evidence' / scenario; case.mkdir(parents=True)
+                old = work / 'launcher-evidence' / ('fixture-' + scenario)
+                inherited = {'SYSTEMROOT': str(base / 'Windows'), 'VSE_WINDOWS_RUNNER_LABEL': probe.RUNNER,
+                             'PYTHONDONTWRITEBYTECODE': '1', 'PYTHONUTF8': '1'}
+                env, fixture = portable.fixture_environment(old, scenario == probe.SCENARIOS[1], inherited)
+                sanitized = bootstrap.sanitize_environment(app, env, 'windows')
+                (case / 'fixture.json').write_text(json.dumps(fixture))
+                selected = {key: sanitized[key] for key in ('PATH', 'VSE_CONFIG_FILE', 'VSE_WORK_DIR', 'PYTHONNOUSERSITE', 'PYTHONUTF8')}
+                selected.update(VSE_OCR_BACKEND='paddle', VSE_MODEL_DIR=str(app / 'backend/models'),
+                                VSE_VSF_BINARY=str(app / 'native/vsf.exe'), VSE_VSF_DIR=str(app / 'native'),
+                                IMAGEIO_FFMPEG_EXE=str(app / 'native/ffmpeg.exe'))
+                (case / 'environment-report.json').write_text(json.dumps({'bundle_root': str(app), 'platform': 'windows', 'environment': selected}))
+                before = probe.tree_inventory(old)
+                moved, record = probe.derive_environment(portable, bootstrap, app, work, output, scenario, inherited)
+                self.assertEqual({r['name'] for r in record['relocated_fixture_fields']}, set(probe.FIXTURE_PATHS))
+                self.assertEqual(moved['PATH'], selected['PATH']); self.assertEqual(moved['SYSTEMROOT'], inherited['SYSTEMROOT'])
+                self.assertEqual(before, probe.tree_inventory(old))
+                self.assertEqual(before, probe.tree_inventory(Path(record['fixture_clone']['path'])))
+                for key in probe.FIXTURE_PATHS: self.assertTrue(Path(moved[key]).is_relative_to(Path(record['fixture_clone']['path'])))
+                selected['PATH'] = 'altered before relocation'
+                (case / 'environment-report.json').write_text(json.dumps({'bundle_root': str(app), 'platform': 'windows', 'environment': selected}))
+                negative_output = base / ('negative-' + scenario); negative_output.mkdir()
+                with patch.object(probe, 'clone_fixture') as clone:
+                    with self.assertRaisesRegex(ValueError, 'PATH/config/work differ'):
+                        probe.derive_environment(portable, bootstrap, app, work, negative_output, scenario, inherited)
+                    clone.assert_not_called()
 
     def test_registry_comparison_is_read_only_fixed_values_and_64_bit_view(self):
         registry = types.SimpleNamespace(HKEY_LOCAL_MACHINE=1, KEY_QUERY_VALUE=1, KEY_WOW64_64KEY=256,
@@ -243,6 +281,7 @@ class ProbeTests(unittest.TestCase):
         self.assertIn("policy.verify_originals(work / 'original', original['original_files'])", source)
         self.assertIn('transport.verify_transport(volume)', source)
         self.assertIn("'prior_failure_reclassified': False", source)
+        self.assertIn("directory_snapshot(frozen_paths) != frozen_directories", source)
         self.assertLess(source.index("write_json(output / 'frozen-original-evidence.json', frozen)"), source.index("from scripts import release_volume_transport as transport"))
         self.assertNotIn('os.environ.update(', source)
         self.assertNotIn('os.environ.clear(', source)
@@ -274,6 +313,133 @@ class ProbeTests(unittest.TestCase):
         child = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == 'child')
         self.assertLess(next(i for i, n in enumerate(child.body[-2].body) if isinstance(n, ast.For)),
                         next(i for i, n in enumerate(child.body[-2].body) if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call) and getattr(n.value.func, 'id', '') == 'native_control'))
+
+
+class FixtureCloneTests(unittest.TestCase):
+    def test_complete_unicode_clone_empty_dirs_original_bytes_and_independent_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary); source = base / 'original 中文 &!()'; source.mkdir()
+            (source / 'home/cache/empty').mkdir(parents=True)
+            data = b'original cache\x00' + str(source).encode()
+            (source / 'home/cache/profile').write_bytes(data)
+            before = probe.tree_inventory(source)
+            record = probe.clone_fixture(source, base / 'clone 中文 &!()')
+            self.assertEqual(record['inventory'], before)
+            self.assertEqual(probe.tree_inventory(Path(record['path'])), before)
+            self.assertFalse((source / 'home/cache/profile').samefile(Path(record['path']) / 'home/cache/profile'))
+            self.assertFalse(record['cache_removed']); self.assertFalse(record['contents_rewritten'])
+            (Path(record['path']) / 'home/cache/profile').write_bytes(b'changed clone')
+            self.assertEqual((source / 'home/cache/profile').read_bytes(), data)
+            self.assertEqual(probe.tree_inventory(source), before)
+            with self.assertRaises(FileExistsError): probe.clone_fixture(source, Path(record['path']))
+            with self.assertRaisesRegex(ValueError, 'separate'): probe.clone_fixture(source, source / 'clone')
+
+    def test_clone_budget_no_space_has_no_output_and_no_cleanup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / 'original'; source.mkdir()
+            destination = Path(temporary) / 'clone'
+            with patch.object(probe.shutil, 'disk_usage', return_value=types.SimpleNamespace(free=0)):
+                with self.assertRaisesRegex(RuntimeError, 'no host cleanup'): probe.clone_fixture(source, destination)
+            self.assertFalse(destination.exists()); self.assertTrue(source.exists())
+
+    def test_source_mutation_during_copy_is_not_accepted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary); source = base / 'original'; source.mkdir()
+            (source / 'file').write_bytes(b'old')
+            inventory = probe.tree_inventory
+            def mutating(path):
+                if path == base / 'clone': (source / 'file').write_bytes(b'new')
+                return inventory(path)
+            with patch.object(probe, 'tree_inventory', side_effect=mutating):
+                with self.assertRaisesRegex(ValueError, 'changed during copy'): probe.clone_fixture(source, base / 'clone')
+
+    def test_hardlink_and_symlink_or_special_entries_are_refused(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary); source = base / 'original'; source.mkdir()
+            (source / 'file').write_bytes(b'original')
+            os.link(source / 'file', source / 'hardlink')
+            with self.assertRaisesRegex(ValueError, 'hardlink'): probe.clone_fixture(source, base / 'clone')
+            (source / 'hardlink').unlink()
+            try: (source / 'link').symlink_to(source / 'file')
+            except OSError: pass  # Windows privilege is not requested for a unit fixture.
+            else:
+                with self.assertRaisesRegex(ValueError, 'reparse/symlink'): probe.clone_fixture(source, base / 'clone')
+                (source / 'link').unlink()
+            if hasattr(os, 'mkfifo'):
+                os.mkfifo(source / 'fifo')
+                with self.assertRaisesRegex(ValueError, 'special'): probe.clone_fixture(source, base / 'clone')
+
+    def test_reparse_attribute_is_refused_before_directory_enumeration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            info = root.lstat()
+            fake = types.SimpleNamespace(st_mode=info.st_mode, st_file_attributes=0x400)
+            with patch.object(Path, 'lstat', return_value=fake), patch.object(Path, 'iterdir') as children:
+                with self.assertRaisesRegex(ValueError, 'reparse'): probe.tree_inventory(root)
+                children.assert_not_called()
+
+    def test_destination_alias_or_injected_hardlink_is_not_a_clone(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary); source = base / 'original'; source.mkdir(); (source / 'file').write_bytes(b'old')
+            target = base / 'clone'; target.mkdir()
+            with self.assertRaises(FileExistsError): probe.clone_fixture(source, target)
+            with patch.object(probe.Path, 'samefile', return_value=True):
+                with self.assertRaisesRegex(ValueError, 'identity'): probe.clone_fixture(source, base / 'other')
+
+    def environment(self, old):
+        return {**{key: str(PureWindowsPath(old) / key.lower()) for key in probe.FIXTURE_PATHS},
+                'PATH': r'C:\Windows\System32;D:\payload\runtime', 'SYSTEMROOT': r'C:\Windows',
+                'WINDIR': r'C:\Windows', 'UNCHANGED': old + '-sibling'}
+
+    def test_component_remapping_case_slashes_and_nonfixture_values(self):
+        old, new = r'D:\Original 中文 &!()\fixture', r'D:\Post 中文 &!()\clone'
+        env = self.environment(old)
+        env['LOCALAPPDATA'] = str(PureWindowsPath(old) / 'home/AppData/Local').lower().replace('\\', '/')
+        moved, changes = probe.relocate_fixture_environment(env, old, new)
+        self.assertEqual(len(changes), len(probe.FIXTURE_PATHS))
+        for key in probe.FIXTURE_PATHS: self.assertTrue(PureWindowsPath(moved[key]).is_relative_to(PureWindowsPath(new)))
+        for key in ('PATH', 'SYSTEMROOT', 'WINDIR', 'UNCHANGED'): self.assertEqual(moved[key], env[key])
+        self.assertNotEqual(moved['HOME'], env['HOME'])
+
+    def test_unknown_old_root_path_lists_escapes_and_missing_fields_fail(self):
+        old, new = r'D:\Original\fixture', r'D:\Post\clone'
+        changes = [('UNKNOWN', old + r'\write'), ('PATH', r'C:\Windows;' + old + r'\bin'),
+                   ('HOME', old + r'\home;D:\outside'), ('APPDATA', old + r'\..\outside'),
+                   ('LOCALAPPDATA', old + r'-sibling\Local'), ('PATH', 'C:/Windows;' + old + ';C:/Tools'),
+                   ('UNKNOWN', '"' + old + '"'), ('UNKNOWN', old + ';suffix')]
+        for key, value in changes:
+            env = self.environment(old); env[key] = value
+            with self.subTest(key=key, value=value):
+                with self.assertRaises(ValueError): probe.relocate_fixture_environment(env, old, new)
+        env = self.environment(old); del env['LOCALAPPDATA']
+        with self.assertRaisesRegex(ValueError, 'Incomplete'): probe.relocate_fixture_environment(env, old, new)
+
+    def test_simulated_ps_cache_writes_only_clone_and_original_empty_dirs_are_guarded(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary); original = base / 'original'; original.mkdir(); (original / 'home').mkdir()
+            frozen_files, frozen_dirs = probe.snapshot([original]), probe.directory_snapshot([original])
+            clone = base / 'clone'; record = probe.clone_fixture(original, clone)
+            before = probe.tree_inventory(clone)
+            cache = clone / 'home/AppData/Local/Microsoft/Windows/PowerShell/StartupProfileData-NonInteractive'
+            cache.parent.mkdir(parents=True); cache.write_bytes(b'\0' * 64)
+            after = probe.tree_inventory(clone); changes = probe.tree_changes(before, after)
+            self.assertEqual(changes['added'][cache.relative_to(clone).as_posix()]['bytes'], 64)
+            self.assertEqual(changes['removed'], {}); self.assertEqual(changes['changed'], {})
+            self.assertEqual(probe.snapshot([original]), frozen_files)
+            self.assertEqual(probe.directory_snapshot([original]), frozen_dirs)
+            (original / 'unexpected-empty').mkdir()
+            self.assertEqual(probe.snapshot([original]), frozen_files)
+            self.assertNotEqual(probe.directory_snapshot([original]), frozen_dirs)
+            (original / 'unauthorized-cache').write_bytes(b'\0' * 64)
+            self.assertNotEqual(probe.snapshot([original]), frozen_files)
+
+    def test_all_clone_change_kinds_are_recorded_not_filtered_by_filename(self):
+        before = {'gone': {'kind': 'file', 'bytes': 1}, 'type': {'kind': 'directory'}, 'edited': {'kind': 'file', 'sha256': 'a'}}
+        after = {'new-empty-dir': {'kind': 'directory'}, 'type': {'kind': 'file', 'bytes': 2}, 'edited': {'kind': 'file', 'sha256': 'b'}}
+        changes = probe.tree_changes(before, after)
+        self.assertEqual(set(changes['added']), {'new-empty-dir'})
+        self.assertEqual(set(changes['removed']), {'gone'})
+        self.assertEqual(set(changes['changed']), {'type', 'edited'})
 
 
 class WorkflowTests(unittest.TestCase):
