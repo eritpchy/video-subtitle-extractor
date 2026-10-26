@@ -11,7 +11,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import zipfile
 
 HERE = Path(__file__).resolve().parents[1]
@@ -66,6 +66,46 @@ def rebuild():
 
 
 class FinalGateTests(unittest.TestCase):
+    def test_foreign_build_module_is_neither_called_nor_replaced(self):
+        trap = Mock(side_effect=AssertionError('foreign build must not run'))
+        foreign = SimpleNamespace(assert_distributable_record=trap)
+        private_foreign = SimpleNamespace(assert_distributable_record=trap)
+        with patch.dict(sys.modules, {'build': foreign, '_vse_windows_restorer_gate_build': private_foreign}):
+            gate.validate_build(record())
+            result = gate.combine(handoff(), [consumer(), consumer('windows-2025')], rebuild())
+            self.assertEqual(result['result'], 'passed')
+            bad = record(); bad['synthetic_space_fixture'] = True
+            with self.assertRaisesRegex(RuntimeError, 'Synthetic or unproven'): gate.validate_build(bad)
+            self.assertIs(sys.modules['build'], foreign)
+            self.assertIs(sys.modules['_vse_windows_restorer_gate_build'], private_foreign)
+        trap.assert_not_called()
+
+    def test_local_helpers_ignore_cwd_pythonpath_and_global_short_names(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for name in ('build', 'generate_metadata', 'source_bundle'):
+                (root / (name + '.py')).write_text('raise AssertionError("foreign import executed")\n')
+            code = '''import importlib.util, pathlib, sys, types
+spec = importlib.util.spec_from_file_location('exact_gate', sys.argv[1])
+gate = importlib.util.module_from_spec(spec); spec.loader.exec_module(gate)
+for name in ('build', 'generate_metadata', 'source_bundle'):
+    foreign = types.ModuleType(name)
+    sys.modules[name] = foreign
+    sys.modules['_vse_windows_restorer_gate_' + name] = foreign
+    loaded = gate.local_helper(name)
+    assert pathlib.Path(loaded.__file__).resolve() == gate.HERE / (name + '.py')
+    assert loaded is not foreign and sys.modules[name] is foreign
+    assert sys.modules['_vse_windows_restorer_gate_' + name] is foreign
+gate.local_helper('generate_metadata')._component('safe')
+gate.local_helper('source_bundle')._safe_member('safe/file.py')
+'''
+            result = subprocess.run([sys.executable, '-B', '-c', code, str(HERE / 'release_gate.py')], cwd=root,
+                env={**__import__('os').environ, 'PYTHONPATH': str(root)}, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for name in ('../build', 'os', 'zlib_build', 'build.py'):
+                with self.subTest(name=name), self.assertRaisesRegex(RuntimeError, 'Unknown restorer helper'):
+                    gate.local_helper(name)
+
     def test_different_rebuild_hash_is_truthfully_not_bit_identical(self):
         result = gate.combine(handoff(), [consumer(), consumer('windows-2025')], rebuild())
         self.assertEqual(result['result'], 'passed')
@@ -359,6 +399,17 @@ class SourceClosureTests(unittest.TestCase):
         help_run = subprocess.run([sys.executable, '-I', '-S', '-B', str(native / 'rebuild.py'), '--help'], cwd=self.root, capture_output=True)
         self.assertEqual(help_run.returncode, 0, help_run.stderr)
         source_bundle.verify_extracted_sources(root)
+
+    def test_source_extraction_uses_local_validators_despite_foreign_modules(self):
+        trap = Mock(side_effect=AssertionError('foreign source helper must not run'))
+        fake_metadata = SimpleNamespace(_component=trap)
+        fake_sources = SimpleNamespace(verify_extracted_sources=trap)
+        with patch.dict(sys.modules, {'generate_metadata': fake_metadata, 'source_bundle': fake_sources}):
+            _, root = self.companion()
+            self.assertTrue((root / 'source-manifest.json').is_file())
+            self.assertIs(sys.modules['generate_metadata'], fake_metadata)
+            self.assertIs(sys.modules['source_bundle'], fake_sources)
+        trap.assert_not_called()
 
     def test_generator_runs_from_extracted_closure_not_original_repository(self):
         sources, root = self.companion()

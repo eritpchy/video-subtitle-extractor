@@ -9,6 +9,7 @@ not signed attestations, client-Windows certification or GPU execution proof.
 from __future__ import annotations
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -28,6 +29,23 @@ SCENARIOS = {'clean-host-path', 'contaminated-host-environment'}
 RESERVE = 4 * 1024 ** 3
 MAX_JSON = 32 * 1024 ** 2
 MAX_SOURCE = 256 * 1024 ** 2
+
+
+def local_helper(name):
+    """Load only this directory's helpers, never a process-global short name.
+
+    Gate APIs also run in shared Python processes (e.g. with native OCR tests,
+    which have their own build.py). Do not consult or replace sys.modules['build']
+    or any private-name cache: each call executes the exact local source file.
+    The small allowlist prevents this helper becoming an arbitrary import API.
+    """
+    require(name in ('build', 'generate_metadata', 'source_bundle'), 'Unknown restorer helper')
+    path = plain(HERE / (name + '.py'))
+    spec = importlib.util.spec_from_file_location('_vse_windows_restorer_gate_' + name, path)
+    require(spec is not None and spec.loader is not None, 'Missing local restorer loader')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def sha(path):
@@ -157,7 +175,7 @@ def require_free(path, required):
 
 
 def validate_build(record):
-    import build
+    build = local_helper('build')
     build.assert_distributable_record(record)
     link = record.get('restricted_zlib', {}).get('final_link_map', {})
     require(link.get('required_inflate_symbols_present') is True
@@ -370,8 +388,8 @@ def consume(args):
 
 def extract_source(archive, output):
     """Extract only the hash-bound source companion, never the application ZIP."""
-    from generate_metadata import _component
-    from source_bundle import verify_extracted_sources
+    _component = local_helper('generate_metadata')._component
+    verify_extracted_sources = local_helper('source_bundle').verify_extracted_sources
     with zipfile.ZipFile(plain(archive)) as zipped:
         entries = zipped.infolist(); names = set(); total = 0
         require(0 < len(entries) <= 10000, 'Source companion entry bound exceeded')
@@ -414,7 +432,7 @@ def rebuild_source(args):
         with (work / 'rebuild.log').open('xb') as log:
             subprocess.run(command, cwd=work, stdout=log, stderr=subprocess.STDOUT, check=True)
         rebuilt = read_json(work / 'rebuilt/rebuild-record.json')
-        import build
+        build = local_helper('build')
         build.assert_distributable_record(rebuilt)
         require(rebuilt['original_exe_sha256'] == handoff['exe_sha256']
                 and sha(work / 'rebuilt/restore.exe') == rebuilt['exe_sha256'], 'Independent rebuild output hash mismatch')
@@ -424,7 +442,7 @@ def rebuild_source(args):
     checks = [('inputs_after', lambda: {'result': 'passed', 'handoff': load_handoff(
         args.handoff, args.handoff_sha256, args.distribution, args.manifest)[0]})]
     if extracted:
-        from source_bundle import verify_extracted_sources
+        verify_extracted_sources = local_helper('source_bundle').verify_extracted_sources
         checks.append(('source_after', lambda: verify_extracted_sources(source)))
     finalize_report(work / 'source-rebuild-report.json', report, failure, checks)
 
@@ -446,7 +464,7 @@ def combine(handoff, reports, rebuilt):
             and type(rebuilt.get('bit_identical_to_original')) is bool
             and rebuilt['bit_identical_to_original'] == (rebuilt['rebuilt_exe_sha256'] == handoff['exe_sha256']), 'Rebuild comparison is not factual')
     record = rebuilt.get('rebuild_record', {})
-    import build
+    build = local_helper('build')
     build.assert_distributable_record(record)
     link = record.get('restricted_zlib', {}).get('final_link_map', {})
     require(record.get('scope') == 'fixed-header-source-rebuild-not-client-certification'
