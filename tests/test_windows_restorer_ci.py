@@ -52,6 +52,37 @@ class DiagnosticContracts(unittest.TestCase):
         self.assertIn('**/*record.json', uploads)
         self.assertIn('**/fixture-source/', uploads)
 
+    def test_rename_probe_is_explicit_always_and_after_unchanged_native_step(self):
+        text = (ROOT / '.github/workflows/windows-restorer.yml').read_text()
+        native = text.split('      - name: Native static-runtime restore with real ZIP64 over 2 GiB\n', 1)[1].split('      - name:', 1)[0]
+        self.assertNotIn('--rename-probe-only', native)
+        self.assertNotIn('if: always()', native)
+        probe = text.split('      - name: Independent atomic rename API probe (never restoration acceptance)\n', 1)[1].split('      - name:', 1)[0]
+        self.assertIn('if: always()', probe)
+        self.assertIn('--rename-probe-only', probe)
+        self.assertIn('--work-directory build/restorer-rename --report-directory test-results/restorer-rename', probe)
+        self.assertLess(text.index('Native static-runtime restore'), text.index('Independent atomic rename API probe'))
+        self.assertLess(text.index('Independent atomic rename API probe'), text.index('Save diagnostic evidence only'))
+        uploads = text.split('uses: actions/upload-artifact@v4', 1)[1]
+        for path in ('test-results/restorer-rename/', 'build/restorer-rename/*.json',
+                     'build/restorer-rename/*.log', 'build/restorer-rename/*.map', 'build/restorer-rename/probe-source/'):
+            self.assertIn(path, uploads)
+        self.assertNotIn('continue-on-error', text)
+
+    def test_default_command_cannot_silently_select_probe_instead_of_large_native_gate(self):
+        work = Path('new-work')
+        command = ci.diagnostic_command(work)
+        self.assertEqual(Path(command[4]).name, 'windows_server_tests.py')
+        self.assertIn('--large', command)
+        probe = ci.diagnostic_command(work, rename_probe_only=True)
+        self.assertEqual(Path(probe[4]).name, 'run_rename_probe.py')
+        self.assertNotIn('--large', probe)
+        script = (ROOT / 'scripts/run_windows_restorer_ci.py').read_text()
+        self.assertIn("parser.add_argument('--rename-probe-only', action='store_true'", script)
+        self.assertIn("child.get('all_cases_collected') is not True", script)
+        self.assertIn("child.get('all_expectations_met') is not True", script)
+        self.assertIn('result.check_returncode()', script)
+
     def test_large_zip64_is_mandatory_and_toolchain_is_not_installed(self):
         text = (ROOT / 'scripts/run_windows_restorer_ci.py').read_text()
         self.assertIn("'--large'", text)

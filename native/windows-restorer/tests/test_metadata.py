@@ -31,37 +31,30 @@ metadata = module('restorer_metadata', HERE / 'generate_metadata.py')
 builder = module('restorer_builder', HERE / 'build.py')
 
 
-class TarHandoffSourceTests(unittest.TestCase):
+class FixedInflateSourceTests(unittest.TestCase):
     """Structural regression guards, not a substitute for real Server runs."""
-    def test_verified_seekable_handle_and_unicode_cwd_do_not_become_narrow_argv(self):
+    def test_verified_handle_and_fixed_unicode_names_never_use_a_subprocess(self):
         source = (HERE / 'restorer.cpp').read_text(encoding='utf-8')
-        body = source.split('void extract_with_system_tar(HANDLE verified_zip,', 1)[1].split('struct TreeLocks', 1)[0]
-        self.assertIn('rewind_file(verified_zip)', body)
-        self.assertIn('inheritable_duplicate(verified_zip)', body)
-        self.assertLess(body.index('rewind_file(verified_zip)'), body.index('inheritable_duplicate(verified_zip)'))
-        command = next(line for line in body.splitlines() if 'std::wstring command =' in line)
-        self.assertIn('-f -', command)
-        self.assertNotIn('-C', command)
-        self.assertNotIn('destination', command)
-        self.assertNotIn('zip', command)
-        self.assertIn('working_directory = native_path(destination)', body)
-        self.assertIn('environment.data(), working_directory.c_str(), &startup.StartupInfo', body)
-        self.assertIn('extract_with_system_tar(verified_zip.get(), extracted)', source)
+        body = source.split('void extract_fixed_ranges(HANDLE verified_zip,', 1)[1].split('struct TreeLocks', 1)[0]
+        for forbidden in ('CreateProcess', 'SetCurrentDirectory', 'tar.exe', 'ShellExecute', 'system('):
+            self.assertNotIn(forbidden, source)
+        for required in ('CREATE_NEW', 'FILE_FLAG_OPEN_REPARSE_POINT', 'SetFilePointerEx(verified_zip',
+                         'vse::inflate_exact', 'FlushFileBuffers', 'verify_file(output.get()',
+                         'directories.push_back(open_directory(path))'):
+            self.assertIn(required, body)
+        self.assertIn('extract_fixed_ranges(verified_zip.get(), extracted)', source)
         self.assertIn('auto extraction_directory = open_directory(extracted)', source)
         self.assertIn('verify_file(verified_zip.get(), bundle::archive_bytes, bundle::archive_sha256', source)
         self.assertIn('check_tree(extracted,', source)
 
-    def test_only_three_explicit_handles_inherit_and_job_still_precedes_execution(self):
+    def test_no_handle_inheritance_and_fixed_ranges_remain_bounded(self):
         source = (HERE / 'restorer.cpp').read_text(encoding='utf-8')
-        body = source.split('void extract_with_system_tar(HANDLE verified_zip,', 1)[1].split('struct TreeLocks', 1)[0]
-        self.assertIn('PROC_THREAD_ATTRIBUTE_HANDLE_LIST', source)
-        self.assertIn('std::array<HANDLE, 3> inherited{input.get(), output.get(), error.get()}', body)
-        self.assertIn('STARTF_USESTDHANDLES', body)
-        self.assertIn('EXTENDED_STARTUPINFO_PRESENT', body)
-        self.assertIn('JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE', body)
-        self.assertLess(body.index('AssignProcessToJobObject'), body.index('ResumeThread'))
-        self.assertIn('GetSystemDirectoryW', body)
-        self.assertIn('auto tar_lock = open_input(tar, true)', body)
+        self.assertNotIn('DuplicateHandle', source)
+        self.assertIn('entry.compressed_bytes > bundle::central_directory_offset - entry.data_offset', source)
+        self.assertIn('entry->data_offset < previous_end', source)
+        self.assertIn('expanded != bundle::uncompressed_bytes', source)
+        self.assertIn('hash.finish() != entry->sha256', source)
+        self.assertIn('rename->ReplaceIfExists = FALSE', source)
 
     def test_server_probe_keeps_four_argv_controls_and_unicode_long_cwd_gates(self):
         server = module('restorer_server_source_test', HERE / 'tests/windows_server_tests.py')
@@ -105,7 +98,9 @@ def fixture():
                         'sha256': 'a' * 64, 'uncompressed_bytes': 6, 'identity': {'platform': 'windows', 'arch': 'x64'}},
             'parts': [{'name': 'vse-test.zip.part001', 'index': 1, 'offset': 0, 'size': 2000000000, 'sha256': 'b' * 64},
                       {'name': 'vse-test.zip.part002', 'index': 2, 'offset': 2000000000, 'size': 1000000017, 'sha256': 'c' * 64}],
-            'validated_zip_entries': [{'name': 'vse-test/中文 &!%()/data.bin', 'size': 6, 'kind': 'file', 'sha256': 'd' * 64}]}
+            'validated_zip_entries': [{'name': 'vse-test/中文 &!%()/data.bin', 'size': 6, 'kind': 'file', 'sha256': 'd' * 64}],
+            'fixed_zip_index': {'schema': 1, 'source_archive_sha256': 'a' * 64, 'central_directory_offset': 3000000000,
+                                'files': [{'name': 'vse-test/中文 &!%()/data.bin', 'data_offset': 100, 'compressed_bytes': 6, 'method': 0}]}}
 
 
 class MetadataTests(unittest.TestCase):
@@ -357,7 +352,7 @@ class PeDependencyPolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'not established in PE'):
             self.inspect(data)
 
-    def fake_compile(self, loadconfig_text, *, flags=0x800):
+    def fake_compile(self, loadconfig_text, *, flags=0x800, environment=None):
         tools = self.root / 'tools'; tools.mkdir(exist_ok=True)
         for name in ('cl.exe', 'link.exe', 'dumpbin.exe'):
             (tools / name).write_bytes(b'unit tool provenance, not executable')
@@ -366,7 +361,12 @@ class PeDependencyPolicyTests(unittest.TestCase):
         library = self.root / 'libcmt.lib'; library.write_bytes(b'unit library provenance')
         output = self.root / 'output'; output.mkdir(exist_ok=True)
 
+        self.observed_compile_environments = []
+        def closure(*args):
+            self.observed_compile_environments.append(dict(args[-1]))
+            return [], {'actual_header_paths': []}
         def run(command, **kwargs):
+            self.observed_compile_environments.append(dict(kwargs['env']))
             if command[0] == str(tools / 'cl.exe'):
                 (output / 'restore.exe').write_bytes(synthetic_x64_pe(flags))
                 (output / 'source-dependencies.json').write_text(json.dumps({'Data': {'Includes': [str(include)]}}))
@@ -376,10 +376,13 @@ class PeDependencyPolicyTests(unittest.TestCase):
                     '/LOADCONFIG': loadconfig_text}[command[1]]
             return subprocess.CompletedProcess(command, 0, stdout=text)
 
-        with patch.object(builder, 'os', SimpleNamespace(name='nt', environ={}, fstat=os.fstat)), \
+        with patch.object(builder, 'os', SimpleNamespace(name='nt', environ=dict(environment or {}), fstat=os.fstat)), \
                 patch.object(builder.platform, 'machine', return_value='AMD64'), \
                 patch.object(builder.shutil, 'which', side_effect=lambda name: str(tools / name)), \
-                patch.object(builder.subprocess, 'run', side_effect=run):
+                patch.object(builder.subprocess, 'run', side_effect=run), \
+                patch.dict(sys.modules, {'zlib_build': SimpleNamespace(
+                    compile_closure=closure,
+                    inspect_link_map=lambda *a: {'synthetic_mock_not_native_proof': True}, verify_sources=lambda *a: None)}):
             return builder.compile_fixed(self.root, self.root, output)
 
     def test_compile_gate_ignores_singular_plural_and_localized_dumpbin_prose(self):
@@ -392,6 +395,17 @@ class PeDependencyPolicyTests(unittest.TestCase):
                 self.assertEqual((self.root / 'output/load-config.txt').read_text(), text)
                 self.assertTrue((self.root / 'output/pe-headers.txt').is_file())
                 self.assertTrue((self.root / 'output/imports.txt').is_file())
+
+    def test_closure_and_restorer_compile_drop_inherited_option_injection(self):
+        poison = {name: '/DUNREVIEWED /Fobad.obj gzwrite.obj' for name in ('CL', '_CL_', 'LINK', '_LINK_')}
+        environment = {**poison, 'INCLUDE': 'selected-sdk', 'LIB': 'selected-libraries'}
+        self.fake_compile('opaque text', environment=environment)
+        self.assertGreaterEqual(len(self.observed_compile_environments), 5)
+        for observed in self.observed_compile_environments:
+            self.assertTrue(set(poison).isdisjoint(observed))
+            self.assertEqual(observed['INCLUDE'], 'selected-sdk')
+            self.assertEqual(observed['LIB'], 'selected-libraries')
+        self.assertEqual(environment['CL'], poison['CL'])  # Parent process unchanged.
 
     def test_compile_gate_rejects_bad_binary_even_with_passing_dumpbin_text(self):
         with self.assertRaisesRegex(RuntimeError, 'not established in PE'):

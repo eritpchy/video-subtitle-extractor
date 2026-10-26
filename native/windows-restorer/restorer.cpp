@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 #include "core.hpp"
+#include "inflate_fixed.hpp"
 #include "bundle_metadata.hpp" // Generated only by generate_metadata.py.
 #pragma comment(lib, "bcrypt.lib")
 #pragma comment(lib, "advapi32.lib")
@@ -49,46 +50,6 @@ public:
 };
 struct LocalFreeDeleter { void operator()(void* value) const { if (value) LocalFree(value); } };
 using LocalMemory = std::unique_ptr<void, LocalFreeDeleter>;
-
-Handle inheritable_duplicate(HANDLE original) {
-    HANDLE duplicate = nullptr;
-    if (!DuplicateHandle(GetCurrentProcess(), original, GetCurrentProcess(), &duplicate,
-                         0, TRUE, DUPLICATE_SAME_ACCESS)) winfail(L"Cannot prepare explicit child handle");
-    return Handle(duplicate);
-}
-Handle child_output(DWORD standard) {
-    const HANDLE original = GetStdHandle(standard);
-    if (original && original != INVALID_HANDLE_VALUE) return inheritable_duplicate(original);
-    // A double-click may have no console. This fixed OS null device is never
-    // derived from a user path; it is not a general device-path allowance.
-    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
-    Handle output(CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                              &attributes, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
-    if (!output.valid()) winfail(L"Cannot prepare child diagnostic output");
-    return output;
-}
-class ChildAttributes {
-    std::vector<unsigned char> storage_;
-    LPPROC_THREAD_ATTRIBUTE_LIST list_ = nullptr;
-public:
-    ChildAttributes() {
-        SIZE_T bytes = 0;
-        if (InitializeProcThreadAttributeList(nullptr, 1, 0, &bytes) ||
-            GetLastError() != ERROR_INSUFFICIENT_BUFFER || !bytes) winfail(L"Cannot size child handle allowlist");
-        storage_.resize(bytes);
-        auto list = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage_.data());
-        if (!InitializeProcThreadAttributeList(list, 1, 0, &bytes)) winfail(L"Cannot initialize child handle allowlist");
-        list_ = list;
-    }
-    ~ChildAttributes() { if (list_) DeleteProcThreadAttributeList(list_); }
-    ChildAttributes(const ChildAttributes&) = delete;
-    ChildAttributes& operator=(const ChildAttributes&) = delete;
-    LPPROC_THREAD_ATTRIBUTE_LIST get() const { return list_; }
-    void allow(std::array<HANDLE, 3>& handles) {
-        if (!UpdateProcThreadAttribute(list_, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-                                       handles.data(), handles.size() * sizeof(HANDLE), nullptr, nullptr)) winfail(L"Cannot restrict child handle inheritance");
-    }
-};
 
 // Prefix only already validated internal paths. User-supplied device/UNC
 // namespace paths never reach this conversion; no LongPathsEnabled change.
@@ -262,59 +223,80 @@ void check_space(const std::wstring& parent) {
     const auto needed = vse::required_space(bundle::archive_bytes, bundle::uncompressed_bytes, bundle::entry_count);
     if (available.QuadPart < needed) fail(L"Insufficient free space: need at least " + std::to_wstring(needed) + L" bytes in the destination (downloaded parts are additional).");
 }
-void extract_with_system_tar(HANDLE verified_zip, const std::wstring& destination) {
-    wchar_t directory[MAX_PATH + 1]{};
-    const UINT count = GetSystemDirectoryW(directory, MAX_PATH + 1);
-    if (!count || count > MAX_PATH) winfail(L"Cannot locate Windows system directory");
-    auto system = pin_directory(directory);
-    const std::wstring tar = vse::join(system.path, L"tar.exe");
-    auto tar_lock = open_input(tar, true); // Existence, regular file and no mutation while launching.
-    wchar_t windows[MAX_PATH + 1]{};
-    const UINT win_count = GetWindowsDirectoryW(windows, MAX_PATH + 1);
-    if (!win_count || win_count > MAX_PATH) winfail(L"Cannot locate Windows directory");
-    // Do not inherit TAR_OPTIONS, PATH, Python/Conda variables or shell hooks.
-    std::wstring environment = std::wstring(L"SystemRoot=") + windows;
-    environment.push_back(L'\0'); environment += std::wstring(L"WINDIR=") + windows;
-    environment.push_back(L'\0'); environment.push_back(L'\0');
-    // Some OS bsdtar versions use narrow argv even when the caller uses
-    // CreateProcessW. Do not send either Unicode path through that conversion.
-    // stdin is a seekable duplicate of the SAME fully verified, read-only,
-    // no-write/no-delete ZIP handle, not a pipe or a pathname reopened by tar.
-    rewind_file(verified_zip);
-    auto input = inheritable_duplicate(verified_zip);
-    auto output = child_output(STD_OUTPUT_HANDLE), error = child_output(STD_ERROR_HANDLE);
-    std::array<HANDLE, 3> inherited{input.get(), output.get(), error.get()};
-    ChildAttributes attributes; attributes.allow(inherited);
-    const auto working_directory = native_path(destination);
-    std::wstring command = vse::quote_arg(tar) + L" -x --no-same-owner --no-same-permissions -f -";
-    Handle job(CreateJobObjectW(nullptr, nullptr));
-    if (!job.valid()) winfail(L"Cannot create extraction job");
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-    if (!SetInformationJobObject(job.get(), JobObjectExtendedLimitInformation, &limits, sizeof(limits))) winfail(L"Cannot bind extraction lifetime");
-    STARTUPINFOEXW startup{}; startup.StartupInfo.cb = sizeof(startup);
-    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startup.StartupInfo.hStdInput = input.get(); startup.StartupInfo.hStdOutput = output.get();
-    startup.StartupInfo.hStdError = error.get(); startup.lpAttributeList = attributes.get();
-    PROCESS_INFORMATION process{};
-    // The empty private target itself (still ancestor-locked by the caller) is
-    // the UTF-16 cwd. No ASCII staging relocation or -C argument is involved.
-    // Only the above three handles inherit; no source/ancestor locks escape.
-    if (!CreateProcessW(tar.c_str(), command.data(), nullptr, nullptr, TRUE,
-                        CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
-                        environment.data(), working_directory.c_str(), &startup.StartupInfo, &process)) winfail(L"Cannot start system tar; no dependency will be downloaded");
-    Handle process_handle(process.hProcess), thread_handle(process.hThread);
-    if (!AssignProcessToJobObject(job.get(), process_handle.get())) { TerminateProcess(process_handle.get(), 1); winfail(L"Cannot bind system tar to restoration job"); }
-    if (ResumeThread(thread_handle.get()) == static_cast<DWORD>(-1)) winfail(L"Cannot resume system tar");
-    for (;;) {
-        check_cancel();
-        const DWORD wait = WaitForSingleObject(process_handle.get(), 100);
-        if (wait == WAIT_OBJECT_0) break;
-        if (wait != WAIT_TIMEOUT) winfail(L"Cannot wait for system tar");
+void extract_fixed_ranges(HANDLE verified_zip, const std::wstring& destination) {
+    if (bundle::uncompressed_bytes > 1024ULL * 1024 * 1024 * 1024 ||
+        bundle::central_directory_offset >= bundle::archive_bytes ||
+        file_size(verified_zip) != bundle::archive_bytes) fail(L"Invalid fixed archive bounds");
+    std::vector<const vse::Entry*> ranges;
+    std::uint64_t expanded = 0;
+    for (const auto& entry : bundle::entries) {
+        if (!vse::absolute_local_path_ok(vse::join(destination, entry.name))) fail(L"Invalid compiled entry path");
+        if (entry.directory) {
+            if (entry.bytes || entry.data_offset || entry.compressed_bytes || entry.method) fail(L"Invalid compiled directory");
+            continue;
+        }
+        expanded = vse::checked_add(expanded, entry.bytes);
+        if (!vse::sha256_text_ok(entry.sha256) || entry.data_offset < 30 ||
+            entry.data_offset > bundle::central_directory_offset ||
+            entry.compressed_bytes > bundle::central_directory_offset - entry.data_offset ||
+            (entry.method != 0 && entry.method != 8) ||
+            (entry.method == 0 && entry.compressed_bytes != entry.bytes)) fail(L"Invalid compiled compressed range");
+        ranges.push_back(&entry);
     }
-    DWORD status = 1;
-    if (!GetExitCodeProcess(process_handle.get(), &status)) winfail(L"Cannot inspect system tar result");
-    if (status != 0) fail(L"System tar could not extract the verified ZIP (exit " + std::to_wstring(status) + L"); nothing was published.");
+    if (expanded != bundle::uncompressed_bytes) fail(L"Fixed output bound mismatch");
+    std::sort(ranges.begin(), ranges.end(), [](const vse::Entry* a, const vse::Entry* b) { return a->data_offset < b->data_offset; });
+    std::uint64_t previous_end = 0;
+    for (const auto entry : ranges) {
+        if (entry->data_offset < previous_end) fail(L"Fixed compressed ranges overlap");
+        previous_end = vse::checked_add(entry->data_offset, entry->compressed_bytes);
+    }
+    // Only compiled names are used. Pin each directory before descendants;
+    // no library controls paths, changes cwd, or launches a subprocess.
+    std::vector<Handle> directories;
+    for (const auto& entry : bundle::entries) if (entry.directory) {
+        check_cancel();
+        const auto path = vse::join(destination, entry.name);
+        if (!CreateDirectoryW(native_path(path).c_str(), nullptr)) winfail(L"Cannot create new fixed output directory");
+        directories.push_back(open_directory(path));
+    }
+    std::vector<unsigned char> buffer(1024 * 1024);
+    for (const auto entry : ranges) {
+        check_cancel();
+        const auto path = vse::join(destination, entry->name);
+        Handle output(CreateFileW(native_path(path).c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                                 FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+        if (!output.valid()) winfail(L"Cannot exclusively create fixed output file");
+        const auto attributes = info(output.get());
+        if (attributes.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY || attributes.nNumberOfLinks != 1) fail(L"Unexpected output identity");
+        if (entry->data_offset > static_cast<std::uint64_t>((std::numeric_limits<LONGLONG>::max)())) fail(L"Fixed offset exceeds Windows signed seek bounds");
+        LARGE_INTEGER offset{}; offset.QuadPart = static_cast<LONGLONG>(entry->data_offset);
+        if (!SetFilePointerEx(verified_zip, offset, nullptr, FILE_BEGIN)) winfail(L"Cannot seek verified archive range");
+        Sha256 hash;
+        std::uint64_t written = 0;
+        auto read = [&](unsigned char* data, unsigned count) -> unsigned {
+            DWORD got = 0;
+            if (!ReadFile(verified_zip, data, count, &got, nullptr)) winfail(L"Cannot read fixed compressed range");
+            check_cancel(); return static_cast<unsigned>(got);
+        };
+        auto write = [&](const unsigned char* data, unsigned count) {
+            if (count > entry->bytes - written) fail(L"Fixed output exceeded accepted size");
+            write_chunk(output.get(), data, count); hash.add(data, count); written += count;
+        };
+        if (entry->method == 0) {
+            std::uint64_t left = entry->compressed_bytes;
+            while (left) {
+                const auto take = static_cast<unsigned>((std::min)(left, static_cast<std::uint64_t>(buffer.size())));
+                if (read(buffer.data(), take) != take) fail(L"Truncated STORE range");
+                write(buffer.data(), take); left -= take;
+            }
+        } else {
+            try { vse::inflate_exact(entry->compressed_bytes, entry->bytes, read, write, [] { check_cancel(); }); }
+            catch (const std::runtime_error&) { fail(L"Fixed DEFLATE range is invalid, truncated, oversized or has trailing input"); }
+        }
+        if (written != entry->bytes || hash.finish() != entry->sha256) fail(L"Restored file SHA256/size differs from accepted inventory");
+        if (!FlushFileBuffers(output.get())) winfail(L"Cannot flush restored file");
+        verify_file(output.get(), entry->bytes, entry->sha256, buffer);
+    }
 }
 struct TreeLocks { std::vector<Handle> directories; std::vector<Handle> files; };
 void check_tree(const std::wstring& root, const std::wstring& relative, std::map<std::wstring, const vse::Entry*>& expected,
@@ -393,7 +375,7 @@ void restore(const std::wstring& source_path, const std::wstring& destination_pa
     if (!FlushFileBuffers(output.get())) winfail(L"Cannot flush reconstructed ZIP");
     verify_file(output.get(), bundle::archive_bytes, bundle::archive_sha256, buffer); // Re-read actual disk bytes.
     // Reopen read-only under the private stage after verification. Re-verify on
-    // the retained no-write/no-delete handle before giving tar a stdin duplicate.
+    // the retained no-write/no-delete handle before reading fixed compressed ranges.
     output.reset();
     auto verified_zip = open_input(temporary_zip);
     const auto owned_zip_identity = info(verified_zip.get());
@@ -401,7 +383,7 @@ void restore(const std::wstring& source_path, const std::wstring& destination_pa
     const auto extracted = vse::join(incomplete, L"payload");
     if (!CreateDirectoryW(native_path(extracted).c_str(), nullptr)) winfail(L"Cannot create empty extraction directory");
     auto extraction_directory = open_directory(extracted);
-    extract_with_system_tar(verified_zip.get(), extracted);
+    extract_fixed_ranges(verified_zip.get(), extracted);
     const auto restored = vse::join(extracted, bundle::root_name);
     auto restored_root = open_directory(restored, true);
     std::map<std::wstring, const vse::Entry*> expected;

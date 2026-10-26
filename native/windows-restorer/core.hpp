@@ -75,5 +75,8 @@ inline bool sha256_text_ok(const std::string& text) {
     return std::all_of(text.begin(), text.end(), [](char ch) { return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f'); });
 }
 struct Part { const wchar_t* name; std::uint64_t bytes; const char* sha256; };
-struct Entry { const wchar_t* name; std::uint64_t bytes; bool directory; const char* sha256; };
+struct Entry {
+    const wchar_t* name; std::uint64_t bytes; bool directory; const char* sha256;
+    std::uint64_t data_offset; std::uint64_t compressed_bytes; unsigned method;
+};
 } // namespace vse

@@ -1,0 +1,2 @@
+# Preserve exact reviewed upstream hashes even when Windows core.autocrlf=true.
+zlib-1.3.2/* -text

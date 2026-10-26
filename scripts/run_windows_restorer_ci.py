@@ -58,14 +58,26 @@ def select_installed(tools, instances, runtime, report):
     return environment
 
 
+def diagnostic_command(work_directory, *, rename_probe_only=False):
+    # Default remains the mandatory large native-restorer gate. Probe is an
+    # explicitly separate diagnostic, never an alias for successful restoration.
+    script = 'run_rename_probe.py' if rename_probe_only else 'windows_server_tests.py'
+    command = [sys.executable, '-B', '-X', 'utf8', str(ROOT / 'native/windows-restorer/tests' / script),
+               '--work-directory', str(work_directory.absolute())]
+    if not rename_probe_only: command.append('--large')
+    return command
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--work-directory', required=True, type=Path)
     parser.add_argument('--report-directory', required=True, type=Path)
     parser.add_argument('--runner', required=True, choices=['windows-2022', 'windows-2025'])
+    parser.add_argument('--rename-probe-only', action='store_true', help='Separate synthetic rename API observations; never substitutes for native restoration')
     args = parser.parse_args(argv)
     args.report_directory.mkdir(parents=True, exist_ok=False)
-    report = {'schema': 1, 'scope': 'synthetic-restorer-diagnostic-not-package-acceptance',
+    report = {'schema': 1, 'scope': ('synthetic-rename-diagnostic-not-restoration-acceptance' if args.rename_probe_only else 'synthetic-restorer-diagnostic-not-package-acceptance'),
+              'rename_probe_only': args.rename_probe_only,
               'result': 'failed', 'runner_label': args.runner, 'actual_os': platform.platform(),
               'commit': os.environ.get('GITHUB_SHA'), 'run_id': os.environ.get('GITHUB_RUN_ID'),
               'run_attempt': os.environ.get('GITHUB_RUN_ATTEMPT'), 'image_os': os.environ.get('ImageOS'),
@@ -90,21 +102,28 @@ def main(argv=None):
         ], encoding='utf-8', timeout=60))
         environment = select_installed(tools, instances, runtime, report)
         args.work_directory.parent.mkdir(parents=True, exist_ok=True)
-        command = [sys.executable, '-B', '-X', 'utf8', str(ROOT / 'native/windows-restorer/tests/windows_server_tests.py'),
-                   '--work-directory', str(args.work_directory.absolute()), '--large']
+        command = diagnostic_command(args.work_directory, rename_probe_only=args.rename_probe_only)
         report['command'] = command
         env = {key.upper(): value for key, value in os.environ.items()}
         env.update(environment)
         env['VSLANG'] = '1033'  # Stable build-side compiler diagnostics, not customer UI.
-        with (args.report_directory / 'native-tests.log').open('wb') as output:
+        log_name = 'rename-tests.log' if args.rename_probe_only else 'native-tests.log'
+        with (args.report_directory / log_name).open('wb') as output:
             result = subprocess.run(command, env=env, stdout=output, stderr=subprocess.STDOUT,
                                     timeout=65 * 60, check=False)
         report['returncode'] = result.returncode
         result.check_returncode()
-        child = json.loads((args.work_directory / 'native-restorer-report.json').read_text(encoding='utf-8'))
-        if (child.get('result') != 'passed' or child.get('large_requested') is not True or
-                child.get('scope') != 'synthetic-native-restorer-tests-not-package-acceptance'):
-            raise RuntimeError('Complete large native diagnostic receipt missing')
+        if args.rename_probe_only:
+            child = json.loads((args.work_directory / 'rename-probe-report.json').read_text(encoding='utf-8'))
+            if (child.get('result') != 'expectations-met' or child.get('all_cases_collected') is not True or
+                    child.get('all_expectations_met') is not True or len(child.get('cases', [])) != 48 or
+                    child.get('scope') != 'synthetic-rename-api-observations-not-restoration-acceptance'):
+                raise RuntimeError('Complete independent rename probe receipt missing')
+        else:
+            child = json.loads((args.work_directory / 'native-restorer-report.json').read_text(encoding='utf-8'))
+            if (child.get('result') != 'passed' or child.get('large_requested') is not True or
+                    child.get('scope') != 'synthetic-native-restorer-tests-not-package-acceptance'):
+                raise RuntimeError('Complete large native diagnostic receipt missing')
         report['result'] = 'passed'
     except Exception as error:
         report['reason'] = str(error)

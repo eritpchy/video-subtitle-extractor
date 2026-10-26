@@ -46,6 +46,11 @@ jobs:
         run: >-
           python scripts/run_windows_restorer_ci.py --runner ${{ matrix.os }}
           --work-directory build/restorer-native --report-directory test-results/restorer-server
+      - name: Independent atomic rename API probe (never restoration acceptance)
+        if: always()
+        run: >-
+          python scripts/run_windows_restorer_ci.py --runner ${{ matrix.os }} --rename-probe-only
+          --work-directory build/restorer-rename --report-directory test-results/restorer-rename
       - name: Save diagnostic evidence only (never EXEs, volumes or release assets)
         if: always()
         uses: actions/upload-artifact@v4
@@ -54,6 +59,11 @@ jobs:
           path: |
             test-results/restorer-safety.xml
             test-results/restorer-server/
+            test-results/restorer-rename/
+            build/restorer-rename/*.log
+            build/restorer-rename/*.json
+            build/restorer-rename/*.map
+            build/restorer-rename/probe-source/
             build/restorer-native/**/*.log
             build/restorer-native/**/*.txt
             build/restorer-native/**/*report.json

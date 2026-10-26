@@ -34,6 +34,7 @@ def copy_notices(source: Path, output: Path):
         shutil.copyfile(path, output / row['name'])
     shutil.copyfile(ROOT / 'LICENSE', output / 'Apache-2.0.txt')
     shutil.copyfile(HERE / 'THIRD_PARTY_NOTICES.txt', output / 'THIRD_PARTY_NOTICES.txt')
+    shutil.copyfile(HERE / 'third_party/zlib-1.3.2/LICENSE', output / 'zlib-LICENSE.txt')
 
 
 def assert_static_imports(output: str) -> list[str]:
@@ -165,15 +166,24 @@ def compile_fixed(source_directory: Path, header_directory: Path, output: Path) 
     if not all((compiler, linker, dumpbin)): raise RuntimeError('Run in the x64 MSVC Native Tools build environment')
     if Path(compiler).resolve().parent != Path(linker).resolve().parent: raise RuntimeError('Compiler/linker tools are from different directories')
     process_environment = {**os.environ, 'VSLANG': '1033'}  # Child diagnostics only; never changes OS/user settings.
+    for option_variable in ('CL', '_CL_', 'LINK', '_LINK_'):
+        process_environment.pop(option_variable, None)  # Fixed command, not inherited compiler/linker switches.
     executable = output / 'restore.exe'
+    sys.path.insert(0, str(source_directory))
+    import zlib_build
+    zlib_objects, zlib_record = zlib_build.compile_closure(source_directory, output, compiler, dumpbin, process_environment)
+    link_map = output / 'link-map.txt'
     dependencies_path = output / 'source-dependencies.json'
     command = [compiler, '/nologo', '/Bv', '/std:c++17', '/EHsc', '/MT', '/O1', '/Os', '/W4', '/WX', '/utf-8', '/bigobj', '/GS', '/guard:cf', '/Brepro',
                '/sourceDependencies', str(dependencies_path), '/DUNICODE', '/D_UNICODE', '/D_WIN32_WINNT=0x0A00',
-               f'/I{source_directory}', f'/I{header_directory}', str(source_directory / 'restorer.cpp'),
-               f'/Fo{output / "restorer.obj"}', f'/Fe{executable}', '/link', '/VERBOSE:LIB', '/INCREMENTAL:NO', '/DYNAMICBASE', '/NXCOMPAT', '/HIGHENTROPYVA', '/DEPENDENTLOADFLAG:0x800',
+               '/DZ_SOLO', '/DNO_GZIP', f'/I{source_directory}', f'/I{header_directory}', str(source_directory / 'restorer.cpp'),
+               *[str(path) for path in zlib_objects],
+               f'/Fo{output / "restorer.obj"}', f'/Fe{executable}', '/link', f'/MAP:{link_map}', '/VERBOSE:LIB', '/INCREMENTAL:NO', '/DYNAMICBASE', '/NXCOMPAT', '/HIGHENTROPYVA', '/DEPENDENTLOADFLAG:0x800',
                '/MACHINE:X64', '/SUBSYSTEM:CONSOLE', '/MANIFEST:EMBED', "/MANIFESTUAC:level='asInvoker' uiAccess='false'"]
     built = subprocess.run(command, cwd=output, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding='utf-8', errors='replace', env=process_environment)
     (output / 'compiler.log').write_text(built.stdout, encoding='utf-8'); built.check_returncode()
+    zlib_record['final_link_map'] = zlib_build.inspect_link_map(link_map)
+    zlib_build.verify_sources(source_directory)
     dependencies = subprocess.run([dumpbin, '/DEPENDENTS', str(executable)], check=True, capture_output=True, text=True, env=process_environment).stdout
     imports = assert_static_imports(dependencies)
     (output / 'imports.txt').write_text(dependencies, encoding='utf-8')
@@ -187,7 +197,7 @@ def compile_fixed(source_directory: Path, header_directory: Path, output: Path) 
     if not includes or any(not isinstance(name, str) for name in includes): raise RuntimeError('Actual compiler header dependencies unavailable')
     # /sourceDependencies lists the headers actually consumed, not guessed SDK
     # paths from environment labels. /VERBOSE:LIB supplies resolved library paths.
-    include_records = [tool_record(Path(name)) for name in sorted(set(includes))]
+    include_records = [tool_record(Path(name)) for name in sorted(set(includes) | set(zlib_record['actual_header_paths']))]
     libraries = sorted(set(re.findall(r'^\s*Searching\s+(.+?\.lib):\s*$', built.stdout, re.MULTILINE | re.IGNORECASE)))
     if not libraries: raise RuntimeError('Actual linker library provenance unavailable; inspect compiler.log')
     library_records = [tool_record(Path(name)) for name in libraries]
@@ -198,6 +208,7 @@ def compile_fixed(source_directory: Path, header_directory: Path, output: Path) 
                  'actual_sdk_headers': sdk_headers, 'environment_labels_only': {name: os.environ.get(name) for name in ('VCToolsVersion', 'WindowsSDKVersion', 'WindowsSdkDir')},
                  'python': {'version': sys.version, 'executable': tool_record(Path(sys.executable))}}
     return {'command': command, 'toolchain': toolchain, 'imports': imports, 'pe_dependency_policy': pe_policy,
+            'restricted_zlib': zlib_record,
             'exe_sha256': digest(executable), 'exe_bytes': executable.stat().st_size,
             'bit_identical_rebuild_verified': False}
 

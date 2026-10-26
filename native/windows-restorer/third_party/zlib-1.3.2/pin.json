@@ -1,0 +1,90 @@
+{
+  "build_macros": [
+    "Z_SOLO",
+    "NO_GZIP"
+  ],
+  "compiled_sources": [
+    "inflate.c",
+    "inftrees.c",
+    "inffast.c",
+    "adler32.c",
+    "zutil.c"
+  ],
+  "files": {
+    "LICENSE": {
+      "bytes": 1002,
+      "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+    },
+    "README": {
+      "bytes": 5291,
+      "sha256": "4026d921213bb2e311d8d42b44ef53361c102d5d45ae32f93f8e52eaee8d068f"
+    },
+    "adler32.c": {
+      "bytes": 4964,
+      "sha256": "9cd1443a24ff2a3053961695bd432035c58347386a420d3388232376ebabe211"
+    },
+    "inffast.c": {
+      "bytes": 12982,
+      "sha256": "f96787a11bb7131ffd2221fb40db27f6a5a1dfb12f59c0bc388807010749c34a"
+    },
+    "inffast.h": {
+      "bytes": 422,
+      "sha256": "05cc5dc9ff1da7b8b52a4bd8bda0d8a5c236a2f39efe84b941516ea13857e6c5"
+    },
+    "inffixed.h": {
+      "bytes": 5968,
+      "sha256": "fd7c4b1dbdacb283421d0675744aaecda44e840e183b5131448bac94564f6adb"
+    },
+    "inflate.c": {
+      "bytes": 52247,
+      "sha256": "90221ea7d762e7044057f6ad5013e969086c6ba3d3051716b7aa786d7a6362ec"
+    },
+    "inflate.h": {
+      "bytes": 6683,
+      "sha256": "e6a43bd0e24ab2cf5fa1dca630859e9a2f6a721f033f75faf179f5c0299e4fe2"
+    },
+    "inftrees.c": {
+      "bytes": 16672,
+      "sha256": "f7ee9ce5925fc9d1579c76e574feed85f5ca4ccddc446a7795578854bbc65743"
+    },
+    "inftrees.h": {
+      "bytes": 3003,
+      "sha256": "d3a7ea301d8ec514823d052a2e42af4636bc81a0cf07052f526030f208068fb8"
+    },
+    "zconf.h": {
+      "bytes": 16955,
+      "sha256": "cb7c2c84211473b4699223edd363d3207b43b9578e739b5bf638f42204ea6e0f"
+    },
+    "zlib.h": {
+      "bytes": 103848,
+      "sha256": "818667d6ab6a37fe7469cb06a7f0cb2c2cb2f2c948a03e5accf1a4a74bf3020a"
+    },
+    "zutil.c": {
+      "bytes": 7454,
+      "sha256": "1279908a15580224a2c1f377555ffdd150327fed71801aa77fc35978dcb741c8"
+    },
+    "zutil.h": {
+      "bytes": 8512,
+      "sha256": "a12243cc6d338ffad0c8e3500fbc05bc7fdcdc25a469393b1c2f7e5df307fff3"
+    }
+  },
+  "gpg_signature_verified": false,
+  "known_security_scope": {
+    "CVE-2026-85091": {
+      "affected_source": "gzwrite.c",
+      "assessment": "Not compiled or linked in this restricted inflate source closure; verify each actual build. This is not a claim that all zlib 1.3.2 code or unknown risks are safe.",
+      "upstream_fix": "https://github.com/madler/zlib/commit/df84af25dc1942490e1d1c899a07619152a46148",
+      "upstream_issue": "https://github.com/madler/zlib/issues/1310"
+    }
+  },
+  "name": "zlib",
+  "schema": 1,
+  "source_modifications": false,
+  "upstream_archive_bytes": 1502830,
+  "upstream_archive_sha256": "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16",
+  "upstream_commit": "da607da739fa6047df13e66a2af6b8bec7c2a498",
+  "upstream_repository": "https://github.com/madler/zlib",
+  "upstream_tag": "v1.3.2",
+  "upstream_url": "https://zlib.net/zlib-1.3.2.tar.gz",
+  "version": "1.3.2"
+}

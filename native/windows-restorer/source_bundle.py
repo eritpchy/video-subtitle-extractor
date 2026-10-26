@@ -11,16 +11,25 @@ import zipfile
 SOURCE_PATHS = (
     'LICENSE', 'native/ocr/vc-runtime-manifest.json',
     'native/windows-restorer/restorer.cpp', 'native/windows-restorer/core.hpp',
+    'native/windows-restorer/inflate_fixed.hpp', 'native/windows-restorer/fixed_index.py',
+    'native/windows-restorer/inspect_zip_layout.py', 'native/windows-restorer/zlib_build.py',
+    'native/windows-restorer/third_party/.gitattributes',
     'native/windows-restorer/build.py', 'native/windows-restorer/generate_metadata.py',
     'native/windows-restorer/source_bundle.py', 'native/windows-restorer/rebuild.py',
     'native/windows-restorer/README.md', 'native/windows-restorer/THIRD_PARTY_NOTICES.txt',
     'native/windows-restorer/tests/core_test.cpp', 'native/windows-restorer/tests/test_metadata.py',
     'native/windows-restorer/tests/test_source_bundle.py', 'native/windows-restorer/tests/windows_server_tests.py',
+    'native/windows-restorer/tests/test_zip_layout.py',
+    'native/windows-restorer/tests/test_fixed_inflate.py', 'native/windows-restorer/tests/inflate_driver.cpp',
+    'native/windows-restorer/tests/rename_probe.cpp', 'native/windows-restorer/tests/run_rename_probe.py',
+    'native/windows-restorer/tests/test_rename_probe.py',
     'scripts/release_volume_transport.py', 'scripts/release_guard.py',
     'scripts/release_profiles.py', 'scripts/package_release.py',
     'scripts/bundle_bootstrap.py', 'scripts/runtime_dependencies.py',
     'tests/test_release_volume_transport.py',
-)
+) + tuple('native/windows-restorer/third_party/zlib-1.3.2/' + name for name in (
+    'pin.json', 'LICENSE', 'README', 'inflate.c', 'inftrees.c', 'inffast.c', 'adler32.c', 'zutil.c',
+    'zlib.h', 'zconf.h', 'zutil.h', 'inflate.h', 'inftrees.h', 'inffast.h', 'inffixed.h'))
 
 
 def digest(data: bytes) -> str: return hashlib.sha256(data).hexdigest()
@@ -61,14 +70,14 @@ def create_source_bundle(destination: Path, *, sources: dict[str, bytes], genera
                          notices: dict[str, bytes], build_record: dict, transport_manifest: bytes) -> dict:
     """Write a new allowlisted source ZIP; no obj/exe/SDK/Python environment."""
     if set(sources) != set(SOURCE_PATHS): raise ValueError('Source snapshot is incomplete or has unexpected files')
-    if set(notices) != {'license.docx', 'license-2015-2022.docx', 'Apache-2.0.txt', 'THIRD_PARTY_NOTICES.txt'}:
+    if set(notices) != {'license.docx', 'license-2015-2022.docx', 'Apache-2.0.txt', 'THIRD_PARTY_NOTICES.txt', 'zlib-LICENSE.txt'}:
         raise ValueError('Required original license notices are missing')
     files = dict(sources)
     files['generated/bundle_metadata.hpp'] = generated_header
     files['evidence/original-build-record.json'] = (json.dumps(build_record, indent=2, ensure_ascii=True) + '\n').encode()
     files['evidence/transport-manifest.json'] = transport_manifest
     files.update({f'notices/{name}': data for name, data in notices.items()})
-    files['REBUILD.md'] = b'''# Exact-source companion\n\nThis ZIP contains the precise sources and fixed header used by the original\nbuild, not just a GitHub link. It does not include object files, an SDK/compiler,\nor a Python environment. Microsoft notices are preserved unchanged.\n\nExtract on a Windows x64 build host with an appropriately licensed MSVC/SDK and\nPython 3.12+ (stdlib only for the fixed-header rebuild). From the extracted root:\n\n    python native/windows-restorer/rebuild.py --source-root . --output D:\\rebuild --acknowledge-redistribution-license\n\nThe script verifies every accompanying source/header/notice hash before building\nwith the fixed header. This path does not regenerate acceptance metadata or need\nthe original large ZIP. The original transport manifest, all generator sources\nand their local import dependencies are also included for audit/regeneration.\nRegenerating the header requires the separately supplied exact volume/receipt\nassets and any dependency explicitly recorded by the original build.\n\nRebuildable is NOT a claim of bit-identical output. Compiler/SDK/library versions,\npaths and linker behavior can change bytes. Original toolchain binaries and\nactual included SDK/header/library hashes are recorded, not redistributed.\nA rebuild records its binary hash and whether it actually equals the original.\nA clean Git commit and a dirty/untracked snapshot are distinguished explicitly.\n\nThis source companion is required alongside the restorer; it is not a substitute\nfor native Server validation and grants no publication or GPU-certification right.\n'''
+    files['REBUILD.md'] = b'''# Exact-source companion\n\nThis ZIP contains the precise sources and fixed header used by the original\nbuild, not just a GitHub link. It does not include object files, an SDK/compiler,\nor a Python environment. Microsoft and zlib notices are preserved unchanged.\nThe exact official restricted zlib sources, pin hashes and source-selection policy\nare included; build compilation and final link-map checks exclude gzwrite,\ndeflate, crc32 and archive APIs. No dependency is downloaded during rebuilding.\n\nExtract on a Windows x64 build host with an appropriately licensed MSVC/SDK and\nPython 3.12+ (stdlib only for the fixed-header rebuild). From the extracted root:\n\n    python native/windows-restorer/rebuild.py --source-root . --output D:\\rebuild --acknowledge-redistribution-license\n\nThe script verifies every accompanying source/header/notice hash before building\nwith the fixed header. This path does not regenerate acceptance metadata or need\nthe original large ZIP. The original transport manifest, all generator sources\nand their local import dependencies are also included for audit/regeneration.\nRegenerating the header requires the separately supplied exact volume/receipt\nassets and any dependency explicitly recorded by the original build.\n\nRebuildable is NOT a claim of bit-identical output. Compiler/SDK/library versions,\npaths and linker behavior can change bytes. Original toolchain binaries and\nactual included SDK/header/library hashes are recorded, not redistributed.\nA rebuild records its binary hash and whether it actually equals the original.\nA clean Git commit and a dirty/untracked snapshot are distinguished explicitly.\n\nThis source companion is required alongside the restorer; it is not a substitute\nfor native Server validation and grants no publication or GPU-certification right.\n'''
     manifest = {'schema': 1, 'kind': 'vse-native-restorer-exact-source', 'git': build_record['git'],
                 'original_exe_sha256': build_record['exe_sha256'],
                 'bit_identical_rebuild_verified': False,

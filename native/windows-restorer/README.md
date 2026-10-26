@@ -12,11 +12,12 @@ ordered volumes. Download that EXE and every matching `.zip.partNNN` into one
 ordinary local directory; double-clicking restores the original top-level
 package directory there. It does not launch the extracted application.
 
-The customer needs no Python, PowerShell script, VC installer, CUDA Toolkit,
-new archive program or downloaded dependency. `/MT` statically links the C/C++
-runtime. A supported Windows OS with its existing `System32\tar.exe` and enough
-local disk space is required; missing tar is a hard failure, never an install or
-download. This is **not** Windows 10/11 or real-GPU certification.
+The candidate needs no customer Python, PowerShell, VC installer, CUDA Toolkit,
+archive program or downloaded dependency. `/MT` statically links the C/C++ runtime.
+The explicitly authorized **Server-diagnostic-only** revision uses pinned official
+zlib 1.3.2's restricted raw-inflate source closure, not system tar. It is **not**
+Windows 10/11, real-package restoration or real-GPU certification. Prior positive
+restoration gates failed; neither this source change nor offline tests waive them.
 
 ## Fixed identity and data flow
 
@@ -27,7 +28,12 @@ download. This is **not** Windows 10/11 or real-GPU certification.
 2. `generate_metadata.py` calls `verify_transport(..., include_entries=True)`.
    It generates a C++ header containing immutable volume names/sizes/SHA256,
    whole-ZIP size/SHA256, original identity, and every member path/type/size/SHA256
-   (including `bundle-manifest.json`). Implicit directories are added. Filenames
+   (including `bundle-manifest.json`). `fixed_index.py` additionally rehashes the
+   complete joined original ZIP before/after bounded header inspection. It checks
+   ZIP32/64 local/central headers, descriptors, offsets, gaps/overlaps and exact
+   inventory agreement, then embeds each file's fixed data offset, compressed
+   size and STORE/DEFLATE method. Unsupported formats fail instead of guessing.
+   Implicit directories are added. Filenames
    become UTF-16 **integer arrays**, never raw JSON interpolated into source.
    There is no production fixture/skip-validation option.
 3. The customer EXE never parses a supplied JSON/checksum to decide what to
@@ -36,17 +42,14 @@ download. This is **not** Windows 10/11 or real-GPU certification.
    back. After reopening it with a retained read-only/no-write/no-delete handle,
    its full hash is checked again before extraction. Offsets and sizes are
    unsigned 64-bit; no entire part or ZIP is allocated in RAM.
-4. Only the verified ZIP is passed to the OS tar via `CreateProcessW`. A seekable,
-   read-only duplicate of the retained verified ZIP handle becomes stdin after
-   rewinding. `tar -f -` therefore cannot reopen a lossy/changed archive pathname.
-   The private, ancestor-locked Unicode destination is supplied directly as the
-   UTF-16 `lpCurrentDirectory`, not a narrow `-C` argument or an ASCII relocation.
-   `STARTUPINFOEXW` explicitly permits only stdin/stdout/stderr duplicates to
-   inherit; no source/ancestor locks or unrelated handles inherit. Its exact
-   executable is derived from `GetSystemDirectoryW`, not PATH or `%SystemRoot%`.
-   Arguments use the Microsoft C argv quote grammar, never `cmd.exe` or a shell.
-   The environment is minimal (no TAR_OPTIONS/Python/Conda contamination). A
-   kill-on-close job binds tar lifetime to the restorer, including abrupt death.
+4. Only that retained verified ZIP handle supplies immutable compiled ranges.
+   STORE copies exact bounded bytes; DEFLATE uses `inflateInit2(-15)` with fixed
+   input/output limits, 1-MiB buffers and bounded allocation. Truncation, invalid
+   blocks, trailing input, wrong output size or SHA fail closed. No runtime ZIP
+   parser, filename decoder, archive library, child process or current-directory
+   change exists. Win32 wide APIs exclusively create compiled paths and pin each
+   directory before its descendants. Every file is SHA-checked while writing,
+   flushed, and read/hash-checked again from its output handle.
 5. Every actual extracted entry is checked against the fixed table. Extra,
    missing, wrong-type, reparse, hard-linked, wrong-size or wrong-hash outputs
    fail. Only then does a same-volume `FileRenameInfo` with `ReplaceIfExists=FALSE`
@@ -75,21 +78,17 @@ not the build directory's mutable manifest.
   handles and allowed. They are not confused with an archive member alias.
 * Internal I/O uses a controlled extended-length path prefix **only after**
   validating a normal drive-absolute path; arbitrary user device syntax is not
-  accepted. System tar receives an internal extended Unicode cwd through the
-  Win32 process API, but **no archive/destination path in its arguments**.
-  An OS-reported extended module path from `GetModuleFileNameW` is safely
+  accepted. An OS-reported extended module path from `GetModuleFileNameW` is
   converted to an ordinary drive path before the same checks; this does not
   permit user-supplied device paths. Actual >260-character EXE placement still
-  requires native coverage. Individual
-  components are bounded to 255 UTF-16 units and full paths to 32,700. No registry
-  or `LongPathsEnabled` policy is readjusted. Actual tar long-path behavior is a
-  required native gate, not assumed from a small fixture. Real current CUDA
-  inventories have members at least 191 characters long before the parent and
-  staging path; therefore a MAX_PATH-only implementation would be insufficient.
-  Windows documents limitations for process creation with a cwd beyond
-  `MAX_PATH`; the separate >260-character destination-cwd gate remains mandatory
-  and may still fail independently of Unicode or deep archive-member handling.
-  Do not change registry policy or relocate to an ASCII folder to waive a gate.
+  requires native coverage. Individual components are bounded to 255 UTF-16
+  units and full paths to 32,700. No registry or `LongPathsEnabled` policy is
+  changed. Real CUDA inventories have members at least 191 characters long
+  before the parent/staging paths, so MAX_PATH-only support is insufficient.
+  The new extractor does not create a process or set a cwd, but actual Unicode,
+  >260-character member and >260-character destination restoration remain
+  mandatory Server gates. The separate observed atomic-rename error 206 is
+  **unresolved**; it is not attributed to tar or fixed by changing extraction.
 * A random `.vse-incomplete-...` directory is atomically created with an ACL for
   the current user and SYSTEM. No existing tree is reused. Preflight requires
   free space for merged ZIP + extracted bytes + 64 KiB per inventory entry +
@@ -127,14 +126,18 @@ python native/windows-restorer/build.py --manifest D:\transport\NAME.zip.transpo
 
 `--output` must be new. The notice flag is the distributor's assertion of
 applicable existing rights, **not** automated license acceptance. Both existing
-pinned Microsoft notices plus the existing Apache LICENSE are copied unchanged;
+pinned Microsoft notices, existing Apache LICENSE and upstream zlib LICENSE are copied unchanged;
 see `THIRD_PARTY_NOTICES.txt`. No dependency or license download is performed.
 The compiler uses `/MT /O1 /Os /GS /guard:cf /W4 /WX /bigobj`; the linker embeds
 `asInvoker`, ASLR, DEP, x64 and `/DEPENDENTLOADFLAG:0x800` (System32-only
 static-import search) settings; `/LOADCONFIG` verifies that import-search flag. `dumpbin` checks imports contain only
 allowed system DLLs, rejecting VCRUNTIME/MSVCP/UCRT/Python imports. Compiler log,
 imports, PE headers, generated metadata and a hash-bound build record remain for
-review. A successful build explicitly says **not client-certified**.
+review. `zlib_build.py` verifies every upstream file against the pinned official
+source hash, compiles only five C files with `Z_SOLO`/`NO_GZIP`, and records every
+object's actual symbols and source dependencies. The final link map must contain
+raw-inflate entry points and exclude gzip/deflate/crc/archive API symbols. A
+successful build explicitly says **not client-certified**.
 
 Only `OUTPUT/distribution/` is the reviewable distribution set: `restore.exe`,
 `restorer-source.zip`, `build-record.json` and the original `notices/`. The outer
@@ -146,7 +149,7 @@ and notices are required companions.
 `create_source_bundle` and `verify_extracted_sources` APIs. Its explicit allowlist
 contains the exact C++ sources, generator/build/rebuild tools, their local
 transport/guard/profile/bootstrap/runtime-dependency source closure, tests,
-Apache LICENSE and notice pins. The source ZIP adds the **fixed generated
+Apache LICENSE, exact restricted zlib sources/license/pin and notice pins. The source ZIP adds the **fixed generated
 header**, original transport metadata, original build record and unchanged
 Microsoft notices. Every member has a size/SHA256 manifest. Missing, changed,
 extra or symlinked source files fail before rebuilding; no `.obj`, DLL, compiler,
@@ -199,7 +202,10 @@ g++ -std=c++17 -Wall -Wextra -Werror -pedantic native/windows-restorer/tests/cor
 
 These cover metadata injection/UTF-16, strict validator integration and changed
 parts, 64-bit sizes, path rejection, correct argv quoting, space arithmetic and
-static-import filtering. **Linux success is not Windows execution evidence.**
+static-import filtering. A portable compiler test actually links the five C
+files and tests valid/empty/multibuffer streams, truncated/invalid/trailing input,
+size bounds and cancellation; source/index/link-map drift tests fail closed.
+**Linux success is not Windows execution evidence.**
 
 ## Required independent Server 2022 + 2025 gate
 
@@ -219,7 +225,11 @@ runs Unicode/space/`&!%()` paths, poisoned PATH/SystemRoot/TAR_OPTIONS, a >260
 character ZIP member and a >260-character Unicode destination cwd,
 missing/modified/swapped/hardlinked volumes, ancestor
 junctions, UNC/device syntax, existing-user-data protection, insufficient-space
-preflight, a real >2-GiB stored ZIP/ZIP64 member, and abrupt interruption. Without
+preflight, a real >2-GiB stored ZIP/ZIP64 member, >2-GiB expanded DEFLATE,
+invalid raw DEFLATE, wrong expected payload SHA, and abrupt interruption during
+both merging and observed fixed-inflate output. The legacy first-case name still
+mentions `clean-system-tar` only for continuity with prior recorded failures;
+this candidate's restoration path never invokes tar. Without
 `--large` the report is only partial; it must not satisfy the release gate.
 
 Before the restorer cases, `system-tar-probe-report.json` records the actual
@@ -240,25 +250,91 @@ nonzero. Negative tests verify the shared source parts are pristine before and
 after temporary mutations, preventing one failed cleanup from manufacturing
 later apparent passes. Compilation/prerequisite failures remain explicit.
 
-### Unicode handoff failure being investigated
+### Preserved actual failures and independent rename probe
 
-The preserved Server 2022/2025 run `40268712355` at `810d07d` failed to open the
-verified archive in the first Unicode case; nothing was published, and the large
-ZIP64 case was not reached. The original evidence ZIP is 291,288 bytes, SHA256
+Run `40268712355` at `810d07d` failed opening the Unicode archive; ZIP64 was not
+reached. Evidence: 291,288 bytes, SHA256
 `1789ff849364ca5d8332aa69be2014293bff018835b2d45b928d6b37af3f5f3f`.
-Both stderr files show `??`, but that alone cannot distinguish lossy argument
-conversion from lossy diagnostics or establish extended-prefix compatibility.
-The upstream [Windows bsdtar Unicode argv issue](https://github.com/libarchive/libarchive/issues/2092)
-supports investigating narrow argv handling; it is **not proof of the unique
-cause in these exact OS binaries**. The handle/cwd handoff is an unvalidated fix
-candidate until both Servers pass the unchanged gates and new path probes.
+Run `40271075684` at `29837c7` collected all 14 cases on both Servers. Ten negative
+cases passed; **all four positive restoration cases failed**. Its evidence ZIP
+is 1,155,631 bytes, SHA256
+`efa72f8fb431181a87d15949fe12c6963c7ceee07d58bc43ef5899e4687bf68d`:
+
+* Unicode member and real >2-GiB ZIP64: tar 3.8.9 reported unreadable member names,
+  including the ASCII external-path control. ACP was 1252, console 65001; those
+  are distinct. A seekable stdin handle did not solve member-name conversion.
+* Deep >260-character member: extraction and SHA verification completed, but
+  atomic `FileRenameInfo` publication failed with error **206**.
+* >260-character Unicode cwd: `CreateProcessW` failed with error **267**, matching
+  the documented process-cwd limitation. It did not reach tar extraction.
+
+These are separate observed failures. Neither an upstream issue nor a lossy
+console string alone establishes a unique cause. Historical tar controls are
+retained, not retried as a production solution. No locale, security policy or
+ASCII payload/path workaround is used.
+
+The synthetic rename probe runs independently in the same selected MSVC host:
+
+```text
+python native/windows-restorer/tests/run_rename_probe.py --work-directory D:\fresh-rename-diagnostic
+```
+
+It collects 48 independent cases: old exact-sized relative-name buffer, explicit
+NUL-terminated relative name, and NUL-terminated extended absolute name with
+NULL RootDirectory; crossed with ASCII/Unicode, short/deep child, short/long
+parent and absent/existing target. Each process records API structure offsets,
+file identities, marker contents, error and unchanged existing-target sentinel.
+No case failure/crash hides later cases; any unmet expectation keeps the total
+nonzero. The **current Microsoft Win32 contract permits a relative RootDirectory**;
+no NT-only assumption is used. The old production rename stays unchanged until
+Server evidence isolates the failure and a reviewed fix passes no-overwrite gates.
+
+### Restricted zlib provenance and known-risk boundary
+
+Only unchanged official zlib 1.3.2 files are included, release commit
+`da607da739fa6047df13e66a2af6b8bec7c2a498`. The official tar is 1,502,830 bytes,
+SHA256 `bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16`.
+[Official release](https://zlib.net/) and
+[tag](https://github.com/madler/zlib/releases/tag/v1.3.2) identify the source;
+`third_party/zlib-1.3.2/pin.json` binds every selected file. GPG verification was
+not performed and is not claimed. License/source notices accompany all builds.
+
+`inflate.c`, `inftrees.c`, `inffast.c`, `adler32.c`, `zutil.c` plus their seven
+headers are compiled with `Z_SOLO` and `NO_GZIP`; no gzip writer, compressor,
+CRC implementation or general archive parser is present.
+[Known issue 1310 / CVE-2026-85091](https://github.com/madler/zlib/issues/1310)
+affects `gzwrite.c`; the
+[maintainer fix](https://github.com/madler/zlib/commit/df84af25dc1942490e1d1c899a07619152a46148)
+changes that excluded file. Source and symbol-closure checks must demonstrate
+exclusion on the **actual MSVC binary**. This is not a claim that the complete
+1.3.2 release is vulnerability-free or that raw inflate has no unknown risks.
+Use is currently authorized only for Server diagnostics, not customer release.
+
+Read-only inspection of both accepted original CUDA ZIPs was actually run on
+Mac with the frozen inspector (SHA256
+`5497ced512459ad11006504162df27f0f143a3b83abf212ae6b79544a287b113`).
+The returned evidence ZIP is 4,822,594 bytes, SHA256
+`fb9e35aed7dfad356aee1050beb2437c45482ea229515f78344154a209c91e3c`:
+
+| Original ZIP | Original bytes / SHA256 | Entries / offset-only ZIP64 |
+| --- | --- | --- |
+| CUDA 11.8 | 2,985,596,865 / `c13df10802ae5839c77c67bdab8b17f4b24a8e04ae3b11b90b3fd119681e97db` | 17,142 / 7,306 |
+| CUDA 12.6 | 2,696,583,328 / `0e38570aa000082c9824c2fb51ba317ce72e8f0463619c08d28398a4faf177ac` | 17,113 / 6,975 |
+
+Every member uses DEFLATE with flags 0, no local ZIP64 size or data descriptor,
+and no unsupported compression feature. Both whole-file SHA checks before/after
+inspection matched the original accepted hashes. CPython legitimately promoted
+central `version_needed` 20→45 when only the offset needed ZIP64; the narrow
+exception verifies precisely that structure, not arbitrary header disagreement.
+This proves observed **layout compatibility only**: no payload was decompressed,
+no native restorer ran, and no GPU/client certification is inferred.
 
 The separate gate must ALSO establish these integration facts, not merely
 summarize the synthetic report:
 
 1. Build against each **successful real CUDA ZIP** and original receipt at the
    exact intended commit; record original ZIP SHA, volume SHA, embedded-header
-   SHA, restorer SHA, tar file version/hash and MSVC version. Failed/stale jobs
+   SHA, restorer SHA, zlib source/object/link-map evidence and MSVC version. Failed/stale jobs
    are ineligible, irrespective of a synthetic fixture pass.
 2. Restore both real 11.8/12.6 packages in Unicode/special-character parent
    directories on each Server. Independently compare every restored file with
@@ -271,12 +347,12 @@ summarize the synthetic report:
 4. Inject a junction at an output ancestor and, in a controlled private fixture,
    an internal reparse/extra file before verification; prove rejection and an
    external sentinel unchanged. Check held ancestor rename and part write/delete
-   attempts fail during restoration. Test Ctrl+C and forced death **during tar**,
-   not only during initial merging, and verify no orphan extractor/success tree.
+   attempts fail during restoration. Test Ctrl+C and forced death **during extraction**,
+   not only during initial merging, and verify no success tree.
 5. Test a genuinely capacity-limited destination (a pre-provisioned CI test disk,
    not a modified customer machine) to exercise write-time disk exhaustion after
-   preflight. Verify missing/unusable system tar fails without network/install;
-   do not rename/remove a host's real tar to simulate this. Any platform setup
+   preflight. The fixed extractor needs no system tar and must never download a
+   dependency. Any platform setup
    needing new authority stays a documented blocker rather than a bypass.
 6. Record loaded-library provenance under contaminated environment and prove no
    customer VC/Python dependency. Neither Server has a real GPU acceptance claim.
@@ -287,7 +363,5 @@ of this transport. This directory does not schedule, publish or modify CI.
 API contracts: [CreateFile sharing and reparse flags](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew),
 [FILE_RENAME_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info),
 [Microsoft argv parsing](https://learn.microsoft.com/en-us/cpp/c-language/parsing-c-command-line-arguments).
-The new handoff also follows [CreateProcessW and explicit inherited-handle lists](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw)
-and [redirected standard handles](https://learn.microsoft.com/en-us/windows/win32/procthread/creating-a-child-process-with-redirected-input-and-output).
-The [documented cwd length limitation](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-setcurrentdirectory)
-is not treated as resolved by extended file-I/O support.
+The historical [documented cwd length limitation](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-setcurrentdirectory)
+is not confused with extended file-I/O support or the separate rename gate.

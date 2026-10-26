@@ -68,6 +68,32 @@ def render_verified(document: dict) -> str:
     archive_size = _integer(archive['size'], 'ZIP size', minimum=1)
     archive_sha = _digest(archive['sha256'])
     unpacked = _integer(archive['uncompressed_bytes'], 'uncompressed size')
+    if unpacked > 1024 ** 4:
+        raise ValueError('Expanded archive exceeds the fixed one-TiB safety bound')
+    index = document['fixed_zip_index']
+    if (set(index) != {'schema', 'source_archive_sha256', 'central_directory_offset', 'files'}
+            or index['schema'] != 1 or index['source_archive_sha256'] != archive_sha):
+        raise ValueError('Fixed index does not bind this accepted ZIP')
+    central_offset = _integer(index['central_directory_offset'], 'central directory offset', minimum=1)
+    if central_offset >= archive_size:
+        raise ValueError('Fixed index exceeds archive bounds')
+    ranges = {}
+    for row in index['files']:
+        if set(row) != {'name', 'data_offset', 'compressed_bytes', 'method'}:
+            raise ValueError('Unexpected fixed-index fields')
+        if row['name'] in ranges:
+            raise ValueError('Duplicate fixed-index file')
+        offset = _integer(row['data_offset'], 'data offset', minimum=30)
+        compressed = _integer(row['compressed_bytes'], 'compressed size')
+        method = _integer(row['method'], 'compression method')
+        if method not in (0, 8) or offset > central_offset or compressed > central_offset - offset:
+            raise ValueError('Unsupported or out-of-bounds fixed range')
+        ranges[row['name']] = (offset, compressed, method)
+    last_end = 0
+    for offset, compressed, _ in sorted(ranges.values()):
+        if offset < last_end:
+            raise ValueError('Fixed compressed ranges overlap')
+        last_end = offset + compressed
     entries = {}
     for entry in document['validated_zip_entries']:
         name = entry['name'].rstrip('/')
@@ -85,6 +111,12 @@ def render_verified(document: dict) -> str:
         if kind == 'directory' and size != 0:
             raise ValueError('Nonempty directory entry')
         key = '\\'.join(components)
+        if kind == 'file':
+            if name not in ranges:
+                raise ValueError('Missing fixed-index file')
+            _, compressed, method = ranges[name]
+            if method == 0 and compressed != size:
+                raise ValueError('STORE size mismatch')
         row = (size, kind == 'directory', digest)
         if key in entries and entries[key] != row:
             raise ValueError('Conflicting member')
@@ -102,6 +134,8 @@ def render_verified(document: dict) -> str:
         raise ValueError('Windows filename collision')
     if sum(row[0] for row in entries.values()) != unpacked:
         raise ValueError('Uncompressed inventory mismatch')
+    if set(ranges) != {entry['name'] for entry in document['validated_zip_entries'] if entry['kind'] == 'file'}:
+        raise ValueError('Fixed index has extra or missing files')
     parts = document['parts']
     if not isinstance(parts, list) or not parts:
         raise ValueError('Missing parts')
@@ -111,6 +145,7 @@ def render_verified(document: dict) -> str:
              f'inline constexpr std::uint64_t archive_bytes = {archive_size}ULL;',
              f'inline constexpr char archive_sha256[] = "{archive_sha}";',
              f'inline constexpr std::uint64_t uncompressed_bytes = {unpacked}ULL;',
+             f'inline constexpr std::uint64_t central_directory_offset = {central_offset}ULL;',
              f'inline constexpr std::uint64_t entry_count = {len(entries)}ULL;',
              f'inline constexpr std::size_t max_entry_path = {max(len(name.encode("utf-16-le")) // 2 for name in entries)};',
              _wide('accepted_identity', json.dumps(identity, ensure_ascii=True, sort_keys=True, separators=(',', ':')))]
@@ -132,8 +167,9 @@ def render_verified(document: dict) -> str:
     for index, (name, _) in enumerate(ordered):
         lines.append(_wide(f'entry_name_{index}', name))
     lines.append('inline constexpr vse::Entry entries[] = {')
-    for index, (_, (size, directory, digest)) in enumerate(ordered):
-        lines.append(f'{{entry_name_{index}, {size}ULL, {str(directory).lower()}, "{digest}"}},')
+    for index, (name, (size, directory, digest)) in enumerate(ordered):
+        offset, compressed, method = (0, 0, 0) if directory else ranges[name.replace('\\', '/')]
+        lines.append(f'{{entry_name_{index}, {size}ULL, {str(directory).lower()}, "{digest}", {offset}ULL, {compressed}ULL, {method}U}},')
     lines += ['};', '} // namespace bundle', '']
     return '\n'.join(lines)
 
@@ -146,6 +182,8 @@ def main() -> int:
     args = parser.parse_args()
     from scripts.release_volume_transport import verify_transport
     document = verify_transport(args.manifest, include_entries=True)
+    from fixed_index import from_verified_transport
+    document['fixed_zip_index'] = from_verified_transport(args.manifest, document)
     source = render_verified(document)
     # Never overwrite generated metadata silently; use a fresh build directory.
     with args.output.open('x', encoding='ascii', newline='\n') as handle:

@@ -136,7 +136,7 @@ def tar_path_probe(work):
     return report
 
 
-def fixture(directory: Path, *, large=False, impossible_space=False, deep=False):
+def fixture(directory: Path, *, large=False, impossible_space=False, deep=False, deflated=False, invalid_deflate=False, wrong_payload_hash=False):
     directory.mkdir()
     root = 'vse-restorer-SYNTHETIC-NOT-A-RELEASE'
     archive = directory / (root + '.zip')
@@ -144,11 +144,19 @@ def fixture(directory: Path, *, large=False, impossible_space=False, deep=False)
     content_hash = hashlib.sha256(); chunk = b'\0' * (1024 * 1024)
     relative = ('deep-' + 'x' * 64 + '/') * 5 + 'data.bin' if deep else 'payload 中文 &!%()/data.bin'
     name = root + '/' + relative
-    with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_STORED, allowZip64=True) as output:
+    with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED if deflated else zipfile.ZIP_STORED, allowZip64=True) as output:
         with output.open(name, 'w', force_zip64=True) as handle:
             left = size
             while left:
                 value = chunk[:min(left, len(chunk))]; handle.write(value); content_hash.update(value); left -= len(value)
+    if invalid_deflate:
+        if not deflated: raise ValueError('Corruption fixture requires raw DEFLATE')
+        # Synthetic only: valid fixed ZIP structure/whole-byte hashes but invalid
+        # DEFLATE BTYPE=3. No accepted production receipt is fabricated here.
+        with archive.open('r+b') as stream:
+            header = stream.read(30)
+            name_bytes, extra_bytes = struct.unpack_from('<HH', header, 26)
+            stream.seek(30 + name_bytes + extra_bytes); stream.write(b'\x07')
     parts = []; offset = 0
     with archive.open('rb') as source:
         while offset < archive.stat().st_size:
@@ -164,8 +172,11 @@ def fixture(directory: Path, *, large=False, impossible_space=False, deep=False)
                 'archive': {'name': archive.name, 'root': root, 'size': archive.stat().st_size,
                             'sha256': sha(archive), 'uncompressed_bytes': size,
                             'identity': {'platform': 'windows', 'arch': 'x64', 'synthetic_fixture': True}},
-                'parts': parts, 'validated_zip_entries': [{'name': name, 'kind': 'file', 'size': size, 'sha256': content_hash.hexdigest()}]}
+                'parts': parts, 'validated_zip_entries': [{'name': name, 'kind': 'file', 'size': size, 'sha256': '0' * 64 if wrong_payload_hash else content_hash.hexdigest()}]}
     metadata = load('test_metadata_renderer', HERE / 'generate_metadata.py')
+    indexer = load('synthetic_fixed_index', HERE / 'fixed_index.py')
+    with archive.open('rb') as stream:
+        document['fixed_zip_index'] = indexer.inspect_stream(stream, document)
     # Test-only fixture generation. Production build.py has no bypass and calls
     # verify_transport. This deliberately carries no release receipt.
     header = metadata.render_verified(document)
@@ -216,6 +227,40 @@ def junction(path: Path, target: Path):
         buffer = ctypes.create_string_buffer(data); returned = wintypes.DWORD()
         if not kernel.DeviceIoControl(handle, 0x000900A4, buffer, len(data), None, 0, ctypes.byref(returned), None):
             raise ctypes.WinError(ctypes.get_last_error())
+    finally: kernel.CloseHandle(handle)
+
+
+def visible_output_size(path):
+    """Query live attributes without data access or changing the writer's locks.
+
+    CreateFile's documented share rules exclude attribute-only access; directory
+    search metadata alone may be stale while the exclusive writer is active.
+    https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
+    """
+    class Information(ctypes.Structure):
+        _fields_ = [('attributes', wintypes.DWORD), ('creation', wintypes.FILETIME),
+                    ('access', wintypes.FILETIME), ('write', wintypes.FILETIME),
+                    ('volume', wintypes.DWORD), ('size_high', wintypes.DWORD),
+                    ('size_low', wintypes.DWORD), ('links', wintypes.DWORD),
+                    ('index_high', wintypes.DWORD), ('index_low', wintypes.DWORD)]
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                                  wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.GetFileInformationByHandle.argtypes = [wintypes.HANDLE, ctypes.POINTER(Information)]
+    kernel.GetFileInformationByHandle.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    # FILE_READ_ATTRIBUTES, all sharing, OPEN_EXISTING, OPEN_REPARSE_POINT.
+    handle = kernel.CreateFileW('\\\\?\\' + str(path), 0x80, 7, None, 3, 0x00200000, None)
+    if handle == ctypes.c_void_p(-1).value:
+        error = ctypes.get_last_error()
+        if error in (2, 3): return None
+        raise ctypes.WinError(error)
+    try:
+        value = Information()
+        if not kernel.GetFileInformationByHandle(handle, ctypes.byref(value)): raise ctypes.WinError(ctypes.get_last_error())
+        if value.attributes & (0x10 | 0x400) or value.links != 1: raise AssertionError('Output became directory/reparse/hardlink')
+        return (value.size_high << 32) | value.size_low
     finally: kernel.CloseHandle(handle)
 
 
@@ -294,6 +339,20 @@ def main():
             deep_relative = deep['validated_zip_entries'][0]['name'].split('/', 1)[1]
             deep_result = run_case(deep_exe, deep_source, work / 'deep-result', True, 'over-260-character-member-path', records, relative=deep_relative)
             assert sha(Path("\\\\?\\" + str(deep_result / deep_relative))) == deep['validated_zip_entries'][0]['sha256']
+        with collect_case(records, 'unicode-fixed-deflate-stream'):
+            compressed_source = work / 'deflate-source 中文 &!%()'
+            compressed = fixture(compressed_source, deflated=True)
+            compressed_exe = compile_fixture(compressed_source)
+            restored = run_case(compressed_exe, compressed_source, work / 'deflate-result 中文 &!%()', True,
+                                'unicode-fixed-deflate-stream', records)
+            assert sha(restored / 'payload 中文 &!%()/data.bin') == compressed['validated_zip_entries'][0]['sha256']
+        for label, options in (('invalid-deflate-never-published', {'invalid_deflate': True}),
+                               ('fixed-payload-sha-mismatch-never-published', {'wrong_payload_hash': True})):
+            with collect_case(records, label):
+                bad_source = work / (label + '-source')
+                fixture(bad_source, deflated=True, **options)
+                bad_exe = compile_fixture(bad_source)
+                run_case(bad_exe, bad_source, work / (label + '-result'), False, label, records)
         parts = [source / row['name'] for row in document['parts']]
         with collect_case(records, 'missing-volume'):
             assert_pristine_parts(source, document)
@@ -348,7 +407,7 @@ def main():
             with collect_case(records, 'interruption-no-success-directory'):
                 if big_exe is None: raise RuntimeError('Blocked: large fixture did not compile')
                 # This is interruption during merging, NOT proof of interruption
-                # during tar; that separate integration gate remains mandatory.
+                # during extraction; that separate gate is exercised below.
                 interrupted = work / 'interrupted'; interrupted.mkdir()
                 process = subprocess.Popen([str(big_exe), '--source', str(large_source), '--destination-parent', str(interrupted), '--non-interactive'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 try:
@@ -359,6 +418,37 @@ def main():
                     assert not (interrupted / big['archive']['root']).exists()
                 finally:
                     if process.poll() is None: process.kill(); process.wait(timeout=30)
+        if args.large:
+            expanded_exe = None
+            with collect_case(records, 'real-over-2gib-expanded-deflate'):
+                expanded_source = work / 'expanded-deflate-source'
+                expanded = fixture(expanded_source, large=True, deflated=True)
+                expanded_exe = compile_fixture(expanded_source)
+                recovered = run_case(expanded_exe, expanded_source, work / 'expanded-deflate-result', True,
+                                     'real-over-2gib-expanded-deflate', records)
+                assert sha(recovered / 'payload 中文 &!%()/data.bin') == expanded['validated_zip_entries'][0]['sha256']
+            with collect_case(records, 'interruption-during-fixed-inflate-no-success'):
+                if expanded_exe is None: raise RuntimeError('Blocked: large DEFLATE fixture did not compile')
+                interrupted = work / 'interrupted-inflate'; interrupted.mkdir()
+                command = [str(expanded_exe), '--source', str(expanded_source), '--destination-parent', str(interrupted), '--non-interactive']
+                with (interrupted / 'stdout.log').open('xb') as out, (interrupted / 'stderr.log').open('xb') as err:
+                    process = subprocess.Popen(command, stdout=out, stderr=err)
+                    try:
+                        deadline, observed = time.monotonic() + 120, None
+                        while process.poll() is None and time.monotonic() < deadline:
+                            for stage in interrupted.glob('.vse-incomplete-*'):
+                                candidate = stage / 'payload' / expanded['validated_zip_entries'][0]['name']
+                                count = visible_output_size(candidate)
+                                if count is not None and 0 < count < expanded['archive']['uncompressed_bytes']: observed = count
+                            if observed is not None: break
+                            time.sleep(.005)
+                        assert process.poll() is None and observed is not None, 'Did not observe active inflate output; not a valid interruption test'
+                        process.kill(); process.wait(timeout=30)
+                        assert not (interrupted / expanded['archive']['root']).exists()
+                        records.append({'case': 'interruption-during-fixed-inflate-no-success', 'passed': True,
+                                        'observed_partial_expanded_bytes': observed, 'exit_code': process.returncode})
+                    finally:
+                        if process.poll() is None: process.kill(); process.wait(timeout=30)
         with collect_case(records, 'over-260-unicode-destination-cwd'):
             assert_pristine_parts(source, document)
             long_parent = work / 'parent 中文 Ω &!%()' / ('x' * 120) / ('y' * 120)
