@@ -35,7 +35,10 @@ jobs:
           ref: ${{ github.sha }}
           path: diagnostic
           persist-credentials: false
-          sparse-checkout: diagnostics/macos-focus-activation
+          sparse-checkout: |
+            diagnostics/macos-focus-activation
+            .github/workflows/macos-focus-activation-diagnostic.yml
+          sparse-checkout-cone-mode: false
       - name: Check out the unchanged original test source
         uses: actions/checkout@v4
         with:

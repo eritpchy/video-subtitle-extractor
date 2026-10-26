@@ -70,6 +70,39 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD']), head)
             self.assertEqual(subprocess.check_output(['git', '-C', str(root), 'status', '--porcelain']), b'')
 
+    def test_real_driver_sparse_checkout_contains_all_offline_contract_inputs(self):
+        driver = self.workflow()['jobs']['focus']['steps'][0]['with']
+        relative_workflow = WORKFLOW.relative_to(ROOT.parents[1])
+        source_files = {relative_workflow: WORKFLOW.read_bytes()}
+        source_files.update({path.relative_to(ROOT.parents[1]): path.read_bytes()
+                             for path in ROOT.iterdir() if path.is_file()})
+        with tempfile.TemporaryDirectory() as tmp:
+            checkout = Path(tmp) / driver['path']
+            subprocess.run(['git', 'init', '-q', str(checkout)], check=True)
+            for relative, data in source_files.items():
+                path = checkout / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            omitted = checkout / 'backend/models/not-an-offline-input.txt'
+            omitted.parent.mkdir(parents=True, exist_ok=True)
+            omitted.write_bytes(b'excluded controlled fixture\n')
+            subprocess.run(['git', '-C', str(checkout), 'add', '.'], check=True)
+            subprocess.run(['git', '-C', str(checkout), '-c', 'user.name=jason', '-c',
+                            'user.email=eritpchy@qq.com', '-c', 'commit.gpgsign=false',
+                            'commit', '-qm', 'controlled driver sparse fixture'], check=True)
+            head = subprocess.check_output(['git', '-C', str(checkout), 'rev-parse', 'HEAD'])
+            mode = '--no-cone' if driver.get('sparse-checkout-cone-mode') == 'false' else '--cone'
+            subprocess.run(['git', '-C', str(checkout), 'sparse-checkout', 'set', mode, '--stdin'],
+                           input=driver['sparse-checkout'].encode(), check=True, capture_output=True)
+            # Read the workflow first: the original driver list raises the same
+            # FileNotFoundError as the hosted Prepare step, before any GUI probe.
+            self.assertEqual((checkout / relative_workflow).read_bytes(), source_files[relative_workflow])
+            for relative, data in source_files.items():
+                self.assertEqual((checkout / relative).read_bytes(), data)
+            self.assertFalse(omitted.exists())
+            self.assertEqual(subprocess.check_output(['git', '-C', str(checkout), 'rev-parse', 'HEAD']), head)
+            self.assertEqual(subprocess.check_output(['git', '-C', str(checkout), 'status', '--porcelain']), b'')
+
     def test_original_cases_once_each_and_failure_propagation(self):
         steps = self.workflow()['jobs']['focus']['steps']
         runs = [step for step in steps if step.get('id') in ('wait', 'tab')]
