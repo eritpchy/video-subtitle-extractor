@@ -118,6 +118,26 @@ jobs:
           python native/ocr/ci_coreml_compat.py
           --verify-report test-results/coreml-compatibility/report.json
           --consumer-commit "${{ github.sha }}"
+      - name: Build separately relocatable CPU/CoreML control frontend (not production acceptance)
+        if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+        run: >-
+          python scripts/native_diagnostics/benchmark.py build
+          --sdk build/native-build/ort-sdk --deps build/native-build/sources
+          --opencv-dir build/native-build/opencv-install/lib/cmake/opencv4
+          --output build/native-diagnostic
+      - name: Preserve separate control frontend with its exact loader-local runtime
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-coreml-diagnostic-frontend-${{ github.sha }}
+          path: |
+            build/native-diagnostic/vse-provider-diagnostic
+            build/native-diagnostic/libonnxruntime*
+            build/native-diagnostic/build-inputs.json
+            build/native-diagnostic/build-*.log
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 7
       - name: Preserve actual production binary/runtime and original failure evidence
         if: always()
         uses: actions/upload-artifact@v4
