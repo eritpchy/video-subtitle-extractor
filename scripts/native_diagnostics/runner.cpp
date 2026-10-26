@@ -6,7 +6,8 @@
 #include <dlfcn.h>
 #include <sys/resource.h>
 #include <unordered_map>
-#include "metal_capture.hpp"
+#include <sys/stat.h>
+#include "../../native/ocr/metal_capture.hpp"
 
 namespace diagnostic {
 using Clock = std::chrono::steady_clock;
@@ -210,12 +211,9 @@ int main(int argc, char **argv) {
     if (*reinterpret_cast<const unsigned char *>(&endian) != 1 || sizeof(float) != 4)
       throw std::runtime_error("little-endian FP32 host required");
     output_dir = fs::absolute(argv[2]);
-    if (!fs::create_directory(output_dir)) throw std::runtime_error("output must not exist");
+    if (mkdir(output_dir.c_str(), 0700) != 0) throw std::runtime_error("output must not exist and must be writable");
     evidence = request.value("evidence", false);
     const bool metal_capture = request.value("metal_capture", false);
-    if (metal_capture && (!evidence || request.value("warmup", 0) != 0 ||
-                         request.value("repeats", 0) != 0))
-      throw std::runtime_error("Metal capture is single-pass evidence only, never timed/warmup samples");
     struct CaptureGuard { ~CaptureGuard() { diagnostic_capture::stop(); } } capture_guard;
     wrapped = *original;
     wrapped.CreateSession = create_session;
@@ -225,6 +223,8 @@ int main(int argc, char **argv) {
     const int threads = bounded_int(request, "threads", 4, 1, 128);
     const int warmups = bounded_int(request, "warmup", 3, 0, 1000);
     const int repeats = bounded_int(request, "repeats", 10, 0, 10000);
+    if (metal_capture && (!evidence || warmups != 0 || repeats != 0))
+      throw std::runtime_error("Metal capture is single-pass evidence only, never timed/warmup samples");
     const int timeout = bounded_int(request, "timeout_ms", 120000, 1, 120000);
     const int batch = bounded_int(request, "batch_size", 6, 1, 100);
     const std::string kind = request.at("kind");

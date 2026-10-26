@@ -38,6 +38,9 @@ def offline_runtime_environment():
 
 def diagnostic_environment(metal_capture=False):
     env = offline_runtime_environment()
+    for key in ('LD_PRELOAD', 'LD_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH',
+                'DYLD_FRAMEWORK_PATH', 'DYLD_FALLBACK_LIBRARY_PATH', 'DYLD_FALLBACK_FRAMEWORK_PATH'):
+        env.pop(key, None)
     # Even capture-enabled launch overhead must not contaminate normal timings.
     env.pop('MTL_CAPTURE_ENABLED', None)
     if metal_capture:
@@ -65,7 +68,7 @@ def new_directory(path):
     path = Path(path).absolute()
     if path.exists() or path.is_symlink():
         raise FileExistsError('Refusing to overwrite diagnostic output: ' + str(path))
-    path.mkdir(parents=True)
+    path.mkdir(mode=0o700, parents=True)
     return path
 
 
@@ -225,7 +228,8 @@ def build(args):
                   'production_worker_source_sha256': digest(ROOT / 'native/ocr/worker.cpp'),
                   'production_included_source_sha256': {
                       name: digest(ROOT / 'native/ocr' / name)
-                      for name in ('worker.cpp', 'provider_evidence.hpp')},
+                      for name in ('worker.cpp', 'provider_evidence.hpp', 'metal_capture.hpp',
+                                   'metal_capture.mm', 'metal_capture_stub.cpp')},
                   'diagnostic_source_sha256': {p.name: digest(p) for p in HERE.iterdir() if p.is_file()},
                   'commands': commands, 'runtime_rebuilt': False,
                   'opencv_static_archives': [{'path': str(p.resolve()), 'sha256': digest(p)}

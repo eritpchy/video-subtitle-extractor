@@ -1,4 +1,4 @@
-// Isolated evidence collection only; never linked into the production worker.
+// Explicit diagnostic evidence only. Normal worker execution never calls this API.
 #pragma once
 #include "json.hpp"
 #include <filesystem>

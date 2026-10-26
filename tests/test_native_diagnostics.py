@@ -1,7 +1,10 @@
 """Independent diagnostics must never certify a GPU from provider/config names."""
 from array import array
 import json
+import os
 from pathlib import Path
+import struct
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -22,6 +25,8 @@ def test_statistics_median_dispersion_and_invalid_data():
 def test_existing_output_and_symlink_are_refused(tmp_path):
     target = tmp_path / 'output'
     diag.new_directory(target)
+    if os.name != 'nt':
+        assert target.stat().st_mode & 0o777 == 0o700
     with pytest.raises(FileExistsError):
         diag.new_directory(target)
     link = tmp_path / 'link'
@@ -169,7 +174,9 @@ def test_minimal_runtime_probe_requires_optout_before_dynamic_load():
 def test_build_provenance_covers_production_provider_helper():
     source = (diag.HERE / 'benchmark.py').read_text()
     assert "'production_included_source_sha256'" in source
-    assert "('worker.cpp', 'provider_evidence.hpp')" in source
+    for name in ('worker.cpp', 'provider_evidence.hpp', 'metal_capture.hpp',
+                 'metal_capture.mm', 'metal_capture_stub.cpp'):
+        assert repr(name) in source
 
 
 def test_metal_capture_environment_is_explicit_and_never_in_timing(monkeypatch):
@@ -181,7 +188,7 @@ def test_metal_capture_environment_is_explicit_and_never_in_timing(monkeypatch):
 
 
 def test_metal_capture_is_private_evidence_not_gpu_certification():
-    source = (diag.HERE / 'metal_capture.mm').read_text()
+    source = (diag.ROOT / 'native/ocr/metal_capture.mm').read_text()
     assert 'MTLCaptureDestinationGPUTraceDocument' in source
     assert 'supportsDestination:' in source
     assert 'descriptor.captureObject = device' in source
@@ -192,11 +199,10 @@ def test_metal_capture_is_private_evidence_not_gpu_certification():
     assert 'system(' not in source and 'chmod' not in source
     runner = (diag.HERE / 'runner.cpp').read_text()
     assert 'Metal capture is single-pass evidence only' in runner
-    assert 'request.value("warmup", 0) != 0' in runner
-    assert 'request.value("repeats", 0) != 0' in runner
+    assert 'warmups != 0 || repeats != 0' in runner
+    assert runner.index('const int repeats = bounded_int') < runner.index('Metal capture is single-pass evidence only')
     assert 'CaptureGuard' in runner
     assert '"scope", "synchronous OrtRun"' in runner
-    assert 'metal_capture' not in (diag.ROOT / 'native/ocr/CMakeLists.txt').read_text()
 
 
 def test_metal_capture_missing_capability_refuses_before_output(tmp_path, monkeypatch):
@@ -207,3 +213,104 @@ def test_metal_capture_missing_capability_refuses_before_output(tmp_path, monkey
     with pytest.raises(ValueError, match='no alternative profiler'):
         diag.capture_case(args)
     assert not args.output.exists()
+
+
+def test_production_capture_requires_exactly_one_bounded_response():
+    from scripts.native_diagnostics import production_capture as production
+    body = b'{"ok":true,"id":1}'
+    framed = struct.pack('<I', len(body)) + body
+    assert production.decode_response(framed) == {'ok': True, 'id': 1}
+    for invalid in (b'', framed[:-1], framed + framed, struct.pack('<I', 0), struct.pack('<I', 17000000)):
+        with pytest.raises(ValueError):
+            production.decode_response(invalid)
+
+
+def test_production_capture_has_explicit_optout_and_no_loader_injection(monkeypatch):
+    from scripts.native_diagnostics import production_capture as production
+    for key in ('LD_PRELOAD', 'LD_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH'):
+        monkeypatch.setenv(key, '/untrusted')
+    monkeypatch.setenv('ORT_DISABLE_TELEMETRY', '0')
+    values = production.environment()
+    assert values['ORT_DISABLE_TELEMETRY'] == values['MTL_CAPTURE_ENABLED'] == '1'
+    assert values['VSE_OCR_PARENT_PID'] == str(os.getpid())
+    for key in ('LD_PRELOAD', 'LD_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH'):
+        assert key not in values
+        assert key not in diag.diagnostic_environment()
+
+
+def test_production_capture_refuses_output_inside_payload_before_creation(tmp_path, monkeypatch):
+    from scripts.native_diagnostics import production_capture as production
+    root = tmp_path / 'payload'; root.mkdir()
+    output = root / 'forbidden-output'
+    monkeypatch.setattr(production, 'inputs', lambda _: (root, root / 'native-ocr', {}))
+    with pytest.raises(ValueError, match='independent'):
+        production.run(SimpleNamespace(output=output, bundle_manifest=None))
+    assert not output.exists()
+
+
+def test_production_capture_missing_capability_cannot_start_worker(tmp_path, monkeypatch):
+    from scripts.native_diagnostics import production_capture as production
+    root = tmp_path / 'payload'; root.mkdir()
+    output = tmp_path / 'evidence'
+    monkeypatch.setattr(production, 'inputs', lambda _: (root, root / 'native-ocr', {}))
+    monkeypatch.setattr(production, 'capabilities', lambda _: {'metal_capture': {'available': False}})
+    monkeypatch.setattr(production.subprocess, 'Popen', lambda *a, **k: pytest.fail('capture must not start'))
+    with pytest.raises(ValueError, match='no alternative profiler'):
+        production.run(SimpleNamespace(output=output, bundle_manifest=None, command='capture'))
+    report = diag.read_json(output / 'production-capture-report.json')
+    assert report['result'] == 'failed' and report['gpu_execution_verified'] is False
+
+
+def test_production_capture_collection_never_certifies_gpu_or_timing(tmp_path, monkeypatch):
+    from scripts.native_diagnostics import production_capture as production
+    from backend.tools import native_ocr
+    root = tmp_path / 'payload'; root.mkdir()
+    output = tmp_path / 'evidence'
+    expected = [[], []]
+    case = {'tier': 'small', 'rec_model': 'PP-OCRv6_small_rec', 'image': '/fixed/blank.png',
+            'fixture_sha256': 'a' * 64, 'expected': expected}
+    monkeypatch.setattr(production, 'inputs', lambda _: (root, root / 'native-ocr', {}))
+    monkeypatch.setattr(production, 'capabilities', lambda _: {'metal_capture': {'available': True}})
+    monkeypatch.setattr(diag, 'selected_cases', lambda _: ({'confidence_tolerance': 1e-5}, [(0, case)]))
+    response = {'id': 1, 'ok': True, 'timing_eligible': False, 'result': expected,
+                'diagnostic_metal_capture': {'gpu_execution_verified': False}}
+    body = json.dumps(response).encode()
+
+    class Child:
+        pid = 4242
+        returncode = 0
+        def __init__(self, command, **kwargs):
+            assert command[-2:] == ['--diagnostic-metal-capture', str(output / 'metal-evidence')]
+            assert kwargs['env']['MTL_CAPTURE_ENABLED'] == kwargs['env']['ORT_DISABLE_TELEMETRY'] == '1'
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def communicate(self, data, timeout):
+            request = production.decode_response(data)
+            assert request['id'] == 1 and request['path'] == case['image']
+            return struct.pack('<I', len(body)) + body, b''
+
+    monkeypatch.setattr(production.subprocess, 'Popen', Child)
+    def validate(response, request, *, worker_pid):
+        assert worker_pid == 4242
+        return {'gpu_execution_verified': False}
+    monkeypatch.setattr(native_ocr, 'validate_execution_evidence', validate)
+    production.run(SimpleNamespace(output=output, bundle_manifest=None, command='capture', case=0,
+                                   provider='coreml', threads=4, batch_size=6, timeout=60))
+    report = diag.read_json(output / 'production-capture-report.json')
+    assert report['result'] == 'collected-not-gpu-certified'
+    assert not report['gpu_execution_verified'] and not report['timing_eligible']
+    assert not report['trace_files_present'] and report['gpu_speedup'] is None
+    assert report['observed_worker_pid'] == 4242 and report['frozen_golden_parity']['passed']
+
+
+def test_compiled_diagnostic_capture_cannot_omit_repeat_limits(tmp_path):
+    value = os.environ.get('VSE_DIAGNOSTIC_TEST_RUNNER')
+    if not value:
+        pytest.skip('Set VSE_DIAGNOSTIC_TEST_RUNNER to a verified compiled diagnostic')
+    request = tmp_path / 'request.json'
+    diag.write_json(request, {'schema_version': 1, 'mode': 'ort-cpu', 'evidence': True, 'metal_capture': True})
+    result = subprocess.run([str(Path(value).resolve(strict=True)), str(request), str(tmp_path / 'output')],
+                            capture_output=True, text=True, timeout=15, env=diag.diagnostic_environment(True))
+    assert result.returncode == 2
+    assert 'Metal capture is single-pass evidence only' in result.stderr
+    assert not (tmp_path / 'output' / 'result.json').exists()

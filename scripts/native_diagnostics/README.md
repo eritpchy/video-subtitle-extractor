@@ -206,11 +206,41 @@ benchmark latency. No trace is automatically launched by normal probe/suite/vide
 
 ### Optional application-local Metal capture (explicit evidence command)
 
-The independent frontend also has an explicit Apple public-API capture path.
+There is an explicit Apple public-API capture path.
 It does not use Instruments, read its denied cache, attach to another process,
 change system permissions, or open Xcode. On macOS it links only the existing
-Foundation and Metal system frameworks; Linux builds a refusing stub. This is
-not linked into the shipping worker. Merely building it does not capture anything.
+Foundation and Metal system frameworks; Linux builds a refusing stub. Under the
+separately authorized same-binary diagnostic contract, the shared helper is also
+linked into the shipping worker, but normal execution never calls it. Merely
+building or launching the normal application does not capture anything.
+
+For evidence tied to the **actual final ZIP worker**, use this build-side harness:
+
+```sh
+python -m scripts.native_diagnostics.production_capture probe \
+  --native-root /existing/final-bundle/native-ocr \
+  --worker-sha256 TRUSTED_FINAL_WORKER_SHA256 \
+  --bundle-manifest /existing/final-bundle/bundle-manifest.json \
+  --output /new/final-worker-metal-capability
+python -m scripts.native_diagnostics.production_capture capture \
+  --native-root /existing/final-bundle/native-ocr \
+  --worker-sha256 TRUSTED_FINAL_WORKER_SHA256 \
+  --bundle-manifest /existing/final-bundle/bundle-manifest.json \
+  --case 0 --provider coreml --output /new/final-worker-metal-evidence
+```
+
+The harness verifies the supplied trusted executable hash, pinned runtime and all
+15 models/configs before launching, rechecks them afterwards, and binds the native
+payload to the final bundle manifest. Omitting `--bundle-manifest` yields only
+build-artifact scope, never final-bundle verification. Only explicit commands set
+`MTL_CAPTURE_ENABLED=1`; loader-injection variables are removed. The worker requires
+an explicit diagnostic CLI entrypoint, a single framed fixed-fixture request and
+EOF, and writes only in a new private evidence directory. PID is also observed by
+the launcher, not merely copied from a response. New filesystem permissions or
+GPU inspection permissions are not granted automatically.
+
+The independent frontend below remains useful during development, but its trace
+directly proves only its **different executable**, not the final package worker:
 
 ```sh
 python scripts/native_diagnostics/benchmark.py metal-probe \
@@ -231,6 +261,8 @@ any permission error; no alternate permission/cache strategy is attempted.
 
 The selected `MTLCreateSystemDefaultDevice` object may not be the object CoreML
 uses. Missing commands are therefore inconclusive, not proof of CPU execution.
+Buffers created before capture starts are outside the API's capture guarantee,
+which can also leave gaps when sessions initialize before the prediction interval.
 Conversely, a nonempty trace or submitted command buffer is not by itself proof
 of actual CoreML GPU dispatch. A reviewer must attribute relevant compute commands
 and execution to this prediction, not compilation, another task, or synthetic
