@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
   workflow_call:
     inputs:
+      reuse_qt_overlay_resources:
+        description: Internal caller completed the same-run fixed Qt resource job
+        type: boolean
+        default: false
       reuse_original_models:
         description: Internal caller already completed this run's fixed model seed job
         type: boolean
@@ -26,7 +30,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  qt-overlay-resources:
+    if: ${{ !inputs.reuse_qt_overlay_resources }}
+    uses: ./.github/workflows/qt-overlay-resources.yml
+    permissions:
+      contents: read
+      actions: read
+
   source:
+    needs: qt-overlay-resources
+    if: ${{ !cancelled() && (needs.qt-overlay-resources.result == 'success' || (inputs.reuse_qt_overlay_resources && needs.qt-overlay-resources.result == 'skipped')) }}
     name: Clean Python 3.12 / ${{ matrix.name }} / no custom worker
     strategy:
       fail-fast: false
@@ -99,6 +112,15 @@ jobs:
           python scripts/source_ci_steps.py run-step --evidence test-results/python-source --step pip-install
           python scripts/source_ci_steps.py run-step --evidence test-results/python-source --step pip-check
           python -m pip freeze > test-results/python-source/pip-freeze.txt
+      - name: Retrieve the same fixed Qt candidate resource bytes used by the Mac package
+        if: runner.os == 'macOS'
+        uses: actions/download-artifact@v4
+        with:
+          name: qt-overlay-resources-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/qt-overlay-resources
+      - name: Explicitly prepare only this new venv's reviewed Qt plugin
+        if: runner.os == 'macOS'
+        run: python scripts/source_ci_steps.py run-step --evidence test-results/python-source --step qt-overlay
       - name: Check default source dispatch without any inference runtime initialization
         run: python scripts/source_ci_steps.py run-step --evidence test-results/python-source --step source-default
       - name: Unit tests for Python provider, source-only data and evidence contracts

@@ -280,7 +280,8 @@ class WorkflowContractTests(unittest.TestCase):
                     self.assertIn('QT_QPA_PLATFORM: cocoa', section)
         native = (ROOT / '.github/workflows/native-ocr.yml').read_text()
         self.assertIn('tests/test_portable_environment.py tests/test_portable_python.py', native)
-        self.assertIn('    needs: models\n', native)
+        self.assertIn('    needs: [models, qt-overlay-resources]\n', native)
+        self.assertIn("needs.models.result == 'success'", native)
 
     def test_existing_models_and_macos_failure_diagnostics_remain_strict(self):
         text = (ROOT / '.github/workflows/native-ocr.yml').read_text()

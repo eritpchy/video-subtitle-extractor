@@ -107,6 +107,28 @@ py -3.12 -m venv .venv
 .venv\Scripts\Activate.ps1
 ```
 
+### macOS GUI Qt preparation boundary
+
+This candidate requires **macOS arm64 26.0+**, based on the highest actual minimum
+of its native libraries. Qt/PySide is fixed to 6.12.0. The reviewed Cocoa fix is a
+single-plugin candidate overlay; a GUI startup is not external accessibility acceptance.
+All macOS source backends share this preparation, without this project's C++ worker or a compiler.
+
+Install the selected requirements in your own venv, optionally adding the explicit
+`-c requirements-macos-qt.txt` constraint. Close GUI processes using that venv and run
+`python scripts/prepare_macos_qt.py` for read-only inspection first.
+**Public repair resources are not published yet and production admission remains blocked.**
+Authorized candidate tests explicitly supply the exact reviewed local resource:
+
+```sh
+python scripts/prepare_macos_qt.py --apply --candidate-testing --archive /absolute/path/vse-qt6.12.0-macos-arm64-ax772484-ps6.zip
+```
+
+Only one plugin in this isolated venv is changed, with original wheel RECORDs,
+licenses, corresponding source and a separate receipt preserved. System packages
+are never patched. The fixed public-download `--apply` path is enabled only after
+resource publication and complete acceptance. See the [Qt resource and acceptance boundary](docs/audits/macos-qt-overlay.md).
+
 ### 2. Default Paddle Python path (CPU)
 
 ```sh

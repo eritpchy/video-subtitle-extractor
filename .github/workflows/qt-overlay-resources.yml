@@ -1,0 +1,43 @@
+name: Reproduce fixed Qt AX candidate resources (not publication)
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  resources:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Repackage the exact already-built plugin and complete corresponding source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -I -S scripts/qt_overlay_resources_ci.py --output build/qt-overlay-input
+      - name: Share only the two fixed public-resource candidate bytes with this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: qt-overlay-resources-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/qt-overlay-input/assets/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Preserve resource provenance and failures without publishing a runtime
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qt-overlay-resource-evidence-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/qt-overlay-input/reports/
+          if-no-files-found: error
+          retention-days: 14

@@ -12,6 +12,10 @@ on:
   # Native CPU (Windows/Linux) and dual-provider Mac CoreML validation chain.
   workflow_call:
     inputs:
+      reuse_qt_overlay_resources:
+        description: Internal caller completed the same-run fixed Qt resource job
+        type: boolean
+        default: false
       acknowledge_vc_redistribution_license:
         required: false
         default: false
@@ -31,6 +35,13 @@ env:
   ORT_DISABLE_TELEMETRY: '1'
 
 jobs:
+  qt-overlay-resources:
+    if: ${{ !inputs.reuse_qt_overlay_resources }}
+    uses: ./.github/workflows/qt-overlay-resources.yml
+    permissions:
+      contents: read
+      actions: read
+
   models:
     name: Pinned FP32 models / conversion only
     runs-on: ubuntu-24.04
@@ -132,7 +143,8 @@ jobs:
           retention-days: 7
   native:
     name: ${{ matrix.profile }} / ${{ matrix.name }}
-    needs: models
+    needs: [models, qt-overlay-resources]
+    if: ${{ !cancelled() && needs.models.result == 'success' && (needs.qt-overlay-resources.result == 'success' || (inputs.reuse_qt_overlay_resources && needs.qt-overlay-resources.result == 'skipped')) }}
     permissions:
       contents: read
       actions: read
@@ -438,12 +450,19 @@ jobs:
         run: |
           'Windows customer package: PENDING applicable VC redistribution rights confirmation. Native compilation and runner tests above are separate evidence; no VC redistributable/customer candidate uploaded.' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           throw 'PENDING: customer packaging requires VC redistribution license acknowledgment; runner tests do not grant redistribution rights.'
+      - name: Retrieve the same fixed Qt candidate resources used by the Python source venv
+        if: runner.os == 'macOS'
+        uses: actions/download-artifact@v4
+        with:
+          name: qt-overlay-resources-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/qt-overlay-resources
       - name: Build self-contained Native package with explicit provider identity
         id: package-build
         run: >-
           python scripts/package_release.py --profile native --native-ocr build/native-ocr
           --accelerator ${{ matrix.platform == 'macos' && 'coreml' || 'cpu' }}
           --wheelhouse build/wheelhouse --output dist-native
+          ${{ matrix.platform == 'macos' && '--qt-overlay-candidate-testing --qt-overlay-archive build/qt-overlay-resources/vse-qt6.12.0-macos-arm64-ax772484-ps6.zip --qt-overlay-source build/qt-overlay-resources/vse-qtbase6.12.0-ax772484-ps6-source.tar.xz' || '' }}
       - name: Verify packaged Linux GUI, SRT and dependency isolation under X11
         if: runner.os == 'Linux'
         shell: bash

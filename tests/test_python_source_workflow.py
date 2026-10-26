@@ -43,8 +43,10 @@ def test_source_installs_into_new_venv_and_never_builds_custom_worker():
         assert required in value
     for forbidden in ('native/ocr/build.py', 'prepare_models.py', 'cmake --build',
                       'gh release', 'contents: write', 'continue-on-error:', 'gh api', 'GITHUB_TOKEN',
-                      'actions/download-artifact', 'DYLD_LIBRARY_PATH', 'MTL_CAPTURE_ENABLED'):
+                      'DYLD_LIBRARY_PATH', 'MTL_CAPTURE_ENABLED'):
         assert forbidden not in value
+    assert value.count('uses: actions/download-artifact@v4') == 1
+    assert 'name: qt-overlay-resources-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}' in value
     assert "ORT_DISABLE_TELEMETRY: '1'" in value
     assert 'defaults:\n  run:\n    shell: bash' in value
 
@@ -189,7 +191,7 @@ def test_reusable_source_gate_requires_all_four_profiles_same_run_and_exact_rece
         assert '${{ jobs.source-set.outputs.' + key + ' }}' in value
     release = (ROOT / '.github/workflows/release.yml').read_text()
     caller = release.split('  python-source:', 1)[1].split('  native:', 1)[0]
-    assert 'needs: original-models' in caller and 'reuse_original_models: true' in caller
+    assert 'needs: [original-models, qt-overlay-resources]' in caller and 'reuse_original_models: true' in caller
     assert 'uses: ./.github/workflows/python-source.yml' in caller
     candidate = release.split('  candidate-set:', 1)[1]
     assert 'needs: [native, windows-paddle, windows-directml, python-source]' in candidate
@@ -222,7 +224,7 @@ def test_reuse_skips_only_duplicate_seed_producer_not_source_model_integrity():
     for forbidden in ('run-id:', 'repository:', 'github-token:', 'pattern:'):
         assert forbidden not in download
     assert 'contents: write' not in value and 'secrets: inherit' not in value
-    assert value.count('actions: read') == 1  # Only optional nested bootstrap needs cross-run read.
+    assert value.count('actions: read') == 2  # Model and Qt resource bootstrap only; consumer jobs have no token.
 
 
 def test_actual_command_wrappers_keep_exit_codes_not_shell_tee_success():

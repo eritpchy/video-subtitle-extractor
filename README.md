@@ -106,6 +106,24 @@ py -3.12 -m venv .venv
 .venv\Scripts\Activate.ps1
 ```
 
+### macOS GUI 的 Qt 准备边界
+
+本候选要求 **macOS arm64 26.0+**，以全部原生库的实际最低版本为准。Qt/PySide 固定
+6.12.0；已识别的 Cocoa 辅助功能问题使用单插件候选修补，不能以普通 GUI 启动冒充外部 AX 验收。
+所有 macOS 源码后端共用此 Qt 准备，不依赖本项目 C++ worker 或编译器。
+
+在用户自己创建的 venv 安装所选依赖时，可显式加 `-c requirements-macos-qt.txt`。
+随后关闭使用该 venv 的 GUI，先运行 `python scripts/prepare_macos_qt.py` 只读检查。
+**当前公共修复资源尚未发布，生产准入仍禁止**；仅已授权候选测试使用同一固定本地资源：
+
+```sh
+python scripts/prepare_macos_qt.py --apply --candidate-testing --archive /absolute/path/vse-qt6.12.0-macos-arm64-ax772484-ps6.zip
+```
+
+它只改当前隔离 venv 的一个 Qt 插件，保留原 wheel RECORD、许可、源码及独立收据，不改系统环境。
+未来修复版公开资源和完整验收通过后才可使用 `--apply` 的固定公开下载路径；详见
+[Qt 候选来源、完整对应源码及仍待验收项](docs/audits/macos-qt-overlay.md)。
+
 ### 2. 默认 Paddle Python 路径（CPU）
 
 ```sh

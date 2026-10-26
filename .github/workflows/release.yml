@@ -30,24 +30,30 @@ env:
   POLYGRAPHY_AUTOINSTALL_DEPS: '0'
 
 jobs:
+  qt-overlay-resources:
+    uses: ./.github/workflows/qt-overlay-resources.yml
+
   original-models:
     uses: ./.github/workflows/paddle-models.yml
 
   python-source:
     name: Complete Python source from this exact candidate commit
-    needs: original-models
+    needs: [original-models, qt-overlay-resources]
     permissions:
       contents: read
       actions: read
     uses: ./.github/workflows/python-source.yml
     with:
       reuse_original_models: true
+      reuse_qt_overlay_resources: true
 
   native:
     name: Native CPU and dual-provider Mac CoreML matrix
+    needs: qt-overlay-resources
     uses: ./.github/workflows/native-ocr.yml
     with:
       acknowledge_vc_redistribution_license: ${{ inputs.acknowledge_vc_redistribution_license || false }}
+      reuse_qt_overlay_resources: true
 
   windows-paddle:
     name: ${{ matrix.profile }} / ${{ matrix.os }} (GPU hardware not tested)
@@ -251,6 +257,8 @@ jobs:
           --aggregate source-acceptance/source-acceptance.json --sha256 "$SOURCE_ACCEPTANCE_SHA256"
           --commit "$GITHUB_SHA" --repository "$GITHUB_REPOSITORY"
           --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT"
+      - name: Require the exact Qt candidate plugin and complete source in the final Mac ZIP
+        run: python scripts/package_macos_qt_overlay.py --archives dist
       - name: Reject missing, mislabeled, stale or unaccepted ZIPs
         run: python scripts/release_guard.py --validate-assets --sha "$GITHUB_SHA" --matrix restored-candidates --assets dist
       - name: Record compatibility and validation boundary

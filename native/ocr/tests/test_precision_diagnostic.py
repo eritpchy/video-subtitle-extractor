@@ -165,7 +165,8 @@ def test_ci_reference_sources_are_separate_offline_and_not_cache_hit_conditional
     assert 'precision-reference' not in models
     assert 'needs:' not in sources and 'timeout-minutes: 15' in sources
     assert 'runs-on: ubuntu-24.04' in sources
-    assert 'needs: models\n' in native
+    assert 'needs: [models, qt-overlay-resources]\n' in native
+    assert "needs.models.result == 'success'" in native
     export = text.split('- name: Export three verified original models for build-only Mac reference', 1)[1].split('- name:', 1)[0]
     assert 'if:' not in export
     assert '--seed-cache' not in export

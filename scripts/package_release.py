@@ -237,13 +237,21 @@ def verify_macos_deployment(root: Path, manifest: dict) -> dict:
 
 
 def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT, *, profile: str = "paddle", native_ocr: Path | None = None,
-                  accelerator: str = 'cpu', onnx_models: Path | None = None, paddle_models: Path | None = None) -> Path:
+                  accelerator: str = 'cpu', onnx_models: Path | None = None, paddle_models: Path | None = None,
+                  qt_overlay_archive: Path | None = None, qt_overlay_source: Path | None = None,
+                  qt_overlay_candidate_testing: bool = False) -> Path:
     build_profile, identity = profile_identity(profile, accelerator)
     if (profile == "native") != (native_ocr is not None) or (profile == 'directml') != (onnx_models is not None):
         raise ValueError("Select native with --native-ocr, or directml with --onnx-models; Paddle remains default")
     if profile != 'paddle' and paddle_models is not None:
         raise ValueError('--paddle-models is only valid for Paddle CPU/CUDA packages')
     target_platform, target_arch = host_platform()
+    overlay_requested = any((qt_overlay_archive, qt_overlay_source, qt_overlay_candidate_testing))
+    if overlay_requested and not ((target_platform, target_arch, build_profile) == ('macos', 'arm64', 'native-coreml')
+                                  and qt_overlay_archive and qt_overlay_source and qt_overlay_candidate_testing):
+        raise ValueError('Qt overlay requires explicit candidate testing, both resources and macOS arm64 Native CoreML')
+    if (target_platform, target_arch, build_profile) == ('macos', 'arm64', 'native-coreml') and not overlay_requested:
+        raise ValueError('Mac CoreML candidate requires the explicit reviewed Qt overlay resources')
     version = read_version(root)
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     if not re.fullmatch(r"[a-f0-9]{40}", revision):
@@ -321,6 +329,11 @@ def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT, *, profile:
             directml_info = stage_directml_models(onnx_models, stage / 'directml-models')
         runtime_info = build_runtime(stage, wheels, runtime_requirements, target_platform, target_arch, profile,
                                      **({'accelerator': accelerator} if accelerator != 'cpu' else {}))
+        qt_overlay_info = None
+        if overlay_requested:
+            from scripts.package_macos_qt_overlay import apply_candidate
+            qt_overlay_info = apply_candidate(stage, stage / runtime_info['python'],
+                                              qt_overlay_archive, qt_overlay_source)
         if target_platform == 'linux':
             try:
                 from .bundle_linux_runtime_libs import bundle_linux_libraries
@@ -334,6 +347,7 @@ def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT, *, profile:
             app_files = {path.relative_to(app_root).as_posix(): sha256(path) for path in app_root.rglob('*') if path.is_file() and not path.is_relative_to(stage)}
         manifest = {"ocr_backend": profile, "accelerator": identity['accelerator'], "build_profile": build_profile,
                     "macos_deployment": deployment if target_platform == 'macos' else None,
+                    "qt_ax_overlay": qt_overlay_info,
                     "gpu_inference_verified": False, "directml_models": directml_info, "paddle_models": paddle_info,
                     "native_ocr": native_info, "app_files": app_files, "format": 2, "version": version, "commit": revision, "platform": target_platform, "arch": target_arch, "python": "3.12", "distribution": BUNDLE_DISTRIBUTION, "runtime_python": runtime_info["python"], "runtime_provenance": runtime_info, "runtime_requirements": runtime_requirements, "files": {path.relative_to(stage).as_posix(): sha256(path) for path in sorted(stage.rglob("*")) if path.is_file()}}
         (stage / "bundle-manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -412,6 +426,9 @@ def verify_bundle(archive_path: Path, smoke: bool) -> None:
         manifest = json.loads((root / "bundle-manifest.json").read_text(encoding="utf-8"))
         verify_payload(root, manifest)
         macos_deployment = verify_macos_deployment(root, manifest) if manifest['platform'] == 'macos' else None
+        if manifest.get('qt_ax_overlay') is not None:
+            from scripts.package_macos_qt_overlay import verify_candidate
+            verify_candidate(root, manifest)
         if smoke:
             evidence = Path(temporary) / "verification-evidence"
             evidence.mkdir()
@@ -484,6 +501,9 @@ def main() -> int:
     parser.add_argument("--onnx-models", type=Path, help="Verified complete 15-model converted artifact for DirectML")
     parser.add_argument("--paddle-models", type=Path, help="Verified complete 15-model Paddle source tree; no client downloads")
     parser.add_argument("--native-ocr", type=Path, help="Verified complete native worker/models artifact (build-side only)")
+    parser.add_argument("--qt-overlay-archive", type=Path, help="Exact reviewed Qt resource ZIP; Mac CoreML candidate only")
+    parser.add_argument("--qt-overlay-source", type=Path, help="Complete corresponding Qt source archive")
+    parser.add_argument("--qt-overlay-candidate-testing", action="store_true", help="Explicit candidate preparation, never production approval")
     parser.add_argument("--output", type=Path, default=Path("dist"))
     parser.add_argument("--verify", type=Path, help="Verify all bundle ZIPs in this directory")
     parser.add_argument("--smoke", action="store_true", help="Test included interpreter/runtime with no client installation or host Python")
@@ -497,7 +517,9 @@ def main() -> int:
             print(f"Verified: {archive}")
     elif args.wheelhouse:
         print(create_bundle(args.wheelhouse, args.output, profile=args.profile, native_ocr=args.native_ocr,
-                            accelerator=args.accelerator, onnx_models=args.onnx_models, paddle_models=args.paddle_models))
+                            accelerator=args.accelerator, onnx_models=args.onnx_models, paddle_models=args.paddle_models,
+                            qt_overlay_archive=args.qt_overlay_archive, qt_overlay_source=args.qt_overlay_source,
+                            qt_overlay_candidate_testing=args.qt_overlay_candidate_testing))
     else:
         parser.error("Specify --wheelhouse or --verify")
     return 0

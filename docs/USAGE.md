@@ -336,3 +336,26 @@ clients, Windows ARM/emulation and physical GPU execution are not established by
 those server CPU checks. No client-machine or GPU access is requested or awaited.
 See the [Windows coverage boundaries and
 evidence guide](windows-verification.md).
+
+
+### macOS source and package Qt candidate
+
+The integrated Mac candidate pins Qt/PySide 6.12.0 and requires macOS arm64 26.0+.
+Source installations use a user-created isolated venv, not a packaged/native OCR worker.
+`requirements-macos-qt.txt` supplies platform-specific constraints; the selected
+source requirements also retain the reviewed exact macOS Qt versions.
+
+Before opening source GUI, use `python scripts/prepare_macos_qt.py` to inspect the
+venv. Production preparation is currently blocked: the proposed 2.3.1 resources
+are not public yet. Authorized candidate CI uses the explicit `--apply
+--candidate-testing --archive <fixed-resource.zip>` path. This is not a general
+installer or a system-site-package patch. The final package embeds the exact same
+plugin, original wheel RECORDs, unchanged historical receipts, small resource,
+and complete corresponding Qt source. Its pruning inventory changes only the
+reviewed Cocoa retained entry and byte total; final archive hashes and runtime
+checks are repeated after that change.
+
+The same-run candidate aggregate requires both source and packaged Qt evidence.
+No source-venv, GUI smoke, CoreML EP, or existing diagnostic result independently
+proves full application external-AX acceptance or physical GPU execution.
+See [resource hashes, API, licenses and remaining gates](audits/macos-qt-overlay.md).

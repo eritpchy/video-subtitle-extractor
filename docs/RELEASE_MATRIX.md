@@ -204,3 +204,27 @@ The manual source workflow prepares its own verified seed. Public source users
 use the documented public model-data preparation commands, not private Actions
 credentials or these temporary CI artifacts. Diagnostic branch trigger exclusions
 are not part of the final production workflow.
+
+### Integrated Qt candidate boundary
+
+The same-run source and Native CoreML jobs consume identical fixed Qt overlay
+resource bytes from a dedicated read-only resource preparation job. Independent
+manual runs create their own verified resource job; only the parent candidate
+caller can reuse an already completed same-run artifact. No skipped/failed
+resource producer is silently adopted. Public source preparation does not use
+Actions credentials and remains disabled until the fixed new-release resources
+and production admission actually exist.
+
+For Mac source, `qt-overlay` is a recorded explicit operation in the newly
+created venv after pip-check and before GUI startup. The source receipt binds its
+real subprocess, sysconfig query, original preparation receipt, fixed plugin and
+native-load evidence. The packaged Mac candidate retains that same plugin,
+original pruning inventory, all original wheel RECORDs, licensing, exact small
+resource and complete corresponding Qt source. Only the Cocoa pruning entry is
+rebound before the full payload/minimum-system/launcher gates run again. The
+aggregate additionally extracts and verifies the final Mac ZIP's overlay bytes;
+metadata alone or the existing CPU diagnostic cannot satisfy this gate.
+
+These are candidate preparations, not external-AX or full application approval.
+All three overlay admission/AX/final-application flags remain false. Published
+2.3.0 assets are unchanged, and the proposed 2.3.1 resources are not yet public.
