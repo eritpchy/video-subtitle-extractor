@@ -391,7 +391,7 @@ jobs:
           tests/test_runtime_dependencies.py tests/test_prune_inference_runtime.py
           tests/test_portable_environment.py tests/test_portable_python.py tests/test_macos_icon.py
           tests/test_macos_minimum_version.py
-          tests/test_coreml_package.py tests/test_native_coreml_adapter.py tests/test_check_native_models.py
+          tests/test_coreml_package.py tests/test_native_coreml_adapter.py tests/test_native_shape_evidence.py tests/test_check_native_models.py
           tests/test_native_diagnostics.py tests/test_coreml_e2e_acceptance.py
           tests/test_windows_runtime_isolation.py tests/test_check_runtime.py
           tests/test_windows_app_local_runtime.py tests/test_windows_os_evidence.py tests/test_windows_native_worker_evidence.py

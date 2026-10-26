@@ -11,6 +11,8 @@ DIAGNOSTIC_PATHS = (
     'backend/tools/paddle_model_config.py', 'backend/tools/ocr.py',
     'backend/tools/subtitle_detect.py', 'backend/tools/directml_ocr.py',
     'scripts/native_diagnostics/**', 'tests/test_native_diagnostics.py',
+    'tests/test_native_shape_evidence.py', 'tests/native_shape_evidence.py',
+    'tests/test_native_coreml_adapter.py',
     'scripts/check_native_models.py', 'scripts/check_paddle_models.py', 'scripts/native_package.py',
 )
 
@@ -95,3 +97,13 @@ def test_separate_control_frontend_always_preserves_loader_local_runtime():
     assert fast.index('--verify-report') < fast.index('benchmark.py build')
     assert 'production-coreml-worker-${{ github.sha }}' in fast
     assert 'native-coreml-diagnostic-frontend-${{ github.sha }}' in fast
+
+
+def test_new_shape_guards_run_without_replacing_real_compatibility():
+    fast = WORKFLOW.read_text(encoding='utf-8')
+    full = (ROOT / '.github/workflows/native-ocr.yml').read_text(encoding='utf-8')
+    for value in (fast, full):
+        assert 'tests/test_native_shape_evidence.py' in value
+        assert 'tests/test_native_coreml_adapter.py' in value
+    assert fast.index('pip install -r requirements-native-inference.txt') < fast.index('pytest tests/test_native_shape_evidence.py')
+    assert fast.index('pytest tests/test_native_shape_evidence.py') < fast.index('ci_coreml_compat.py --output')
