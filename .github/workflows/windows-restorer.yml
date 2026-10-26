@@ -1,0 +1,63 @@
+name: Isolated Windows volume restorer diagnostic
+
+# This workflow and the exact diagnostic-branch exclusions are NOT release code.
+on:
+  push:
+    branches: [fix/windows-restorer]
+    paths: ['.github/workflows/windows-restorer.yml', 'native/windows-restorer/**', 'scripts/release_volume_transport.py', 'scripts/run_windows_restorer_ci.py', 'tests/test_release_volume_transport.py', 'tests/test_windows_restorer_ci.py']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-restorer-diagnostic-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  native-server:
+    name: Native restorer / ${{ matrix.os }} / synthetic only
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Install build-side safety test dependencies only
+        run: python -m pip install packaging pytest==8.3.5
+      - name: Transport and isolated-trigger safety tests
+        run: >-
+          python -m pytest tests/test_release_volume_transport.py tests/test_windows_restorer_ci.py
+          tests/test_release_profiles.py tests/test_windows_verification.py -q
+          --junitxml=test-results/restorer-safety.xml
+      - name: Fixed-header and exact-source offline tests
+        run: python -m unittest discover -s native/windows-restorer/tests -p "test_*.py" -v
+      - name: Native static-runtime restore with real ZIP64 over 2 GiB
+        run: >-
+          python scripts/run_windows_restorer_ci.py --runner ${{ matrix.os }}
+          --work-directory build/restorer-native --report-directory test-results/restorer-server
+      - name: Save diagnostic evidence only (never EXEs, volumes or release assets)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: restorer-diagnostic-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            test-results/restorer-safety.xml
+            test-results/restorer-server/
+            build/restorer-native/**/*.log
+            build/restorer-native/**/*.txt
+            build/restorer-native/**/*report.json
+            build/restorer-native/**/*record.json
+            build/restorer-native/**/fixture-source/
+          if-no-files-found: error
+          retention-days: 14

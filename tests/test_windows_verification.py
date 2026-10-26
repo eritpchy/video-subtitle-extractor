@@ -196,7 +196,7 @@ class WorkflowContractTests(unittest.TestCase):
         push = text.split('  push:\n', 1)[1].split('  pull_request:\n', 1)[0]
         # An explicit branches filter excludes tag pushes while '**' keeps
         # slash-containing branches such as release/2.3.0 in the existing CI.
-        self.assertIn("    branches: ['**']\n", push)
+        self.assertIn("    branches: ['**', '!fix/windows-restorer']\n", push)
         self.assertNotRegex(push, r'(?m)^    (?:tags|tags-ignore|branches-ignore):')
         # Frozen-byte attributes and branding assets affect the built payload
         # just as source changes do; both must retain automatic matrix coverage.
