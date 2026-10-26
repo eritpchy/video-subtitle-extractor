@@ -1,6 +1,23 @@
 name: Isolated production Mac CoreML compatibility
 
 on:
+  push:
+    branches: ['fix/macos-coreml']
+    paths:
+      - '.github/workflows/macos-coreml.yml'
+      - '.github/actionlint.yaml'
+      - '.gitattributes'
+      - 'native/ocr/**'
+      - 'requirements-native-inference.txt'
+      - 'backend/tools/native_ocr.py'
+      - 'backend/tools/hardware_accelerator.py'
+      - 'backend/tools/paddle_model_config.py'
+      - 'backend/tools/ocr.py'
+      - 'backend/tools/subtitle_detect.py'
+      - 'backend/tools/directml_ocr.py'
+      - 'scripts/check_native_models.py'
+      - 'scripts/check_paddle_models.py'
+      - 'scripts/native_package.py'
   workflow_dispatch:
 
 permissions:

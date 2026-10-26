@@ -195,8 +195,8 @@ class WorkflowContractTests(unittest.TestCase):
         text = (ROOT / '.github/workflows/release.yml').read_text()
         push = text.split('  push:\n', 1)[1].split('  pull_request:\n', 1)[0]
         # An explicit branches filter excludes tag pushes while '**' keeps
-        # slash-containing branches such as release/2.3.0 in the existing CI.
-        self.assertIn("    branches: ['**']\n", push)
+        # slash-containing branches; only this isolated diagnostic ref is excluded.
+        self.assertIn("    branches: ['**', '!fix/macos-coreml']\n", push)
         self.assertNotRegex(push, r'(?m)^    (?:tags|tags-ignore|branches-ignore):')
         # Frozen-byte attributes and branding assets affect the built payload
         # just as source changes do; both must retain automatic matrix coverage.
