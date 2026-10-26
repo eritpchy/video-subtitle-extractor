@@ -10,11 +10,11 @@ PATHS = (
     'backend/tools/ocr.py', 'backend/tools/subtitle_detect.py', 'backend/tools/directml_ocr.py',
     'backend/main.py', 'backend/cli.py', 'ui/setting_interface.py',
     'scripts/prepare_source_models.py', 'scripts/check_python_coreml.py',
-    'scripts/e2e_python_coreml.py', 'scripts/paddle_package_models.py',
+    'scripts/e2e_python_coreml.py', 'scripts/e2e_smoke.py', 'scripts/paddle_package_models.py',
     'native/ocr/model-source-pins.json', 'native/ocr/tests/evidence/**',
     'native/ocr/tests/goldens/smoke.json', 'tests/test_python_coreml*.py',
-    'tests/test_prepare_source_models.py', 'tests/test_e2e_python_coreml.py',
-    'tests/test_python_source_workflow.py', 'README.md', 'README_en.md',
+    'tests/test_check_python_coreml.py', 'tests/test_prepare_source_models.py', 'tests/test_e2e_python_coreml.py',
+    'tests/test_python_source_workflow.py', 'README.md', 'README_en.md', 'docs/USAGE.md',
 )
 
 
@@ -53,6 +53,7 @@ def test_real_source_cases_video_gui_and_failure_artifacts_cannot_be_skipped_by_
     for provider, case in (('coreml', 'early'), ('coreml', 'models'), ('cpu', 'all'), ('coreml', 'all')):
         assert f'--provider {provider} --case-set {case}' in value
     assert 'scripts/e2e_python_coreml.py' in value
+    assert 'tests/test_check_python_coreml.py' in value
     assert value.index('--case-set early') < value.index('--case-set models') < value.index('--provider coreml --case-set all')
     artifact = value.split('- name: Preserve source evidence including genuine failures', 1)[1].split('- name:', 1)[0]
     assert 'if: always()' in artifact and 'test-results/python-source/' in artifact
