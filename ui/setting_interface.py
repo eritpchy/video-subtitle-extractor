@@ -6,6 +6,7 @@ from qfluentwidgets import (FluentWindow, PushButton, Slider, ProgressBar, Plain
                           FolderListSettingCard, HyperlinkCard, ColorSettingCard, 
                           CustomColorSettingCard)
 from backend.config import config, tr, HARDWARD_ACCELERATION_OPTION
+from ui.macos_setting_controls import adapt_macos_setting_combo
 
 class SettingInterface(QtWidgets.QVBoxLayout):
 
@@ -44,6 +45,7 @@ class SettingInterface(QtWidgets.QVBoxLayout):
             parent=parent,
             texts=[tr['Mode'][i] for i in config.mode.validator.options],
         )
+        adapt_macos_setting_combo(self.mode_combo)
         self.addWidget(self.mode_combo)
            
         # A native-coreml package has a real switch: disabling it explicitly

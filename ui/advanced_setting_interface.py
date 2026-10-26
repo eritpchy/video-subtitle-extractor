@@ -15,6 +15,7 @@ from backend.tools.version_service import VersionService
 from backend.tools.concurrent import TaskExecutor
 from backend.tools.constant import VideoSubFinderDecoder
 from backend.tools.native_ocr import selected_backend
+from ui.macos_setting_controls import adapt_macos_setting_combo
 
 class AdvancedSettingInterface(ScrollArea):
     """高级设置页面"""
@@ -96,6 +97,7 @@ class AdvancedSettingInterface(ScrollArea):
             texts=[theme_labels[mode] for mode in config.themeMode.options],
             parent=self.appearance_group,
         )
+        adapt_macos_setting_combo(self.theme_mode)
         # 高级设置组
         self.advanced_group = SettingCardGroup(tr["Setting"]["AdvancedSetting"], self.scrollWidget)
         # VideoSubFinder设置组
