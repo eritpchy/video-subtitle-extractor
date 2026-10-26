@@ -2,7 +2,7 @@
 from array import array
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import struct
 import subprocess
 from types import SimpleNamespace
@@ -207,6 +207,38 @@ def test_bundled_runtime_retains_pinned_license_and_notices(tmp_path):
     copied = diag.stage_runtime_notices(sdk, {'files': records}, output)
     assert {row['file'] for row in copied} == {'ort-notices/' + row['path'] for row in records}
     assert all(diag.digest(output / row['file']) == row['sha256'] for row in copied)
+    (sdk / 'LICENSE').write_text('modified license must not be accepted')
+    other_output = tmp_path / 'other-output'
+    other_output.mkdir()
+    with pytest.raises(ValueError, match='Pinned input integrity mismatch'):
+        diag.stage_runtime_notices(sdk, {'files': records}, other_output)
+
+
+def test_notice_manifest_uses_portable_paths_with_windows_path_semantics(monkeypatch):
+    # Exercise the production function with Windows path objects on every host,
+    # without mutating os.name or attempting Windows filesystem operations.
+    sdk, output = PureWindowsPath('C:/sdk'), PureWindowsPath('C:/output')
+    records = [
+        {'path': 'LICENSE', 'role': 'notice', 'sha256': 'a' * 64},
+        {'path': 'docs/ThirdPartyNotices.txt', 'role': 'notice', 'sha256': 'b' * 64},
+        {'path': 'onnxruntime.dll', 'role': 'runtime', 'sha256': 'c' * 64},
+    ]
+    directories, copies, verified = [], [], []
+    monkeypatch.setattr(PureWindowsPath, 'mkdir', lambda path: directories.append(path), raising=False)
+    monkeypatch.setattr(diag.shutil, 'copy2', lambda source, destination: copies.append((source, destination)))
+
+    def pinned(path, sha):
+        verified.append((path, sha))
+        return {'sha256': sha, 'path': str(path), 'bytes': 1}
+
+    monkeypatch.setattr(diag, 'pinned_file', pinned)
+    result = diag.stage_runtime_notices(sdk, {'files': records}, output)
+    assert directories == [output / 'ort-notices']
+    assert [row['file'] for row in result] == ['ort-notices/LICENSE', 'ort-notices/ThirdPartyNotices.txt']
+    assert [row['sha256'] for row in result] == ['a' * 64, 'b' * 64]
+    assert copies == [(sdk / row['path'], output / 'ort-notices' / PureWindowsPath(row['path']).name)
+                      for row in records if row['role'] == 'notice']
+    assert verified == [(path, row['sha256']) for row, pair in zip(records, copies) for path in pair]
 
 
 def test_macos_diagnostic_rejects_absolute_ci_rpath_or_other_dependencies():

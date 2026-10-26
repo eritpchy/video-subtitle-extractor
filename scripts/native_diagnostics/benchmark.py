@@ -232,7 +232,7 @@ def stage_runtime_notices(sdk, record, output):
         pinned_file(source, row['sha256'])
         destination = directory / Path(row['path']).name
         shutil.copy2(source, destination)
-        files.append({'file': str(destination.relative_to(output)),
+        files.append({'file': destination.relative_to(output).as_posix(),
                       **pinned_file(destination, row['sha256'])})
     return files
 
