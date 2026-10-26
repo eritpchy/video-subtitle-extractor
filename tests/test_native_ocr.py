@@ -35,6 +35,7 @@ if '--capabilities' in sys.argv:
   for ch in json.dumps(out): sys.stdout.write(ch);sys.stdout.flush()
  else: print(json.dumps(out))
  sys.exit(0)
+shape_states={}
 while True:
  h=sys.stdin.buffer.read(4)
  if not h: break
@@ -65,6 +66,14 @@ while True:
  now=time.time_ns();mono=time.monotonic_ns()
  out['execution_window']={'worker_pid':os.getpid(),'utc_start_ns':now,'utc_end_ns':now,
   'monotonic_start_ns':mono,'monotonic_end_ns':mono,'monotonic_clock':'fixture'}
+ if coreml:
+  for role,item in list(sessions.items()):
+   if item is None: continue
+   k=(req['tier'],req['rec_model'],req['operation'],role)
+   prior=shape_states.get(k,{'total':0,'window':out['execution_window']})
+   total=prior['total']+int(item['status']=='executed')
+   sessions[role]=shape_aggregate(item,role,out['execution_window'],total=total,first_window=prior['window'])
+   shape_states[k]={'total':total,'window':prior['window']}
  if behavior=='wrong_provider': out['actual_provider']='CPUExecutionProvider' if coreml else 'CoreMLExecutionProvider'
  if behavior=='gpu_claim': evidence['gpu_execution_verified']=True
  if behavior=='no_coreml':
@@ -78,6 +87,8 @@ while True:
  payload=json.dumps(out).encode()
  sys.stdout.buffer.write(struct.pack('<I',len(payload))+payload);sys.stdout.buffer.flush()
 '''
+# Pure synthetic protocol construction is shared with offline receipt tests.
+WORKER = (Path(__file__).with_name('native_shape_evidence.py').read_text(encoding='utf-8') + '\n' + WORKER)
 
 @pytest.fixture
 def native_root(tmp_path, monkeypatch):

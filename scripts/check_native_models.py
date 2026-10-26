@@ -109,8 +109,10 @@ def _request_evidence(row, provider, worker_sha256, models, goldens):
         for key in ('capture', 'request_run_count', 'session_run_count', 'evidence_reused'):
             if key not in session:
                 raise ValueError('Native session lacks precise capture/reuse semantics')
-        if provider == 'coreml' and session['status'] == 'executed' and 'profile_window' not in session:
-            raise ValueError('CoreML first-run evidence has no attributable process/time window')
+        # validate_execution_evidence requires every executed CoreML shape's
+        # exact binding, first-run window, counters and aggregate consistency.
+        # The aggregate deliberately has no single profile_window: different
+        # widths can execute distinct compiled sessions in one request.
         name = session['model']
         if row.get('model_sha256', {}).get(name) != models[name]:
             raise ValueError('Native execution is not bound to the fixed FP32 model')
@@ -188,6 +190,9 @@ def validate_report(report, identity=None, *, required_providers=PROVIDERS):
             if execution_identity in requests_seen:
                 raise ValueError('A native request was replayed as a second mode/provider/input case')
             requests_seen.add(execution_identity)
+        if provider == 'coreml':
+            from backend.tools.native_ocr import validate_coreml_record_sequence
+            validate_coreml_record_sequence([row['request_evidence'] for row in rows])
         if covered != frozen.ALL_MODELS or group.get('covered_models') != sorted(covered):
             raise ValueError('Incomplete actual native model execution coverage')
     # Both compare against precisely the same baseline, not separate tolerances.

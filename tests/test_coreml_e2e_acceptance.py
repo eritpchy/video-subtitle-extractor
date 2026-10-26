@@ -13,6 +13,7 @@ import pytest
 
 from scripts import accept_release_archive as acceptance
 from scripts import e2e_smoke as smoke
+from tests.native_shape_evidence import shape_aggregate
 
 
 WORKER_SHA256 = 'a' * 64
@@ -37,7 +38,7 @@ def raw_record(mode='fast', *, provider='coreml', request_id=1, worker_pid=123):
                   'observed_providers': ['CPUExecutionProvider'] + (['CoreMLExecutionProvider'] if coreml else []),
                   'gpu_execution_verified': False}
         if coreml:
-            result['profile_window'] = deepcopy(window)
+            result = shape_aggregate(result, role, window)
         return result
     evidence = {'schema_version': 1, 'requested_provider': provider, 'actual_provider': actual,
                 'compute_units': 'CPUAndGPU' if coreml else 'CPUOnly', 'ane_allowed': False,
@@ -156,8 +157,8 @@ def archive_evidence(tmp_path):
     paths = {}
     for index, mode in enumerate(smoke.MODES, 1):
         directory = tmp_path / relative / f'bundle-coreml-e2e-{mode}'
-        record = directory / f'native-requests/native-ocr-123-{index}.json'
-        write_json(record, raw_record(mode, request_id=index))
+        record = directory / f'native-requests/native-ocr-{123 + index}-1.json'
+        write_json(record, raw_record(mode, request_id=1, worker_pid=123 + index))
         report = {'result': 'passed', 'mode': mode, 'requested_provider': 'coreml', 'cpu_forced': False,
                   'gpu_inference_verified': False, 'command': ['python', '-m', 'backend.cli', 'input.mp4', '--mode', mode]}
         smoke.collect_coreml_video_evidence(record.parent, report)
@@ -278,7 +279,7 @@ def test_archive_detects_evidence_changed_after_validation(archive_evidence):
     lambda record: record['request'].update(image_sha256='not-a-sha256'),
     lambda record: record['request'].update(image_bytes=True),
     lambda record: (record['request'].update(id=True), record['response'].update(id=True)),
-    lambda record: [record['response']['execution_evidence']['sessions'][role].pop('profile_window')
+    lambda record: [record['response']['execution_evidence']['sessions'][role]['shape_sessions'][0].pop('profile_window')
                     for role in ('det', 'rec')],
     lambda record: [record['response']['execution_evidence']['sessions'][role].pop(key)
                     for role in ('det', 'rec') for key in ('capture', 'request_run_count', 'session_run_count', 'evidence_reused')],
@@ -309,3 +310,23 @@ def test_request_seen_set_is_shared_across_clean_and_polluted_environment_gates(
     acceptance._coreml_video_evidence(evidence, root, relative, 'clean', worker_sha256=WORKER_SHA256, seen_requests=seen)
     with pytest.raises(RuntimeError, match='replayed'):
         acceptance._coreml_video_evidence(evidence, root, relative, 'polluted', worker_sha256=WORKER_SHA256, seen_requests=seen)
+
+
+def test_complete_video_receipt_rejects_old_profile_relabelled_for_new_width():
+    from backend.tools.native_ocr import validate_execution_evidence
+    first = raw_record()
+    second = deepcopy(first)
+    second['request']['id'] = second['response']['id'] = 2
+    for field in ('utc_start_ns', 'utc_end_ns', 'monotonic_start_ns', 'monotonic_end_ns'):
+        second['response']['execution_window'][field] += 1000
+    for role, session in second['response']['execution_evidence']['sessions'].items():
+        session.update(session_run_count=2, evidence_reused=True)
+        item = session['shape_sessions'][0]
+        item.update(session_run_count=2, evidence_reused=True)
+        if role == 'rec':
+            item['input_shape'][3] = 640
+            item['free_dimension_overrides']['DynamicDimension.1'] = 640
+    validate_execution_evidence(second['response'], second['request'], worker_pid=123)
+    report = {'requested_provider': 'coreml', 'cpu_forced': False, 'gpu_inference_verified': False, 'mode': 'fast'}
+    with pytest.raises(ValueError, match='shape/profile identity'):
+        smoke.validate_coreml_video_evidence(report, [second, first])
