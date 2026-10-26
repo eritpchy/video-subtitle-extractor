@@ -61,10 +61,10 @@ def test_only_the_isolated_snapshot_may_add_its_precise_push_trigger():
             push = workflow.split('  push:', 1)[1].split('  pull_request:', 1)[0]
             assert "branches: ['**', '!fix/macos-coreml']" in push
     else:
-        # This is the main implementation, not its isolated trigger snapshot.
+        # This isolated Python-source diagnostic does not enable the Native fast job.
         for workflow in (release, standard):
             push = workflow.split('  push:', 1)[1].split('  pull_request:', 1)[0]
-            assert "branches: ['**']" in push
+            assert "branches: ['**', '!fix/python-source-coreml']" in push
             assert '!fix/macos-coreml' not in push
     assert '  pull_request:' in release and '  pull_request:' in standard
     assert '  workflow_dispatch:' in release and '  workflow_dispatch:' in standard

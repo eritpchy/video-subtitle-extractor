@@ -95,7 +95,7 @@ class ReleaseProfileTests(unittest.TestCase):
     def test_workflow_is_automatic_but_never_publishes(self):
         workflow = (ROOT / '.github/workflows/release.yml').read_text()
         self.assertIn('  push:', workflow)
-        self.assertIn("branches: ['**']", workflow)
+        self.assertIn("branches: ['**', '!fix/python-source-coreml']", workflow)
         self.assertNotIn('contents: write', workflow)
         self.assertNotIn('--publish', workflow)
         self.assertNotIn('softprops/action-gh-release', workflow)

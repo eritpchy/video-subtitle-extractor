@@ -1,6 +1,40 @@
 name: Complete Python source inference validation
 
 on:
+  push:
+    branches: ['fix/python-source-coreml']
+    paths:
+      - '.github/workflows/python-source.yml'
+      - '.github/actionlint.yaml'
+      - '.gitattributes'
+      - 'requirements-coreml-inference.txt'
+      - 'backend/tools/python_coreml_ocr.py'
+      - 'backend/tools/python_coreml_runtime.json'
+      - 'backend/tools/native_ocr.py'
+      - 'backend/tools/hardware_accelerator.py'
+      - 'backend/tools/paddle_model_config.py'
+      - 'backend/tools/ocr.py'
+      - 'backend/tools/subtitle_detect.py'
+      - 'backend/tools/directml_ocr.py'
+      - 'backend/main.py'
+      - 'backend/cli.py'
+      - 'ui/setting_interface.py'
+      - 'scripts/prepare_source_models.py'
+      - 'scripts/check_python_coreml.py'
+      - 'scripts/e2e_python_coreml.py'
+      - 'scripts/e2e_smoke.py'
+      - 'scripts/paddle_package_models.py'
+      - 'native/ocr/model-source-pins.json'
+      - 'native/ocr/tests/evidence/**'
+      - 'native/ocr/tests/goldens/smoke.json'
+      - 'tests/test_python_coreml*.py'
+      - 'tests/test_check_python_coreml.py'
+      - 'tests/test_prepare_source_models.py'
+      - 'tests/test_e2e_python_coreml.py'
+      - 'tests/test_python_source_workflow.py'
+      - 'README.md'
+      - 'README_en.md'
+      - 'docs/USAGE.md'
   workflow_dispatch:
 
 permissions:
