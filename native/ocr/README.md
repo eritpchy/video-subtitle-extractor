@@ -162,16 +162,28 @@ accumulation without replacing/converting the model assets. Registration failure
 or no observed CoreML kernel execution fails the request; CPU use must be explicit.
 Mixed ORT CoreML/CPU partitions are allowed but reported. Every success includes
 `requested_provider`, `actual_provider`, and `execution_evidence.sessions.det/rec`.
-CoreML sessions profile their first successful `OrtRun`; later requests explicitly
-mark reused evidence. Event counts describe EP execution, **not GPU utilization**,
+CoreML reads the unchanged ONNX input metadata and binds named dynamic dimensions
+with ORT's `AddFreeDimensionOverrideByName` to the exact preprocessed tensor before
+session creation. It also requires static CoreML input shapes. Detection retains
+an LRU of at most two exact-shape sessions; recognition retains at most four. Batch
+sizes (including partial last batches), widths, tensor values and preprocessing
+are unchanged; there is no shape bucketing, extra padding or batch-one fallback.
+CPU sessions keep their original dynamic-shape path.
+
+Each shape session profiles its first successful `OrtRun`; later requests explicitly
+mark reused evidence. `shape_sessions` contains only instances used in this request,
+including those subsequently evicted. IDs are process-unique; cached IDs are listed
+in LRU order. Aggregate event counts sum each instance's first profile once, not
+once per Run. A new shape cannot borrow another shape's execution proof.
+Event counts describe EP execution, **not GPU utilization**,
 and `gpu_execution_verified` remains false. Production retains only the bounded
 summary and deletes the private raw profile; the independent diagnostic preserves
 raw evidence for audits. A blank image's recognizer is `not_run`, even when that
 cached recognizer executed on an earlier image. Detect-only has `rec=null`.
 
 `execution_window` identifies the worker PID and UTC/steady-clock nanosecond
-interval for the OCR pipeline (including lazy recognizer initialization, excluding
-image decoding and initial detector setup). CoreML `profile_window` identifies only
+interval for the OCR pipeline (including lazy CoreML shape-session initialization,
+excluding image decoding and eager CPU detector setup). Each child `profile_window` identifies only
 the first successful model Run. These allow external trace correlation; neither is
 hardware attribution. Same-device CPU/CoreML parity, actual GPU evidence and total
 video performance remain Mac acceptance gates, not results of a Linux build.
@@ -195,8 +207,10 @@ For an independently authorized evidence run only, set both
   that request to one hash-verified frozen fixture and the pinned model assets.
   Existing output directories and extra requests are refused before capture.
 
-On a supported Mac, both OCR sessions are initialized before a private new
-owner-only output directory is created. Capture covers the single `predict` call,
+On a supported Mac, a private new owner-only output directory is created.
+Capture covers the single `predict` call, including lazy CoreML shape-session
+compilation because actual recognition batch shapes depend on detector output. It
+does not insert an unreported warmup or additional inference. Capture
 stops on success or exception, and writes only `metal-capture.gputrace` there. The
 worker responds once and exits; there is no profiler or CPU substitution. The
 response adds `diagnostic_only=true`, `timing_eligible=false`, and explicit

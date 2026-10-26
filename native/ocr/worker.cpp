@@ -5,6 +5,7 @@
 #include "json.hpp"
 #include "onnxruntime_c_api.h"
 #include "provider_evidence.hpp"
+#include "input_shape.hpp"
 #include "protocol_output.hpp"
 #include "metal_capture.hpp"
 #include <algorithm>
@@ -153,21 +154,51 @@ struct Session {
   bool profiling = false;
   uint64_t run_count = 0, request_run_count = 0;
   J execution_evidence;
+  OrtEnv *environment = nullptr;
+  fs::path model_path;
+  int thread_count = 0;
+  bool shape_dispatcher = false;
+  size_t shape_capacity = 4;
+  uint64_t shape_id = 0;
+  native_shape::Input input_metadata;
+  std::vector<int64_t> bound_shape;
+  std::map<std::string, int64_t> dimension_overrides;
+  std::vector<std::unique_ptr<Session>> shape_cache;
+  // Snapshots outlive LRU eviction and belong only to the current request.
+  std::map<uint64_t, J> request_shapes;
 #ifdef VSE_OCR_PRECISION_DIAGNOSTIC
   fs::path diagnostic_model;
 #endif
   Session(OrtEnv *env, const fs::path &path, int threads,
-          const std::string &requested_provider = "cpu")
+          const std::string &requested_provider = "cpu",
+          const std::vector<int64_t> &fixed_shape = {},
+          const native_shape::Input *known_input = nullptr,
+          size_t cache_capacity = 4)
       : provider(requested_provider), model(model_identifier(path)),
         execution_evidence(native_provider::initial_session_evidence(provider,
-                                                                     model)) {
+                                                                     model)),
+        environment(env), model_path(path), thread_count(threads),
+        shape_capacity(cache_capacity), bound_shape(fixed_shape) {
     require_provider(provider);
+    if (provider == "coreml" || !fixed_shape.empty()) {
+      input_metadata = known_input ? *known_input : native_shape::read_input(path);
+      if (fixed_shape.empty()) {
+        if (shape_capacity < 1 || shape_capacity > 4)
+          throw std::runtime_error("invalid CoreML shape cache capacity");
+        shape_dispatcher = true;
+        return; // Real preprocessed tensor shape is not known until Run.
+      }
+      dimension_overrides = native_shape::overrides(input_metadata, fixed_shape);
+    }
     OrtSessionOptions *o = nullptr;
     check(api->CreateSessionOptions(&o));
     try {
       check(api->SetIntraOpNumThreads(o, threads));
       check(api->SetInterOpNumThreads(o, 1));
       check(api->SetSessionGraphOptimizationLevel(o, ORT_ENABLE_ALL));
+      for (const auto &dimension : dimension_overrides)
+        check(api->AddFreeDimensionOverrideByName(o, dimension.first.c_str(),
+                                                dimension.second));
       if (provider == "coreml") {
 #ifdef __APPLE__
         // A private, bounded first-inference profile proves EP execution, not
@@ -183,7 +214,7 @@ struct Session {
         const char *keys[] = {"ModelFormat", "MLComputeUnits",
                              "AllowLowPrecisionAccumulationOnGPU",
                              "RequireStaticInputShapes", "EnableOnSubgraphs"};
-        const char *values[] = {"MLProgram", "CPUAndGPU", "0", "0", "0"};
+        const char *values[] = {"MLProgram", "CPUAndGPU", "0", "1", "0"};
         check(api->SessionOptionsAppendExecutionProvider(o, "CoreML", keys,
                                                         values, 5));
         profiling = true;
@@ -202,6 +233,23 @@ struct Session {
       check(api->SessionGetInputName(s, 0, a, &n));
       input = n;
       a->Free(a, n);
+      if (!bound_shape.empty()) {
+        if (input != input_metadata.name)
+          throw std::runtime_error("bound ONNX input identity changed");
+        OrtTypeInfo *type = nullptr;
+        check(api->SessionGetInputTypeInfo(s, 0, &type));
+        try {
+          const OrtTensorTypeAndShapeInfo *tensor = nullptr;
+          check(api->CastTypeInfoToTensorInfo(type, &tensor));
+          size_t rank = 0;
+          check(api->GetDimensionsCount(tensor, &rank));
+          std::vector<int64_t> dimensions(rank);
+          check(api->GetDimensions(tensor, dimensions.data(), rank));
+          if (dimensions != bound_shape)
+            throw std::runtime_error("ORT did not bind the exact input shape");
+        } catch (...) { api->ReleaseTypeInfo(type); throw; }
+        api->ReleaseTypeInfo(type);
+      }
       check(api->SessionGetOutputName(s, 0, a, &n));
       output = n;
       a->Free(a, n);
@@ -229,6 +277,19 @@ struct Session {
     }
   }
   J request_evidence() const {
+    if (shape_dispatcher) {
+      J snapshots = J::array();
+      for (const auto &entry : request_shapes) snapshots.push_back(entry.second);
+      auto result = native_provider::summarize_shape_sessions(
+          model, snapshots, run_count, request_run_count);
+      result["cache_capacity"] = shape_capacity;
+      result["cached_shape_session_count"] = shape_cache.size();
+      result["cached_shape_session_ids"] = J::array();
+      for (const auto &child : shape_cache)
+        result["cached_shape_session_ids"].push_back(child->shape_id);
+      result["shape_cache_scope"] = "exact_input_shape_lru";
+      return result;
+    }
     // A recognizer used by a previous image is not execution evidence for a
     // later blank image. Preserve the session lifetime count separately.
     J evidence = request_run_count ? execution_evidence
@@ -239,7 +300,18 @@ struct Session {
                                                : "explicit_cpu_session";
     evidence["evidence_reused"] = provider == "coreml" && request_run_count &&
                                    run_count > request_run_count;
+    if (!bound_shape.empty()) {
+      evidence["shape_session_id"] = shape_id;
+      evidence["input_shape"] = bound_shape;
+      evidence["free_dimension_overrides"] = dimension_overrides;
+      evidence["require_static_input_shapes"] = provider == "coreml";
+    }
     return evidence;
+  }
+  void begin_request() {
+    request_run_count = 0;
+    request_shapes.clear();
+    for (auto &child : shape_cache) child->begin_request();
   }
   void record_first_execution() {
     if (provider == "cpu") {
@@ -287,6 +359,40 @@ struct Session {
   Tensor run(Tensor &x, int timeout) {
     if (!provider_error.empty())
       throw std::runtime_error(provider_error);
+    if (shape_dispatcher) {
+      const auto start = std::chrono::steady_clock::now();
+      // Validate before cache lookup too: never run a different batch/tensor
+      // shape through a session compiled for a nearby padded/bucketed shape.
+      native_shape::overrides(input_metadata, x.shape);
+      auto found = std::find_if(shape_cache.begin(), shape_cache.end(),
+          [&](const auto &child) { return child->bound_shape == x.shape; });
+      std::unique_ptr<Session> selected;
+      if (found != shape_cache.end()) {
+        selected = std::move(*found);
+        shape_cache.erase(found);
+      } else {
+        if (shape_cache.size() == shape_capacity) shape_cache.erase(shape_cache.begin());
+        selected = std::make_unique<Session>(environment, model_path, thread_count,
+                                            provider, x.shape, &input_metadata);
+        // Process-wide IDs survive Engine replacement and cannot recycle an
+        // evicted session identity when model/operation/provider changes.
+        static std::atomic<uint64_t> shape_sequence{0};
+        selected->shape_id = ++shape_sequence;
+      }
+      shape_cache.push_back(std::move(selected));
+      auto &child = *shape_cache.back();
+      const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - start).count();
+      if (elapsed >= timeout)
+        throw std::runtime_error("request inference deadline exceeded during shape session initialization");
+      auto output = child.run(x, timeout - static_cast<int>(elapsed));
+      ++run_count;
+      ++request_run_count;
+      request_shapes[child.shape_id] = child.request_evidence();
+      return output;
+    }
+    if (!bound_shape.empty() && x.shape != bound_shape)
+      throw std::runtime_error("input tensor shape differs from bound session");
     OrtMemoryInfo *m = nullptr;
     check(api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &m));
     Value in, out;
@@ -557,7 +663,7 @@ struct Engine {
          const std::string &tier, const std::string &rec_name, int thread_count,
          bool detect_only, const std::string &requested_provider = "cpu")
       : det(env, models / ("PP-OCRv6_" + tier + "_det_infer.onnx"),
-            thread_count, requested_provider),
+            thread_count, requested_provider, {}, nullptr, 2),
         environment(env), rec_path(models / (rec_name + "_infer.onnx")),
         threads(thread_count), provider(requested_provider) {
     std::ifstream f(configs / (tier + ".json"));
@@ -633,9 +739,9 @@ struct Engine {
             {"sessions", {{"det", det_evidence}, {"rec", rec_evidence}}}};
   }
   J predict(const cv::Mat &src, int timeout, bool detect_only, int batch_size) {
-    det.request_run_count = 0;
+    det.begin_request();
     if (rec)
-      rec->request_run_count = 0;
+      rec->begin_request();
     auto deadline =
         std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout);
     auto remaining = [&]() {
@@ -1095,8 +1201,8 @@ int main(int argc, char **argv) {
           const auto capability = diagnostic_capture::capabilities();
           if (!capability.at("available").get<bool>())
             throw std::runtime_error("Metal capture is unavailable; no fallback or alternative profiler");
-          // Compile/load both sessions before capture. This diagnostic is not
-          // a cold-start timing and must not attribute lazy compilation to Run.
+          // CPU sessions are eager; CoreML sessions bind only once actual
+          // tensors exist. Capture therefore includes lazy shape compilation.
           if (!detect_only && !engine->rec)
             engine->rec = std::make_unique<Session>(
                 env, engine->rec_path, engine->threads, provider);
@@ -1118,7 +1224,7 @@ int main(int argc, char **argv) {
         ExecutionClock inference_end;
         result["execution_window"] = execution_window(
             inference_start, inference_end,
-            "OCR pipeline including pre/postprocessing, model Runs and lazy recognizer initialization; excludes image decoding and initial detector/session setup");
+            "OCR pipeline including pre/postprocessing, model Runs and lazy CoreML shape-session initialization; excludes image decoding and eager CPU detector/session setup");
         if (metal_capture) {
           diagnostic_capture::stop();
           capture_guard.enabled = false;
@@ -1128,7 +1234,7 @@ int main(int argc, char **argv) {
           capture["request_id"] = result["id"];
           capture["timing_eligible"] = false;
           capture["gpu_execution_verified"] = false;
-          capture["scope"] = "single explicit IPC request OCR pipeline after detector/recognizer session setup; selected Metal device-object coverage and executed CoreML GPU attribution remain unverified";
+          capture["scope"] = "single explicit IPC request OCR pipeline including lazy CoreML shape-session compilation; selected Metal device-object coverage and executed CoreML GPU attribution remain unverified";
         }
         result[detect_only ? "dt_polys" : "result"] = prediction;
         result["cpu_threads"] = cpu_threads;

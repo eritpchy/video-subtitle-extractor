@@ -15,7 +15,7 @@ def test_coreml_is_explicit_mac_only_and_does_not_enable_ane():
     assert '#ifdef __APPLE__' in eligibility
     assert '"1.31.0"' in eligibility
     assert '"CoreMLExecutionProvider"' in eligibility
-    assert 'const char *values[] = {"MLProgram", "CPUAndGPU", "0", "0", "0"}' in source
+    assert 'const char *values[] = {"MLProgram", "CPUAndGPU", "0", "1", "0"}' in source
     assert '"CPUAndNeuralEngine"' not in source
     assert 'SessionOptionsAppendExecutionProvider(o, "CoreML"' in source
 
@@ -27,6 +27,23 @@ def test_legacy_cpu_calls_remain_cpu_and_engine_cache_includes_provider():
     assert '":" + operation + ":" + provider' in source
     assert 'rec_path, threads, provider' in source
     assert 'result["execution_evidence"] = engine->provider_evidence()' in source
+
+
+def test_coreml_specializes_exact_real_shapes_without_model_or_batch_rewrite():
+    source = (ROOT / 'worker.cpp').read_text(encoding='utf-8')
+    assert 'native_shape::read_input(path)' in source
+    assert 'AddFreeDimensionOverrideByName' in source
+    assert 'if (dimensions != bound_shape)' in source
+    assert 'if (!bound_shape.empty() && x.shape != bound_shape)' in source
+    assert 'shape_cache.size() == shape_capacity' in source
+    assert 'request_shapes[child.shape_id] = child.request_evidence()' in source
+    assert 'request_shapes.clear()' in source
+    assert 'static std::atomic<uint64_t> shape_sequence{0}' in source
+    assert 'cached_shape_session_ids' in source
+    assert 'thread_count, requested_provider, {}, nullptr, 2' in source
+    assert 'size_t cache_capacity = 4' in source
+    assert 'batch.shape = {n, 3, rec_h, bw}' in source
+    assert 'input_shape_sha256' in (ROOT / 'build.py').read_text(encoding='utf-8')
 
 
 def test_capabilities_dont_require_models_or_claim_gpu_execution():
@@ -50,8 +67,8 @@ def test_worker_requires_optout_before_any_ort_api_use():
 
 def test_cached_first_profile_is_not_mislabeled_as_current_blank_execution():
     source = (ROOT / 'worker.cpp').read_text(encoding='utf-8')
-    assert 'det.request_run_count = 0' in source
-    assert 'rec->request_run_count = 0' in source
+    assert 'det.begin_request()' in source
+    assert 'rec->begin_request()' in source
     assert 'J evidence = request_run_count ? execution_evidence' in source
     assert 'evidence["evidence_reused"]' in source
     assert '"profile_window"' in source and '"execution_window"' in source

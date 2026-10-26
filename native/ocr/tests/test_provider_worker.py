@@ -89,6 +89,43 @@ def test_actual_cpu_cache_blank_detect_and_provider_refusal(artifact):
         assert code == 0, stderr
 
 
+@pytest.mark.parametrize('tier', ['small', 'medium'])
+def test_actual_cpu_multiline_full_partial_batches_and_shape_changes(artifact, tier):
+    path, executable = artifact
+    worker = Worker([str(executable), '--models', str(path / 'models'),
+                     '--config', str(path / 'config')])
+    request = {'tier': tier, 'provider': 'cpu',
+               'path': str(ROOT / 'tests/evidence/fixtures/multiline_2.5.png')}
+    try:
+        # The frozen fixture has two recognized lines: batch=2 is full, batch=3
+        # has an actual n=2 partial batch, batch=1 makes two separate Runs.
+        full = worker.request({**request, 'id': 70, 'batch_size': 2})
+        partial = worker.request({**request, 'id': 71, 'batch_size': 3})
+        single = worker.request({**request, 'id': 72, 'batch_size': 1})
+        assert full['ok'] and partial['ok'] and single['ok']
+        assert len(full['result'][1]) == 2
+        assert partial['result'] == full['result']
+        assert full['execution_evidence']['sessions']['rec']['request_run_count'] == 1
+        assert partial['execution_evidence']['sessions']['rec']['request_run_count'] == 1
+        assert single['execution_evidence']['sessions']['rec']['request_run_count'] == 2
+        assert single['result'][0] == full['result'][0]
+        assert [r[0] for r in single['result'][1]] == [r[0] for r in full['result'][1]]
+        # Different batch sizes can change per-batch padded width and therefore
+        # tensor bytes. Do not call their confidence difference a same-input
+        # parity failure; repeat each exact batching configuration instead.
+        repeated_single = worker.request({**request, 'id': 76, 'batch_size': 1})
+        assert repeated_single['ok'] and repeated_single['result'] == single['result']
+        for index, fixture in enumerate(('english.png', 'blank.png', 'multiline_2.5.png')):
+            result = worker.request({**request, 'id': 73 + index,
+                                     'path': str(ROOT / 'tests/evidence/fixtures' / fixture)})
+            assert result['ok']
+            if fixture == 'blank.png':
+                assert result['execution_evidence']['sessions']['rec']['status'] == 'not_run'
+    finally:
+        code, stderr = worker.close()
+        assert code == 0, stderr
+
+
 @pytest.mark.skipif(sys.platform != 'darwin', reason='actual Apple CoreML EP execution requires a Mac')
 def test_actual_coreml_first_profile_reuse_and_blank(artifact):
     path, executable = artifact

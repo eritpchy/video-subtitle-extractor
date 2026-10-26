@@ -78,4 +78,41 @@ inline Json summarize_coreml_profile(const Json &events,
   result["observed_providers"] = providers;
   return result;
 }
+
+inline Json summarize_shape_sessions(const std::string &model,
+                                     const Json &snapshots,
+                                     uint64_t lifetime_runs,
+                                     uint64_t request_runs) {
+  Json result = initial_session_evidence("coreml", model);
+  uint64_t coreml = 0, cpu = 0, runs = 0;
+  bool reused = false;
+  std::set<std::string> providers;
+  for (const auto &snapshot : snapshots) {
+    if (snapshot.at("model") != model || snapshot.at("status") != "executed" ||
+        !snapshot.at("coreml_ep_executed").get<bool>())
+      throw std::runtime_error("invalid per-shape CoreML execution evidence");
+    coreml += snapshot.at("coreml_kernel_events").get<uint64_t>();
+    cpu += snapshot.at("cpu_kernel_events").get<uint64_t>();
+    runs += snapshot.at("request_run_count").get<uint64_t>();
+    reused = reused || snapshot.at("evidence_reused").get<bool>();
+    for (const auto &provider : snapshot.at("observed_providers"))
+      providers.insert(provider.get<std::string>());
+  }
+  if (runs != request_runs || request_runs > lifetime_runs ||
+      ((request_runs > 0) != (coreml > 0)))
+    throw std::runtime_error("per-shape CoreML run evidence mismatch");
+  result["status"] = request_runs ? "executed" : "not_run";
+  result["coreml_ep_executed"] = coreml > 0;
+  result["cpu_ep_executed"] = cpu > 0;
+  result["coreml_kernel_events"] = coreml;
+  result["cpu_kernel_events"] = cpu;
+  result["observed_providers"] = providers;
+  result["session_run_count"] = lifetime_runs;
+  result["request_run_count"] = request_runs;
+  result["capture"] = "per_shape_first_successful_run";
+  result["evidence_reused"] = reused;
+  result["shape_sessions"] = snapshots;
+  result["aggregation_scope"] = "Unique shape-session instances used by this request, including evicted instances; event counts sum their first-run profiles once, not per current Run. Lifetime runs include evicted sessions.";
+  return result;
+}
 } // namespace native_provider
