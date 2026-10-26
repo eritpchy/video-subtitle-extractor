@@ -1,0 +1,19 @@
+Video Subtitle Extractor native Windows volume restorer
+
+The restorer sources are licensed under the repository's Apache License 2.0.
+A copy of the existing repository LICENSE is included in the build notices.
+
+The executable is built with Microsoft Visual C++ and statically links the
+Microsoft C/C++ runtime (/MT). Microsoft components remain subject to their
+applicable Microsoft license terms, not the Apache license. The build preserves
+both original, byte-pinned Microsoft runtime license documents already reviewed
+by this repository (native/ocr/vc-runtime-manifest.json). No runtime DLL,
+installer, or separately installed customer-side VC runtime is required.
+
+The distributor remains responsible for applicable Visual Studio toolchain and
+runtime redistribution rights. Preserving notices and using /MT do not establish
+license entitlement. The build does not download or accept a new license.
+
+Windows APIs and the Windows-provided tar.exe are operating-system components.
+No tar source, library, or executable is redistributed by this restorer. If the
+system tar.exe is unavailable, restoration fails; it never fetches a replacement.
