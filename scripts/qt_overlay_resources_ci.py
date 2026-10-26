@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -26,7 +27,7 @@ ARTIFACT = {
     'digest': 'sha256:25bbdcc961ece4f05bed906df085a66bbab86c1007e086013d17b0a21ab40747',
     'expired': False,
 }
-RUN = {'id': 40260642504, 'head_sha': '561de09ed45180362725d24640862d3fa1ceb',
+RUN = {'id': 40260642504, 'head_sha': '561de09ed45180362732725d24640862d3fa1ceb',
        'head_branch': 'fix/macos-accessibility', 'repository_id': 342871390,
        'head_repository_id': 342871390}
 ENDPOINT = 'repos/eritpchy/video-subtitle-extractor/actions/artifacts/12624219589'
@@ -42,6 +43,10 @@ def require_hosted_ci() -> None:
 
 
 def validate_metadata(metadata: dict) -> None:
+    if (not isinstance(RUN.get('head_sha'), str)
+            or re.fullmatch(r'[0-9a-f]{40}', RUN['head_sha']) is None
+            or not ARTIFACT['name'].endswith('-' + RUN['head_sha'])):
+        raise RuntimeError('Fixed source pin must be a complete matching 40-hex Git SHA')
     for name, expected in ARTIFACT.items():
         if metadata.get(name) != expected or type(metadata.get(name)) is not type(expected):
             raise RuntimeError(f'Fixed artifact metadata mismatch: {name}')

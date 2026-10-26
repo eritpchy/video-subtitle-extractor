@@ -18,6 +18,9 @@ native/ocr/model_assets.py -text
 native/ocr/verify_model_cache.py -text
 native/ocr/model_cache_identity.py -text
 
+# Independent original Qt artifact metadata is verified byte-for-byte.
+tests/fixtures/qt-overlay/artifact-12624219589.json -text
+
 # Final source receipts compare these exact checkout bytes across host platforms.
 /.github/workflows/python-source.yml -text
 /scripts/source_acceptance.py -text

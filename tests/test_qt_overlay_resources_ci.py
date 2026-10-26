@@ -1,5 +1,6 @@
 """Offline fixed-input CI resource tests; never download or execute Mac code."""
 import copy
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,9 +10,29 @@ import pytest
 
 from scripts import qt_overlay_resources_ci as module
 
+RAW_METADATA = Path(__file__).parent / 'fixtures/qt-overlay/artifact-12624219589.json'
+
 
 def metadata():
-    return {**module.ARTIFACT, 'workflow_run': dict(module.RUN)}
+    # Exact original job metadata, independent of the production pin constants.
+    return json.loads(RAW_METADATA.read_bytes())
+
+
+def test_fixed_pins_match_independent_original_job_metadata_bytes():
+    assert hashlib.sha256(RAW_METADATA.read_bytes()).hexdigest() == \
+        '28b448bca26f8c2df65f43e68220679c839ac6da454e956723288f875d5f5d24'
+    original = metadata()
+    assert original['workflow_run']['head_sha'] == '561de09ed45180362732725d24640862d3fa1ceb'
+    module.validate_metadata(original)
+
+
+@pytest.mark.parametrize('bad', ['561de09ed45180362725d24640862d3fa1ceb', 'a' * 39,
+                                'a' * 41, 'g' * 40, 'A' * 40, None])
+def test_incomplete_or_invalid_fixed_source_pin_fails_even_if_mock_agrees(monkeypatch, bad):
+    monkeypatch.setitem(module.RUN, 'head_sha', bad)
+    value = metadata();value['workflow_run']['head_sha'] = bad
+    with pytest.raises(RuntimeError, match='40-hex'):
+        module.validate_metadata(value)
 
 
 @pytest.mark.parametrize('key', list(module.ARTIFACT))
@@ -76,7 +97,11 @@ def prepared_inputs(tmp_path, monkeypatch):
     monkeypatch.setitem(module.ARTIFACT, 'digest', 'sha256:' + module.overlay.sha256(archive))
     def download(endpoint, destination, error_log):
         error_log.write_text('')
-        destination.write_bytes(json.dumps(metadata()).encode() if endpoint == module.ENDPOINT else archive.read_bytes())
+        value = metadata()
+        # Only the bounded synthetic container's byte identity is substituted.
+        value['size_in_bytes'] = module.ARTIFACT['size_in_bytes']
+        value['digest'] = module.ARTIFACT['digest']
+        destination.write_bytes(json.dumps(value).encode() if endpoint == module.ENDPOINT else archive.read_bytes())
     monkeypatch.setattr(module, 'github_to_file', download)
     small, source = b'prepared-small-resource', b'prepared-complete-source'
     def identity(name, value):
