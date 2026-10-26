@@ -229,6 +229,8 @@ def check_environment_evidence(evidence: Path, fixture: dict, profile: str, root
                 raise RuntimeError('Windows descendant has a non-bundled Python search path')
         if record.get('utf8_mode') != 1 or environment.get('PYTHONUTF8') != '1' or 'PYTHONIOENCODING' in environment:
             raise RuntimeError('App-controlled UTF-8 mode was lost')
+        if record.get('dont_write_bytecode') != 1 or record.get('bytecode_writes_disabled') is not True:
+            raise RuntimeError('App-controlled bytecode write protection was lost')
         if record['user_site_enabled'] is not False or not record['no_user_site']:
             raise RuntimeError('User-site isolation was lost in a Python child')
         # The bootstrap must preserve the documented user selections. Existing
@@ -324,6 +326,10 @@ def verify_archive(archive: Path, output: Path) -> dict:
                         case['macos_app_cli_audit'] = summarize_reports(root, app_audit, ('backend',))
                         if Path(fixture['marker']).exists():
                             raise RuntimeError('Foreign fixture executed through macOS app launcher')
+                    # Reusing the extraction must not defer a mutation failure
+                    # to the next scenario. Every inventoried byte, including
+                    # prebuilt stdlib .pyc files, remains protected by its hash.
+                    verify_payload(root, manifest)
                     case['result'] = 'passed'
                 except Exception as error:
                     case.update(result='failed', error=f'{type(error).__name__}: {error}')

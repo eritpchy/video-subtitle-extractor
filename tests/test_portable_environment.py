@@ -52,6 +52,7 @@ def staged_fixture(tmp_path, platform):
     (root / 'bootstrap.py').write_text('''import json, os, pathlib, site, sys
 root = pathlib.Path(__file__).resolve().parent
 before = dict(isolated=sys.flags.isolated, ignore_environment=sys.flags.ignore_environment, utf8_mode=sys.flags.utf8_mode,
+              dont_write_bytecode=sys.flags.dont_write_bytecode, bytecode_writes_disabled=sys.dont_write_bytecode,
               user_site_enabled=site.ENABLE_USER_SITE, args=sys.argv, path=sys.path,
               native={key:os.environ.get(key) for key in ('LD_LIBRARY_PATH','DYLD_LIBRARY_PATH','QT_PLUGIN_PATH','QT_QPA_PLATFORM_PLUGIN_PATH','PYTHONHOME','PYTHONPATH','PYTHONEXECUTABLE','__PYVENV_LAUNCHER__')})
 sys.path.insert(0,str(root))
@@ -84,6 +85,7 @@ def test_real_launcher_isolates_python_before_bootstrap(tmp_path, platform, app,
     actual = json.loads(output.read_text(encoding='utf-8'))
     before, after = actual['before'], actual['after']
     assert before['isolated'] == before['ignore_environment'] == before['utf8_mode'] == 1
+    assert before['dont_write_bytecode'] == 1 and before['bytecode_writes_disabled'] is True
     assert after['PYTHONUTF8'] == '1' and 'PYTHONIOENCODING' not in after
     assert before['user_site_enabled'] is False
     assert before['args'][1:] == ['参数 with space']
@@ -114,6 +116,7 @@ def test_isolated_launcher_retains_trusted_descendant_audit(tmp_path):
     processes = [json.loads(path.read_text()) for path in reports.glob('process-*.json')]
     assert len(processes) == 2
     assert all(record['user_site_enabled'] is False for record in processes)
+    assert all(record['dont_write_bytecode'] == 1 and record['bytecode_writes_disabled'] is True for record in processes)
     assert not Path(fixture['marker']).exists()
     # The bridge intentionally uses HOST Python: prove the strict auditor still
     # rejects it. A flag change must not turn a missing audit into a false pass.
@@ -157,6 +160,7 @@ def valid_environment_report(tmp_path):
                'forbidden_roots': ['/foreign'], 'user_sites': ['/usersite']}
     report = {'isolated': 1, 'ignore_environment': 1, 'no_user_site': 1, 'user_site_enabled': False,
               'profile': 'native', 'sys_path': [str(root)], 'utf8_mode': 1,
+              'dont_write_bytecode': 1, 'bytecode_writes_disabled': True,
               'environment': {'VSE_CONFIG_FILE': '/preferences', 'VSE_WORK_DIR': '/work',
                               'VSE_OCR_BACKEND': 'native', 'VSE_NATIVE_OCR_ROOT': str(root / 'native-ocr'), 'PYTHONUTF8': '1',
                               'VSE_VSF_BINARY': str(root / 'vsf'), 'VSE_VSF_DIR': str(root), 'IMAGEIO_FFMPEG_EXE': str(root / 'ffmpeg')}}
@@ -166,7 +170,7 @@ def valid_environment_report(tmp_path):
     return root, fixture, report
 
 
-@pytest.mark.parametrize('regression', ['isolation', 'usersite', 'config', 'profile', 'native-path', 'pythonpath', 'qtpath', 'marker', 'missing-probe'])
+@pytest.mark.parametrize('regression', ['isolation', 'usersite', 'config', 'profile', 'native-path', 'pythonpath', 'qtpath', 'marker', 'missing-probe', 'bytecode-startup', 'bytecode-effective'])
 def test_evidence_gate_fails_closed(tmp_path, regression):
     root, fixture, report = valid_environment_report(tmp_path)
     check_environment_evidence(tmp_path, fixture, 'native', root)
@@ -186,11 +190,62 @@ def test_evidence_gate_fails_closed(tmp_path, regression):
         report['environment']['QT_PLUGIN_PATH'] = '/foreign'
     elif regression == 'marker':
         Path(fixture['marker']).touch()
+    elif regression == 'bytecode-startup':
+        report['dont_write_bytecode'] = 0
+    elif regression == 'bytecode-effective':
+        report['bytecode_writes_disabled'] = False
     else:
         (tmp_path / 'dependency-isolation/process-1.json').unlink()
     (tmp_path / 'environment-report.json').write_text(json.dumps(report))
     with pytest.raises(RuntimeError):
         check_environment_evidence(tmp_path, fixture, 'native', root)
+
+
+@pytest.mark.parametrize('field,value', [('dont_write_bytecode', 0), ('bytecode_writes_disabled', False),
+                                        ('dont_write_bytecode', None), ('bytecode_writes_disabled', None)])
+def test_descendant_bytecode_protection_is_required_not_just_launcher(tmp_path, field, value):
+    root, fixture, report = valid_environment_report(tmp_path)
+    if value is None:
+        del report[field]
+    else:
+        report[field] = value
+    (tmp_path / 'dependency-isolation/process-1.json').write_text(json.dumps(report))
+    with pytest.raises(RuntimeError, match='bytecode write protection was lost'):
+        check_environment_evidence(tmp_path, fixture, 'native', root)
+
+
+@pytest.mark.parametrize('mutate', [False, True])
+def test_each_scenario_rechecks_inventoried_bytecode_after_launcher(tmp_path, monkeypatch, mutate):
+    from scripts import verify_portable_environment as verifier
+    root = tmp_path / 'bundle'
+    bytecode = root / 'runtime/Lib/__pycache__/__future__.cpython-312.pyc'
+    bytecode.parent.mkdir(parents=True)
+    bytecode.write_bytes(b'inventoried bytecode fixture')
+    (root / 'bundle-manifest.json').write_text(json.dumps({
+        'format': 2, 'platform': 'linux', 'arch': 'x64', 'ocr_backend': 'native',
+        'files': {bytecode.relative_to(root).as_posix(): bootstrap.sha256(bytecode)}}))
+    archive = tmp_path / 'candidate.zip'
+    archive.write_bytes(b'archive fixture; extraction mocked, payload hashes real')
+    archive.with_suffix('.zip.sha256').write_text(bootstrap.sha256(archive))
+    monkeypatch.setattr(verifier, 'extract_checked', lambda *args: root)
+    monkeypatch.setattr(verifier, 'host_platform', lambda: ('linux', 'x64'))
+    monkeypatch.setattr(verifier, 'SCENARIOS', ('clean-host-path',))
+    monkeypatch.setattr(verifier, 'audit_environment', lambda *args: {})
+    monkeypatch.setattr(verifier, 'summarize_reports', lambda *args, **kwargs: {})
+    monkeypatch.setattr(verifier, 'check_environment_evidence', lambda *args: None)
+    def launch(*args, **kwargs):
+        if mutate:
+            bytecode.write_bytes(b'rewritten bytecode fixture')
+    monkeypatch.setattr(verifier.subprocess, 'run', launch)
+    output = tmp_path / 'evidence'
+    if mutate:
+        with pytest.raises(RuntimeError, match='Portable environment scenario failed'):
+            verifier.verify_archive(archive, output)
+        case = json.loads((output / 'clean-host-path/scenario-report.json').read_text())
+        assert case['result'] == 'failed'
+        assert 'Bundle checksum mismatch: runtime/Lib/__pycache__/__future__.cpython-312.pyc' in case['error']
+    else:
+        assert verifier.verify_archive(archive, output)['result'] == 'passed'
 
 
 @pytest.mark.parametrize('reverse', [False, True])

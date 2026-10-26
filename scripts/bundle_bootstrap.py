@@ -130,6 +130,7 @@ def environment_report(root: Path, manifest: dict) -> dict:
     return {'schema': 1, 'bundle_root': str(root), 'platform': manifest['platform'], 'executable': sys.executable,
             'prefix': sys.prefix, 'base_prefix': sys.base_prefix, 'sys_path': sys.path,
             'isolated': sys.flags.isolated, 'ignore_environment': sys.flags.ignore_environment, 'utf8_mode': sys.flags.utf8_mode,
+            'dont_write_bytecode': sys.flags.dont_write_bytecode, 'bytecode_writes_disabled': sys.dont_write_bytecode,
             'no_user_site': sys.flags.no_user_site, 'user_site_enabled': site.ENABLE_USER_SITE,
             'profile': manifest.get('ocr_backend', 'paddle'),
             'environment': {key: os.environ[key] for key in selected if key in os.environ}}
@@ -235,6 +236,18 @@ def run_paddle_model_acceptance(root: Path, python: Path, fixtures: Path, result
 BUNDLE_DISTRIBUTION = 'self-contained inference runtime'
 
 
+def run_paddle_model_integrity(root: Path, python: Path) -> None:
+    """Keep the stdlib-only model verifier isolated and the ZIP immutable.
+
+    -I ignores PYTHONUTF8 and PYTHONDONTWRITEBYTECODE, including the safe
+    values set by this bootstrap. These controls must be interpreter options,
+    before any stdlib imports can rewrite the inventoried runtime .pyc files.
+    """
+    subprocess.run([str(python), '-I', '-B', '-X', 'utf8', '-S',
+                    'scripts/paddle_package_models.py', '--verify-only',
+                    str(root / 'backend/models')], check=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--verify', action='store_true', help='Audit the included runtime and run real GUI/OCR/video regressions; no installation')
@@ -317,8 +330,7 @@ def main(argv: list[str] | None = None) -> int:
         subprocess.run([str(python), 'scripts/prune_inference_runtime.py', '--verify', '--manifest', str(root / 'runtime/inference-prune.json')], check=True)
         subprocess.run([str(python), '-m', 'scripts.runtime_dependencies', '--manifest', str(manifest_path)], check=True)
         if backend == 'paddle':
-            subprocess.run([str(python), '-I', '-S', 'scripts/paddle_package_models.py',
-                            '--verify-only', str(root / 'backend/models')], check=True)
+            run_paddle_model_integrity(root, python)
         if manifest.get('accelerator', '').startswith('cuda'):
             subprocess.run([str(python), '-m', 'scripts.cuda_package', '--root', str(root),
                             '--accelerator', manifest['accelerator']], check=True)

@@ -88,6 +88,14 @@ repeating the complete image suite. Packaged Paddle always pins VSE_MODEL_DIR
 to its own verified weights, rather than borrowing a host model directory.
 None of these CPU results certifies a GPU.
 
+The isolated original-model integrity verifier passes `-B -X utf8` explicitly:
+Python's `-I` ignores both `PYTHONDONTWRITEBYTECODE` and `PYTHONUTF8`. Launcher
+and descendant evidence records actual UTF-8 and bytecode-write controls, not
+just environment strings. Each environment scenario rechecks the complete
+payload hashes after execution, including prebuilt stdlib `.pyc` files; cache
+changes are failures, never excluded from the inventory.
+See the [Python 3.12 command-line contract](https://docs.python.org/3.12/using/cmdline.html).
+
 `accept_release_archive.py` binds these completed reports to the ZIP SHA256,
 commit, version, platform and backend. `release_guard.py --validate-assets`
 requires exactly the seven approved packages and matching receipts, rejecting

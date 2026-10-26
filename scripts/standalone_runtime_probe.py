@@ -352,6 +352,8 @@ def install_probe() -> None:
                       'argv': sys.argv, 'images': sorted(images), 'modules': modules,
                       'isolated': sys.flags.isolated, 'ignore_environment': sys.flags.ignore_environment,
                       'sys_path': sys.path, 'no_user_site': sys.flags.no_user_site, 'utf8_mode': sys.flags.utf8_mode,
+                      'dont_write_bytecode': sys.flags.dont_write_bytecode,
+                      'bytecode_writes_disabled': sys.dont_write_bytecode,
                       'user_site_enabled': __import__('site').ENABLE_USER_SITE,
                       'environment': {key: os.environ[key] for key in (
                           'PATH', 'PYTHONHOME', 'PYTHONPATH', 'PYTHONUSERBASE', 'PYTHONUTF8', 'PYTHONIOENCODING', 'CONDA_PREFIX',

@@ -75,6 +75,7 @@ jobs:
           tests/test_cuda_profile_audit.py tests/test_prune_cuda_development.py
           tests/test_runtime_dependencies.py tests/test_portable_environment.py tests/test_e2e_modes.py
           tests/test_paddle_package_models.py tests/test_check_paddle_models.py tests/test_final_paddle_launcher.py
+          tests/test_isolated_model_verifier.py
           tests/test_frozen_checkout_bytes.py -q --junitxml=test-results/profile-safety.xml
       - name: Install fixed verified VideoSubFinder
         run: python scripts/install_videosubfinder.py --version 6.10.7
