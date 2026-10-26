@@ -48,6 +48,7 @@ while True:
   sys.stderr.write('missing native library example');sys.stderr.flush();sys.exit(2)
  if behavior=='flood': sys.stderr.buffer.write(b'x'*1000000);sys.stderr.buffer.flush()
  if behavior=='oversize': sys.stdout.buffer.write(struct.pack('<I',17000000));sys.stdout.buffer.flush();continue
+ if behavior=='stdout_noise': sys.stdout.buffer.write(b'CoreML diagnostic must not be IPC\n');sys.stdout.buffer.flush();continue
  out={'id':req['id'],'ok':True,'result':[[[[1,2],[20,2],[20,12],[1,12]]],[['你好',.95]]],
       'dt_polys':[[[1,2],[20,3],[19,12],[1,11]]]}
  out.update({key:req[key] for key in ('rec_model','batch_size','cpu_threads')})
@@ -138,6 +139,7 @@ def test_opt_in_recognizer_long_lived_unicode_and_detection(native_root):
 
 
 @pytest.mark.parametrize('behavior,match', [('eof','transport'), ('oversize','protocol limit'),
+                                         ('stdout_noise', 'header_hex=436f7265'),
                                          ('bad_id','unaligned'), ('boolean_id','unaligned'),
                                          ('float_batch','honor requested batch_size'), ('error','bad asset')])
 def test_errors_reaped_and_next_call_recovers(native_root, monkeypatch, behavior, match):
@@ -151,6 +153,34 @@ def test_errors_reaped_and_next_call_recovers(native_root, monkeypatch, behavior
         assert list(native.predict_iter(np.zeros((32, 64, 3), dtype=np.uint8)))[0]['rec_texts'] == ['你好']
     finally:
         native.close()
+
+
+@pytest.mark.parametrize('header', [b'Core', b'\0\0\0\0', (17000000).to_bytes(4, 'little')])
+def test_invalid_frame_header_reports_exact_bytes_without_reading_body(header):
+    import io
+    import queue
+    from types import SimpleNamespace
+    from backend.tools.native_ocr import _exchange
+
+    class HeaderOnly:
+        def __init__(self):
+            self.calls = []
+
+        def read(self, size):
+            self.calls.append(size)
+            assert self.calls == [4], 'An invalid header must never read or resynchronize a body'
+            return header
+
+    output = HeaderOnly()
+    answers = queue.Queue()
+    process = SimpleNamespace(stdin=io.BytesIO(), stdout=output)
+    _exchange(process, b'{}', answers)
+    error = answers.get_nowait()
+    assert isinstance(error, ValueError)
+    assert 'Native OCR response exceeds the 16 MiB protocol limit' in str(error)
+    assert f'header_hex={header.hex()}' in str(error)
+    assert f'decoded_length={int.from_bytes(header, "little")}' in str(error)
+    assert output.calls == [4]
 
 
 def test_stderr_flood_is_drained_bounded(native_root, monkeypatch):

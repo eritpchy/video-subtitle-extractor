@@ -361,9 +361,14 @@ def _exchange(process, payload, answers):
                 raise EOFError('Native OCR worker closed its request stream')
             packet = packet[count:]
         process.stdin.flush()
-        size, = struct.unpack('<I', _read_exact(process.stdout, 4))
+        header = _read_exact(process.stdout, 4)
+        size, = struct.unpack('<I', header)
         if not 0 < size <= 16 * 1024 * 1024:
-            raise ValueError('Native OCR response exceeds the 16 MiB protocol limit')
+            # Preserve exactly the rejected frame header, never an unbounded
+            # body or a speculative "resynchronized" response. This separates
+            # stdout contamination from a genuine oversized length on CI.
+            raise ValueError('Native OCR response exceeds the 16 MiB protocol limit; '
+                             f'header_hex={header.hex()}; decoded_length={size}')
         answers.put(json.loads(_read_exact(process.stdout, size), object_pairs_hook=_unique_object))
     except BaseException as error:
         answers.put(error)
