@@ -3,6 +3,7 @@ import copy
 import hashlib
 import http.server
 import json
+import os
 from pathlib import Path
 import shutil
 import struct
@@ -21,6 +22,27 @@ def digest(data):
 
 def write_json(path, value):
     path.write_text(json.dumps(value), encoding='utf-8')
+
+
+
+SYNTHETIC_MACOS_PURELIB = '/Users/synthetic/vse-venv/lib/python3.12/site-packages'
+
+
+def macos_receipt(receipt, path):
+    """Model a Mac-produced receipt independently of this test host's paths.
+
+    These bytes describe a synthetic Mac origin, not the Windows/Linux fixture
+    directory. verify_overlay deliberately checks relocated files separately.
+    Do not patch or weaken the production POSIX identity validator.
+    """
+    receipt['purelib'] = SYNTHETIC_MACOS_PURELIB
+    write_json(path, receipt)
+    return receipt
+
+
+def apply_synthetic_overlay(purelib, receipt_path, resource, *, context):
+    receipt = module._apply(purelib, receipt_path, resource, context=context)
+    return macos_receipt(receipt, receipt_path)
 
 
 def macho():
@@ -105,13 +127,13 @@ def test_resource_mutation_rejected(resource, mutation):
 def test_single_plugin_atomic_replacement_retains_records_and_idempotence(resource, purelib):
     before = module.archives.inventory(purelib)
     receipt_path = purelib / module.RECEIPT
-    receipt = module._apply(purelib, receipt_path, resource, context='explicit-user-venv')
+    receipt = apply_synthetic_overlay(purelib, receipt_path, resource, context='explicit-user-venv')
     after = module.archives.inventory(purelib)
     assert [k for k in before if before[k] != after[k]] == [module.PLUGIN.as_posix()]
     assert set(after) - set(before) == {module.RECEIPT}
     assert receipt['external_ax_client_tested'] is False
     assert receipt['production_integration_allowed'] is False
-    assert module._apply(purelib, receipt_path, resource, context='explicit-user-venv') == receipt
+    assert apply_synthetic_overlay(purelib, receipt_path, resource, context='explicit-user-venv') == receipt
     module.verify_overlay(purelib, receipt, policy=resource.policy)
 
 
@@ -121,7 +143,7 @@ def test_failed_receipt_write_rolls_back_only_owned_plugin(resource, purelib, mo
         raise OSError('disk full')
     monkeypatch.setattr(module, '_atomic_json', fail)
     with pytest.raises(OSError, match='disk full'):
-        module._apply(purelib, purelib / module.RECEIPT, resource, context='explicit-user-venv')
+        apply_synthetic_overlay(purelib, purelib / module.RECEIPT, resource, context='explicit-user-venv')
     assert module.archives.inventory(purelib) == before
 
 
@@ -129,7 +151,7 @@ def test_unknown_plugin_or_framework_is_never_replaced(resource, purelib):
     plugin = purelib / module.PLUGIN
     plugin.write_bytes(b'unknown modification')
     with pytest.raises(RuntimeError, match='unknown'):
-        module._apply(purelib, purelib / module.RECEIPT, resource, context='explicit-user-venv')
+        apply_synthetic_overlay(purelib, purelib / module.RECEIPT, resource, context='explicit-user-venv')
     assert plugin.read_bytes() == b'unknown modification'
 
 
@@ -138,7 +160,10 @@ def test_plugin_symlink_cannot_escape_venv(resource, purelib, tmp_path):
     outside = tmp_path / 'system-plugin'
     outside.write_bytes(plugin.read_bytes())
     plugin.unlink()
-    plugin.symlink_to(outside)
+    try:
+        plugin.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlink creation is not permitted on this test host")
     with pytest.raises(RuntimeError, match='regular file'):
         module.inspect_target(purelib, policy=resource.policy)
     assert outside.read_bytes() == b'original'
@@ -147,7 +172,7 @@ def test_plugin_symlink_cannot_escape_venv(resource, purelib, tmp_path):
 def test_already_patched_without_receipt_is_not_adopted(resource, purelib):
     (purelib / module.PLUGIN).write_bytes((resource.root / 'libqcocoa.dylib').read_bytes())
     with pytest.raises(RuntimeError, match='not adopted'):
-        module._apply(purelib, purelib / module.RECEIPT, resource, context='explicit-user-venv')
+        apply_synthetic_overlay(purelib, purelib / module.RECEIPT, resource, context='explicit-user-venv')
 
 
 def test_version_mismatch_and_duplicate_metadata_fail(resource, purelib):
@@ -271,7 +296,7 @@ def test_false_candidate_scope_never_downloads_public_asset(resource, tmp_path):
 
 
 def test_patched_receipt_detects_later_record_modification(resource, purelib):
-    receipt = module._apply(purelib, purelib / module.RECEIPT, resource, context='explicit-user-venv')
+    receipt = apply_synthetic_overlay(purelib, purelib / module.RECEIPT, resource, context='explicit-user-venv')
     next(purelib.glob('*.dist-info/RECORD')).write_text('modified RECORD')
     with pytest.raises(RuntimeError, match='receipt'):
         module.verify_overlay(purelib, receipt, policy=resource.policy)
@@ -304,6 +329,7 @@ def test_stage_entry_is_isolated_and_leaves_pruning_to_packager(resource, pureli
         assert module.archives.inventory(stage) == before
     else:
         receipt = module.apply_to_stage(stage, python, resource, candidate_testing=True)
+        macos_receipt(receipt, stage / 'runtime' / module.RECEIPT)
         assert receipt['context'] == 'candidate-package-stage'
         assert (stage / 'runtime' / module.RECEIPT).is_file()
         assert prune.read_text() == 'existing pruning inventory'
@@ -330,13 +356,13 @@ def test_venv_license_notices_survive_resource_cleanup_and_reject_tamper(resourc
 ])
 def test_receipt_cannot_promote_preparation_to_production(resource, purelib, field, value):
     path = purelib / module.RECEIPT
-    receipt = module._apply(purelib, path, resource, context='explicit-user-venv')
+    receipt = apply_synthetic_overlay(purelib, path, resource, context='explicit-user-venv')
     receipt[field] = value
     write_json(path, receipt)
     with pytest.raises(RuntimeError, match='receipt'):
         module.verify_overlay(purelib, receipt, policy=resource.policy)
     with pytest.raises(RuntimeError, match='receipt'):
-        module._apply(purelib, path, resource, context='explicit-user-venv')
+        apply_synthetic_overlay(purelib, path, resource, context='explicit-user-venv')
 
 
 @pytest.mark.parametrize('step', ['partial-plugin-copy', 'partial-json-write', 'hardlink-backup'])
@@ -354,7 +380,7 @@ def test_partial_io_failure_leaves_no_temporary_or_modified_files(resource, pure
     if step == 'partial-json-write': monkeypatch.setattr(module.json, 'dump', partial_json)
     if step == 'hardlink-backup': monkeypatch.setattr(module.os, 'link', failed_link)
     with pytest.raises(OSError, match='disk full'):
-        module._apply(purelib, purelib / module.RECEIPT, resource, context='explicit-user-venv')
+        apply_synthetic_overlay(purelib, purelib / module.RECEIPT, resource, context='explicit-user-venv')
     assert module.archives.inventory(purelib) == before
 
 
@@ -371,7 +397,7 @@ def test_failed_rollback_preserves_original_recovery_bytes(resource, purelib, mo
     monkeypatch.setattr(module.os, 'replace', fail_rollback)
     monkeypatch.setattr(module, '_atomic_json', failed_receipt)
     with pytest.raises(RuntimeError, match='Exact original plugin preserved'):
-        module._apply(purelib, purelib / module.RECEIPT, resource, context='explicit-user-venv')
+        apply_synthetic_overlay(purelib, purelib / module.RECEIPT, resource, context='explicit-user-venv')
     backups = list((purelib / module.PLUGIN).parent.glob('.vse-qt-original-*'))
     assert len(backups) == 1 and backups[0].read_bytes() == b'original'
     assert not (purelib / module.RECEIPT).exists()
@@ -389,7 +415,7 @@ def native_receipt(receipt, policy):
 
 
 def test_aggregate_receipt_validation_needs_no_mac_files_or_execution(resource, purelib, monkeypatch):
-    receipt = module._apply(purelib, purelib / module.RECEIPT, resource, context='explicit-user-venv')
+    receipt = apply_synthetic_overlay(purelib, purelib / module.RECEIPT, resource, context='explicit-user-venv')
     with pytest.raises(RuntimeError, match='native-load'):
         module.validate_receipt_identity(receipt, policy=resource.policy, require_native_load=True)
     receipt = native_receipt(receipt, resource.policy)
@@ -406,7 +432,7 @@ def test_aggregate_receipt_validation_needs_no_mac_files_or_execution(resource, 
 @pytest.mark.parametrize('case', ['foreign-image', 'duplicate-image', 'false-external-claim', 'inactive',
                                   'no-records', 'bad-record-path', 'missing-proof', 'relative-purelib'])
 def test_portable_aggregate_rejects_unbound_or_overstated_proof(resource, purelib, case):
-    receipt = native_receipt(module._apply(purelib, purelib / module.RECEIPT,
+    receipt = native_receipt(apply_synthetic_overlay(purelib, purelib / module.RECEIPT,
                                           resource, context='explicit-user-venv'), resource.policy)
     if case == 'foreign-image': receipt['native_load_probe']['images'][0] = '/foreign/libqcocoa.dylib'
     if case == 'duplicate-image': receipt['native_load_probe']['images'].append(receipt['native_load_probe']['images'][0])
@@ -418,3 +444,39 @@ def test_portable_aggregate_rejects_unbound_or_overstated_proof(resource, pureli
     if case == 'relative-purelib': receipt['purelib'] = '../site-packages'
     with pytest.raises(RuntimeError):
         module.validate_receipt_identity(receipt, policy=resource.policy, require_native_load=True)
+
+
+def test_private_apply_records_its_actual_host_path_without_conversion(resource, purelib):
+    # Public entry points are macOS-only. On Windows this private synthetic
+    # operation is not a valid Mac-origin receipt until the test maps it above.
+    receipt = module._apply(purelib, purelib / module.RECEIPT, resource, context='explicit-user-venv')
+    assert receipt['purelib'] == str(purelib)
+    if os.name == 'nt':
+        with pytest.raises(RuntimeError, match='canonical macOS'):
+            module.validate_receipt_identity(receipt, policy=resource.policy)
+    else:
+        module.validate_receipt_identity(receipt, policy=resource.policy)
+
+
+@pytest.mark.parametrize('path', [
+    r'D:\runner\venv\Lib\site-packages', 'D:/runner/venv/Lib/site-packages',
+    r'\\server\share\venv', '/Users/ci/../foreign', '/Users/ci//venv',
+])
+def test_windows_or_noncanonical_origin_paths_remain_rejected(resource, purelib, path):
+    receipt = apply_synthetic_overlay(purelib, purelib / module.RECEIPT,
+                                      resource, context='explicit-user-venv')
+    receipt['purelib'] = path
+    with pytest.raises(RuntimeError, match='canonical macOS'):
+        module.validate_receipt_identity(receipt, policy=resource.policy)
+
+
+def test_synthetic_receipt_has_mac_origin_but_checks_real_relocated_bytes(resource, purelib, tmp_path):
+    receipt = apply_synthetic_overlay(purelib, purelib / module.RECEIPT,
+                                      resource, context='explicit-user-venv')
+    assert receipt['purelib'] == SYNTHETIC_MACOS_PURELIB
+    relocated = tmp_path / 'relocated-runtime'
+    shutil.move(purelib, relocated)
+    module.verify_overlay(relocated, receipt, policy=resource.policy)
+    (relocated / module.PLUGIN).write_bytes(b'changed after relocation')
+    with pytest.raises(RuntimeError):
+        module.verify_overlay(relocated, receipt, policy=resource.policy)
