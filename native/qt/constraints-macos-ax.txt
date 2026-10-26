@@ -1,0 +1,10 @@
+# Diagnostic only. These do not change any production requirements or package.
+pyside6==6.12.0
+pyside6-essentials==6.12.0
+shiboken6==6.12.0
+pyside6-fluent-widgets==1.11.3
+pysidesix-frameless-window==0.8.2
+pyobjc==12.2.2
+pyobjc-core==12.2.2
+pyobjc-framework-Cocoa==12.2.2
+pyobjc-framework-Quartz==12.2.2

@@ -1,0 +1,109 @@
+name: macOS Qt accessibility diagnostic candidate
+
+# Independent opt-in investigation. Never called by release.yml and never
+# publishes/replaces a release, package, branch or tag.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-qt-ax-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  cocoa-candidate:
+    name: Qt 6.12.0 Cocoa-only patch / official wheel ABI comparison
+    runs-on: macos-15
+    timeout-minutes: 100
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.0.1.app/Contents/Developer
+      QT_QPA_PLATFORM: cocoa
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      VSE_OCR_BACKEND: native
+      VSE_OFFLINE: '1'
+      VSE_CONFIG_FILE: ${{ github.workspace }}/build/macos-qt-ax/reports/config.json
+      PIP_CONSTRAINT: ${{ github.workspace }}/native/qt/constraints-macos-ax.txt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: arm64
+      - name: Install pinned build tools and diagnostic test tools
+        run: |
+          python -m pip install --only-binary=:all: --require-hashes -r native/ocr/requirements-build.txt
+          python -m pip install packaging pytest==8.3.5
+      - name: Test build guards and evidence classification before native operations
+        run: python -m pytest tests/test_macos_qt_accessibility.py -q
+      - name: Resolve unchanged official native-GUI runtime wheels under diagnostic constraints
+        run: python scripts/prepare_release_profile.py --profile native-cpu --output build/macos-qt-ax/wheelhouse
+      - name: Install only selected runtime wheels into one disposable virtual environment
+        shell: bash
+        run: |
+          mkdir -p build/macos-qt-ax/reports
+          python -m venv build/macos-qt-ax/candidate-venv
+          build/macos-qt-ax/candidate-venv/bin/python -c "import pathlib,subprocess,sys; subprocess.run([sys.executable,'-m','pip','install','--no-index','--no-deps','--no-compile',*map(str,sorted(pathlib.Path('build/macos-qt-ax/wheelhouse').glob('*.whl')))],check=True)"
+          build/macos-qt-ax/candidate-venv/bin/python -m pip install pytest==8.3.5
+          build/macos-qt-ax/candidate-venv/bin/python -m pip freeze --all > build/macos-qt-ax/reports/runtime-freeze.txt
+          build/macos-qt-ax/candidate-venv/bin/python -c "import json,pathlib; from scripts.runtime_dependencies import audit_installed; p=pathlib.Path('build/macos-qt-ax/wheelhouse/profile.json'); audit_installed(json.loads(p.read_text())['runtime_requirements'],'native')"
+      - name: Capture original wheel native-AX baseline in crash-isolated child processes
+        run: >-
+          python scripts/build_macos_qt_accessibility.py probe --phase stock
+          --work-dir build/macos-qt-ax --python build/macos-qt-ax/candidate-venv/bin/python
+      - name: Build only QCocoaIntegrationPlugin and its Core/Gui build dependencies
+        run: python scripts/build_macos_qt_accessibility.py build --work-dir build/macos-qt-ax --jobs 3
+      - name: Verify provenance and private ABI, stage only one plugin in disposable runtime
+        run: >-
+          python scripts/build_macos_qt_accessibility.py stage --work-dir build/macos-qt-ax
+          --python build/macos-qt-ax/candidate-venv/bin/python --wheelhouse build/macos-qt-ax/wheelhouse
+      - name: Prove actual Cocoa/Core/Gui image loads come from the candidate venv, not build output
+        run: >-
+          python scripts/build_macos_qt_accessibility.py verify-runtime --work-dir build/macos-qt-ax
+          --python build/macos-qt-ax/candidate-venv/bin/python
+      - name: Verify native selected cells, repeated selection and model-lifetime behavior
+        run: >-
+          python scripts/build_macos_qt_accessibility.py probe --phase candidate
+          --work-dir build/macos-qt-ax --python build/macos-qt-ax/candidate-venv/bin/python
+      - name: Run actual native GUI API, theme, timeline and icon regressions
+        env:
+          VSE_MACOS_AX_REGRESSION: '1'
+        run: >-
+          build/macos-qt-ax/candidate-venv/bin/python -m pytest
+          tests/test_theme.py tests/test_theme_system_flows.py tests/test_timeline_sync.py
+          tests/test_qt_runtime.py tests/test_macos_icon.py tests/test_macos_accessibility_probe.py
+          -q --junitxml=build/macos-qt-ax/reports/gui-tests.xml
+      - name: Render all VSE pages, video preview, light/dark/system and clean shutdown
+        env:
+          VSE_SMOKE_SCREENSHOT_DIR: build/macos-qt-ax/reports/gui-screenshots
+        shell: bash
+        run: |
+          set -o pipefail
+          build/macos-qt-ax/candidate-venv/bin/python gui.py --smoke-test 2>&1 | tee build/macos-qt-ax/reports/gui-smoke.log
+      - name: Bind bounded acceptance to exact plugin bytes, fail if stock did not reproduce
+        run: python scripts/build_macos_qt_accessibility.py finalize --work-dir build/macos-qt-ax
+      - name: Preserve diagnostic evidence, including failures and explicit untested client acceptance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-qt-ax-evidence-${{ github.sha }}
+          path: build/macos-qt-ax/reports/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Preserve source-attributed diagnostic candidate, never a release package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-qt-ax-diagnostic-not-for-release-${{ github.sha }}
+          path: |
+            build/macos-qt-ax/candidate/
+            build/macos-qt-ax/rebuild-inputs/
+            native/qt/
+            scripts/build_macos_qt_accessibility.py
+            scripts/macos_accessibility_probe.py
+            docs/audits/macos-accessibility-crash.md
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14

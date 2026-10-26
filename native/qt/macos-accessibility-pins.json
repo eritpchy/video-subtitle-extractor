@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "purpose": "Independent CI diagnostic candidate only; not a released Qt fix or production-package override",
+  "qt_version": "6.12.0",
+  "source": {
+    "url": "https://download.qt.io/official_releases/qt/6.12/6.12.0/submodules/qtbase-everywhere-src-6.12.0.tar.xz",
+    "sha256": "a951bd163c7b80fc6b8c88d7668fb56abf91c152373e13c10666763238131307",
+    "root": "qtbase-everywhere-src-6.12.0"
+  },
+  "patch": {
+    "change": 772484,
+    "patch_set": 6,
+    "revision": "bbe938de0b5863fe8edd77bea2dffb97c35e0db9",
+    "url": "https://codereview.qt-project.org/changes/772484/revisions/bbe938de0b5863fe8edd77bea2dffb97c35e0db9/patch",
+    "decoded_sha256": "fbc6e92fb2e27c220821cbaaf8e16579cb77dbc83eb7acffe8ae3df7ed3a503b",
+    "status_observed_2026_10_26": "NEW; Code-Review +2; Sanity-Review +1; not merged or released"
+  },
+  "wheel": {
+    "filename": "pyside6_essentials-6.12.0-cp310-abi3-macosx_14_0_universal2.whl",
+    "sha256": "0867b709a724db28b161227c7d6ecb5ed10cc09226a53542417ac6dee1308239",
+    "original_cocoa_sha256": "e355b16024485dbacac13ea13a1ce46bca4cf682f8b7b698c557e5960185d636",
+    "original_arm64_uuid": "028e2655-9fd8-3e6e-a861-d6cd79b760bc"
+  },
+  "toolchain": {
+    "xcode_version": "26.0.1",
+    "xcode_build": "17A400",
+    "sdk_version": "26.0",
+    "deployment_target": "14.4",
+    "arch": "arm64",
+    "cmake": "4.1.2",
+    "ninja": "1.13.0"
+  },
+  "patched_sources": {
+    "src/plugins/platforms/cocoa/qcocoaaccessibilityelement.h": "99185a8e33a3b9838e1e24c71b48e52125d1d4090c8d0ea98dcf9fd58163f301",
+    "src/plugins/platforms/cocoa/qcocoaaccessibilityelement.mm": "5442fbf479dad835ed54c97947bc019db869f7dbd00666c303560c0db5003396"
+  }
+}
