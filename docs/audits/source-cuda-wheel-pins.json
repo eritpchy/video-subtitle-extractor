@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "provenance_note": "Read-only extraction of runtime_provenance.source_wheels from the accepted source archive bundle-manifest.json. These are build-observed complete-wheel hashes, not a vendor signature or a new source-install/GPU inference result.",
+  "profiles": {
+    "cuda11.8": {
+      "paddle": {
+        "filename": "paddlepaddle_gpu-3.3.1-cp312-cp312-win_amd64.whl",
+        "bytes": 766607334,
+        "sha256": "11f5a72624912f4750d4aedf511367672dea698002fbdded316258d45b897146",
+        "url": "https://paddle-whl.cdn.bcebos.com/stable/cu118/paddlepaddle-gpu/paddlepaddle_gpu-3.3.1-cp312-cp312-win_amd64.whl"
+      },
+      "source_archive_sha256": "c13df10802ae5839c77c67bdab8b17f4b24a8e04ae3b11b90b3fd119681e97db",
+      "source_manifest_sha256": "1bb914e7a098a37bef31aa88cc67f55087ae8cf3ae48a019319598e4f44b8150",
+      "source_commit": "59749ccc02e369f374c69846b2bde6279084577d",
+      "source_run": 40259119763,
+      "hash_origin": "build-observed complete wheel bytes"
+    },
+    "cuda12.6": {
+      "paddle": {
+        "filename": "paddlepaddle_gpu-3.3.1-cp312-cp312-win_amd64.whl",
+        "bytes": 579382604,
+        "sha256": "ad733bfe59cf5978de2b338b6f29a7b3855bfb34d92b65fcb2d88c77aa312cbf",
+        "url": "https://paddle-whl.cdn.bcebos.com/stable/cu126/paddlepaddle-gpu/paddlepaddle_gpu-3.3.1-cp312-cp312-win_amd64.whl"
+      },
+      "nvjitlink": {
+        "filename": "nvidia_nvjitlink_cu12-12.6.85-py3-none-win_amd64.whl",
+        "bytes": 161908572,
+        "sha256": "e61120e52ed675747825cdd16febc6a0730537451d867ee58bee3853b1b13d1c",
+        "url": "https://files.pythonhosted.org/packages/89/76/93c1467b1387387440a4d25102d86b7794535449b689f8e2dc22c1c8ff7f/nvidia_nvjitlink_cu12-12.6.85-py3-none-win_amd64.whl"
+      },
+      "source_archive_sha256": "0e38570aa000082c9824c2fb51ba317ce72e8f0463619c08d28398a4faf177ac",
+      "source_manifest_sha256": "77234c3f52e3b7acf207cc63b71488807df891df2dfbb06783e651ef23064c5f",
+      "source_commit": "59749ccc02e369f374c69846b2bde6279084577d",
+      "source_run": 40259119763,
+      "hash_origin": "build-observed complete wheel bytes"
+    }
+  }
+}

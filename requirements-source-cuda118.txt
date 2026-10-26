@@ -1,0 +1,6 @@
+# Windows x64 CPython 3.12 source install; use a fresh virtual environment.
+# Ordinary pip dependencies/full PySide6; not the curated distribution runtime.
+# Paddle whole-wheel hash: build-observed complete wheel bytes, not a vendor signature.
+# Accepted archive/manifest provenance: docs/audits/source-cuda-wheel-pins.json.
+-r requirements-source-common.txt
+paddlepaddle-gpu @ https://paddle-whl.cdn.bcebos.com/stable/cu118/paddlepaddle-gpu/paddlepaddle_gpu-3.3.1-cp312-cp312-win_amd64.whl#sha256=11f5a72624912f4750d4aedf511367672dea698002fbdded316258d45b897146 ; python_version == "3.12" and implementation_name == "cpython" and sys_platform == "win32" and (platform_machine == "AMD64" or platform_machine == "x86_64")

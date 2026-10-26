@@ -92,6 +92,72 @@ On CPU, oneDNN remains disabled by default for the reviewed Paddle 3.3.1/PIR mod
 combination. CUDA runtime selection and GPU hardware evidence are separate from
 this CPU source setup; a CPU CI pass is not CUDA certification.
 
+### Windows Python CUDA 11.8 or 12.6 source backend
+
+Use **Windows x64, CPython 3.12 and a new virtual environment**. Choose exactly
+one CUDA variant. Do not first install `requirements.txt` (which contains CPU
+Paddle), or install both CUDA variants into the same environment.
+
+The source profiles include `requirements-source-common.txt`, synchronized with
+`requirements.txt` except for removal of CPU Paddle. They retain **full PySide6**
+and normal dependency metadata. Do not use the distribution packager's Essentials
+substitution, `--no-deps`, pruning or waived `pip check` for a normal source install.
+Paddle GPU is 3.3.1 from the official CUDA-specific Windows CPython 3.12 wheel;
+CUDA 12.6 additionally fixes the already-reviewed NVJitLink 12.6.85 dependency.
+The exact vendor-wheel URLs and complete-wheel SHA256 values are recorded in
+[`source-cuda-wheel-pins.json`](audits/source-cuda-wheel-pins.json). Paddle hashes
+were observed from complete wheel bytes in the accepted build, not published
+vendor signatures. These key wheel pins do not turn the other ordinary source
+dependency ranges into a fully hash-locked transitive environment.
+
+A compatible NVIDIA GPU and **system NVIDIA driver** are prerequisites for CUDA
+execution. The pip environment supplies its CUDA/cuDNN libraries, not the kernel
+GPU driver. These commands do not install a compiler or this project's C++ worker.
+No true CUDA hardware inference pass is claimed here. The existing Server 2022/2025
+package CPU tests are not certification of this new source-install recipe.
+
+PowerShell, after cloning the repository:
+
+```powershell
+# Choose ONE matching pair before creating the environment:
+$CudaRequirements = 'requirements-source-cuda118.txt'
+$CudaVersion = '11.8'
+# For CUDA 12.6 instead:
+# $CudaRequirements = 'requirements-source-cuda126.txt'
+# $CudaVersion = '12.6'
+
+py -3.12 -m venv .venv-cuda
+.venv-cuda\Scripts\Activate.ps1
+python -c "import platform,struct,sys; assert sys.implementation.name == 'cpython' and sys.platform == 'win32' and sys.version_info[:2] == (3,12) and struct.calcsize('P') == 8 and platform.machine().lower() in ('amd64','x86_64')"
+python -m pip install -r $CudaRequirements
+python -m pip check
+python -c "import importlib.metadata as m; assert m.version('paddlepaddle-gpu') == '3.3.1'; assert not any(d.metadata['Name'].lower() == 'paddlepaddle' for d in m.distributions())"
+python scripts/install_videosubfinder.py --version 6.10.7
+python -S scripts/prepare_source_models.py paddle --output build/source-cuda-models --cache build/model-downloads/paddle
+python -S scripts/prepare_source_models.py verify --format paddle build/source-cuda-models
+$env:VSE_OCR_BACKEND = 'paddle'
+$env:VSE_MODEL_DIR = "$PWD/build/source-cuda-models"
+
+# This checks compilation/device discovery, NOT an OCR/GPU inference pass:
+python -c "import paddle; assert str(paddle.version.cuda()) == '$CudaVersion'; assert paddle.is_compiled_with_cuda(); assert paddle.device.cuda.device_count() > 0, 'No usable CUDA device: check hardware/driver before requesting GPU'"
+python gui.py
+# GPU requested; do not add --cpu to this command:
+python -m backend.cli "input.mp4" --language en --mode auto
+# Explicit CPU through the SAME Paddle GPU environment and model data:
+python -m backend.cli "input.mp4" --language en --mode accurate --cpu
+```
+
+If the device check fails, do not describe a later CPU result as CUDA execution.
+Paddle's availability policy can otherwise select CPU. Successful installation,
+`pip check` and device discovery are distinct from real workload correctness.
+The fixed model-data output must be new; for an existing verified output, rerun
+`verify` and reuse its `VSE_MODEL_DIR` rather than overwriting it.
+
+The documented wheel/index selection follows `scripts/release_profiles.py` and
+the reviewed wheel inventory, not the stale CUDA 10.2 installation prose embedded
+in upstream wheel metadata. Current source CUDA support is **11.8/12.6 only**;
+CUDA 10.2 is retained solely as the immutable historical 2.2.0 release download.
+
 ### Windows DirectML Python backend
 
 Use a separate Python 3.12 virtual environment. The current source requirements
@@ -188,9 +254,12 @@ variable to `build/rebuilt-onnx` after verification. This documented determinist
 conversion route is Linux-based; it does **not** claim Mac Paddle2ONNX conversion
 has been validated. Build-time converter packages are not runtime dependencies.
 
-Fast mode and CPU auto mode use v6 small where supported; accurate and GPU auto
-use medium. Languages outside v6 coverage use their explicit v5/v3 recognizers,
-not renamed/substituted v6 models. See [model coverage](PP-OCRv6.md).
+Fast mode uses v6 small where supported; accurate uses medium. **Auto uses medium
+only when Paddle CUDA is enabled and available. CPU, DirectML and Python/Native
+CoreML auto remain small**, even when those non-CUDA providers accelerate execution.
+Languages outside v6 coverage retain their explicit v5/v3 recognizers. GPU use
+alone does not imply higher accuracy for the same mode/model; model selection and
+actual inference correctness are separate. See [model coverage](PP-OCRv6.md).
 
 The VideoSubFinder installer independently checks the official release sums and
 archive against its committed lock and preserves required platform libraries.
