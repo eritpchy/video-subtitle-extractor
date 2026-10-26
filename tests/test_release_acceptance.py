@@ -51,12 +51,16 @@ def coreml_workloads(root):
         record = copy.deepcopy(row['request_evidence'])
         # Each mocked source environment represents a distinct process/run,
         # not one image request copied into three real-CLI evidence folders.
-        pid = 1000 + int(hashlib.sha256(str(root).encode()).hexdigest()[:8], 16)
+        pid = 1000 + int(hashlib.sha256(str(directory).encode()).hexdigest()[:8], 16)
         record['worker_pid'] = pid
         record['response']['execution_window']['worker_pid'] = pid
         for session in record['response']['execution_evidence']['sessions'].values():
-            if session is not None and 'profile_window' in session:
-                session['profile_window']['worker_pid'] = pid
+            if session is not None:
+                # The original synthetic image fixture now attributes its first
+                # profile per concrete shape; every child belongs to this new
+                # mocked CLI process, not the source fixture's worker.
+                for shape in session['shape_sessions']:
+                    shape['profile_window']['worker_pid'] = pid
         filename = f"native-ocr-{record['worker_pid']}-{record['request']['id']}.json"
         path = directory / 'native-requests' / filename
         write_json(path, record)
