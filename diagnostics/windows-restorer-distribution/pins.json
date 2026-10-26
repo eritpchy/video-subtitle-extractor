@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "scope": "exact-8f-2.3.0-build-only-not-final-2.3.1",
+  "repository": "eritpchy/video-subtitle-extractor",
+  "commit": "8f08e7f6887a950f75cb7967f1f80e344935ecaa",
+  "version": "2.3.0",
+  "run_id": 40391756697,
+  "run_attempt": 2,
+  "profiles": {
+    "paddle-cuda11.8": {
+      "canonical_artifact_id": 12691536652,
+      "canonical_artifact_name": "release-candidate-windows-x64-paddle-cuda11.8",
+      "outer_container_bytes": 2985770739,
+      "outer_api_sha256": "2668dab0085943bcb94ff31e35d7f26c662e538a0e129d9c9932432568a10601",
+      "inner_zip": "vse-2.3.0-windows-x64-cuda11.8.zip",
+      "inner_zip_bytes": 2985765008,
+      "inner_zip_sha256": "270ff11159d99bc4be236ad42867b9a5a59c10971af7ab1489b117d2e5accb38",
+      "receipt_bytes": 5081,
+      "receipt_sha256": "724108619b572cc2bf04332531f755e82a42d74c8fb03fbb1a9f4158c1b7fef8",
+      "expiry_utc": "2026-10-27T20:55:03Z",
+      "job": 121843193554,
+      "checksum_bytes": 102,
+      "checksum_sha256": "1f502d1607d1b311fe43fd796b6e3d24f0848caf3862f9f53a5004388e444366",
+      "expanded_bytes": 5316866020
+    },
+    "paddle-cuda12.6": {
+      "canonical_artifact_id": 12689727768,
+      "canonical_artifact_name": "release-candidate-windows-x64-paddle-cuda12.6",
+      "outer_container_bytes": 2696756946,
+      "outer_api_sha256": "b338dd6d67bf9b96366f6c4ce48051ca8040d302c7752a85e1cfdf1fbb6bf136",
+      "inner_zip": "vse-2.3.0-windows-x64-cuda12.6.zip",
+      "inner_zip_bytes": 2696751215,
+      "inner_zip_sha256": "c1343fa5f998ac8504eb716d5933c6cef8428b544591cfbab15e15af30e237ab",
+      "receipt_bytes": 5081,
+      "receipt_sha256": "3637c3d49bd49080e3ec43819928210b0739cdb8a94f86d62963553c9ba3886b",
+      "expiry_utc": "2026-10-27T20:55:03Z",
+      "job": 121843193630,
+      "checksum_bytes": 102,
+      "checksum_sha256": "bf3eb6efde2780677037b6b44459576a3350e7ec8fc3ec73bb1b21e3fa32e14c",
+      "expanded_bytes": 4499313938
+    }
+  }
+}
