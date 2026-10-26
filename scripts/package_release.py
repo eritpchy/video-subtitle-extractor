@@ -17,11 +17,11 @@ import tempfile
 import zipfile
 
 try:
-    from .bundle_bootstrap import host_platform, sha256, verify_payload
+    from .bundle_bootstrap import BUNDLE_DISTRIBUTION, host_platform, sha256, verify_payload
     from .runtime_dependencies import runtime_wheels
     from .release_profiles import profile_identity, profile_requirements, archive_name
 except ImportError:
-    from bundle_bootstrap import host_platform, sha256, verify_payload
+    from bundle_bootstrap import BUNDLE_DISTRIBUTION, host_platform, sha256, verify_payload
     from runtime_dependencies import runtime_wheels
     from release_profiles import profile_identity, profile_requirements, archive_name
 
@@ -293,7 +293,7 @@ def create_bundle(wheelhouse: Path, output: Path, root: Path = ROOT, *, profile:
             app_files = {path.relative_to(app_root).as_posix(): sha256(path) for path in app_root.rglob('*') if path.is_file() and not path.is_relative_to(stage)}
         manifest = {"ocr_backend": profile, "accelerator": identity['accelerator'], "build_profile": build_profile,
                     "gpu_inference_verified": False, "directml_models": directml_info, "paddle_models": paddle_info,
-                    "native_ocr": native_info, "app_files": app_files, "format": 2, "version": version, "commit": revision, "platform": target_platform, "arch": target_arch, "python": "3.12", "distribution": "self-contained inference runtime", "runtime_python": runtime_info["python"], "runtime_provenance": runtime_info, "runtime_requirements": runtime_requirements, "files": {path.relative_to(stage).as_posix(): sha256(path) for path in sorted(stage.rglob("*")) if path.is_file()}}
+                    "native_ocr": native_info, "app_files": app_files, "format": 2, "version": version, "commit": revision, "platform": target_platform, "arch": target_arch, "python": "3.12", "distribution": BUNDLE_DISTRIBUTION, "runtime_python": runtime_info["python"], "runtime_provenance": runtime_info, "runtime_requirements": runtime_requirements, "files": {path.relative_to(stage).as_posix(): sha256(path) for path in sorted(stage.rglob("*")) if path.is_file()}}
         (stage / "bundle-manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
             for path in sorted(archive_root.rglob("*")):

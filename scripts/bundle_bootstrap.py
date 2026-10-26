@@ -220,6 +220,9 @@ def configure_user_paths() -> None:
         os.environ['VSE_WORK_DIR'] = str(work)
 
 
+BUNDLE_DISTRIBUTION = 'self-contained inference runtime'
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--verify', action='store_true', help='Audit the included runtime and run real GUI/OCR/video regressions; no installation')
@@ -238,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(__file__).resolve().parent
     manifest_path = root / 'bundle-manifest.json'
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
-    if manifest.get('format') != 2 or manifest.get('distribution') != 'self-contained CPU inference runtime':
+    if manifest.get('format') != 2 or manifest.get('distribution') not in (BUNDLE_DISTRIBUTION, 'self-contained CPU inference runtime'):
         raise RuntimeError('This launcher requires a self-contained release bundle')
     if host_platform() != (manifest['platform'], manifest['arch']):
         raise RuntimeError(f"Wrong native bundle: requires {manifest['platform']}/{manifest['arch']}")

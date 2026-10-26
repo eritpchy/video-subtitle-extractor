@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-from scripts.bundle_bootstrap import sha256, verify_payload, write_size_report, main as bootstrap_main, configure_user_paths
+from scripts.bundle_bootstrap import BUNDLE_DISTRIBUTION, sha256, verify_payload, write_size_report, main as bootstrap_main, configure_user_paths
 from scripts.package_release import create_bundle, extract_checked, include_source, read_version, wheel_lock, verify_bundle, verification_path, finalize_portable_runtime
 from scripts.release_guard import assert_target, remote_tag_commit, validate_tag
 
@@ -49,6 +49,23 @@ class ReleaseGuardTests(unittest.TestCase):
 
 
 class PackageTests(unittest.TestCase):
+    def test_bootstrap_accepts_packager_distribution_and_legacy_cpu_format(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for distribution in (BUNDLE_DISTRIBUTION, 'self-contained CPU inference runtime'):
+                with self.subTest(distribution=distribution):
+                    (root / 'bundle-manifest.json').write_text(json.dumps({
+                        'format': 2, 'distribution': distribution,
+                    }))
+                    with patch('scripts.bundle_bootstrap.__file__', str(root / 'bootstrap.py')), \
+                         patch('scripts.bundle_bootstrap.host_platform', side_effect=RuntimeError('reached native platform gate')):
+                        with self.assertRaisesRegex(RuntimeError, 'reached native platform gate'):
+                            bootstrap_main([])
+            (root / 'bundle-manifest.json').write_text(json.dumps({'format': 2, 'distribution': 'system-python'}))
+            with patch('scripts.bundle_bootstrap.__file__', str(root / 'bootstrap.py')):
+                with self.assertRaisesRegex(RuntimeError, 'self-contained release bundle'):
+                    bootstrap_main([])
+
     def test_interpreter_pruning_uses_canonical_stage_identity(self):
         with tempfile.TemporaryDirectory() as tmp:
             parent = Path(tmp)
