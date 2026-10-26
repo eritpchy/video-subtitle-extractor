@@ -42,6 +42,11 @@ def audit(root: Path, accelerator: str, *, prepare: bool = False) -> dict:
             if (not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(packages)
                     or entry.hash is None or entry.hash.mode != 'sha256'):
                 raise RuntimeError(f'Missing/unverifiable CUDA runtime file: {name}/{entry}')
+            # RECORD may locate files through an OS ancestor alias (Windows
+            # RUNNER~1 / runneradmin, macOS /var /private/var). Containment was
+            # checked above against the canonical package root; use that same
+            # canonical identity for hashing and the relative inventory key.
+            path = path.resolve(strict=True)
             actual = digest(path)
             encoded = base64.urlsafe_b64encode(bytes.fromhex(actual)).decode().rstrip('=')
             if encoded != entry.hash.value or (entry.size is not None and path.stat().st_size != entry.size):

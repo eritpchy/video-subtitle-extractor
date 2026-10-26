@@ -51,7 +51,11 @@ class ReleaseAssetGuardTests(unittest.TestCase):
                 bundle.writestr(manifest_path or self.manifest_path(name),
                                 json.dumps(self.manifests[name]) if manifest_text is None else manifest_text)
                 for path, data in extra:
-                    bundle.writestr(path, data)
+                    # Preserve malicious archive bytes on Windows too: passing
+                    # a str to writestr sanitizes backslashes before writing.
+                    entry = zipfile.ZipInfo(path)
+                    entry.filename = entry.orig_filename = path
+                    bundle.writestr(entry, data)
         self.write_sidecars(name)
 
     def write_sidecars(self, name):
@@ -174,6 +178,34 @@ class ReleaseAssetGuardTests(unittest.TestCase):
                 self.write_archive(self.name, extra=[(entry, 'not a runtime')])
                 with self.assertRaisesRegex(RuntimeError, 'Unsafe or unexpected'):
                     self.validate()
+
+    def test_raw_zip_backslash_cannot_hide_behind_windows_normalization(self):
+        raw = self.archive.stem + '/runtime\\python.dll'
+        self.write_archive(self.name, extra=[(raw, 'not a runtime')])
+        with zipfile.ZipFile(self.archive) as bundle:
+            self.assertEqual(bundle.infolist()[-1].orig_filename, raw)
+        # Exercise Windows' ZipInfo reader on every host, without changing
+        # pathlib or the host OS. The original name remains unsafe even if the
+        # normalized name looks like an ordinary in-root path.
+        original_init = zipfile.ZipInfo.__init__
+
+        def windows_init(entry, *args, **kwargs):
+            original_init(entry, *args, **kwargs)
+            entry.filename = entry.filename.replace('\\', '/')
+
+        with patch.object(zipfile.ZipInfo, '__init__', windows_init), \
+                self.assertRaisesRegex(RuntimeError, 'Unsafe or unexpected'):
+            self.validate()
+
+    def test_raw_zip_nul_cannot_hide_behind_truncated_filename(self):
+        raw = self.archive.stem + '/runtime/python.dll\x00/../../outside'
+        self.write_archive(self.name, extra=[(raw, 'not a runtime')])
+        with zipfile.ZipFile(self.archive) as bundle:
+            entry = bundle.infolist()[-1]
+            self.assertEqual(entry.orig_filename, raw)
+            self.assertNotEqual(entry.filename, raw)
+        with self.assertRaisesRegex(RuntimeError, 'Unsafe or unexpected'):
+            self.validate()
 
     def test_manifest_identity_must_match_profile_name(self):
         original = dict(self.manifests[self.name])

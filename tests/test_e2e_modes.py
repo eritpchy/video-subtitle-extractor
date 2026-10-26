@@ -49,7 +49,7 @@ class CpuModeSmokeTests(unittest.TestCase):
         report = self.invoke()
         self.assertEqual(report["mode"], "fast")
         self.assertTrue(report["cpu_forced"])
-        self.assertEqual(Path(report["srt"]), self.output / "recognized.srt")
+        self.assertTrue(Path(report["srt"]).samefile(self.output / "recognized.srt"))
         self.assertEqual(json.loads((self.output / "report.json").read_text()), report)
         self.assertFalse((self.output / "fast").exists())
 
@@ -81,9 +81,25 @@ class CpuModeSmokeTests(unittest.TestCase):
         self.assertEqual(len(self.commands), 3)
         for case in report["cases"]:
             folder = self.output / case["mode"]
-            self.assertEqual(Path(case["srt"]).parent, folder)
+            self.assertTrue(Path(case["srt"]).parent.samefile(folder))
             self.assertEqual(json.loads((folder / "report.json").read_text()), case)
         self.assertEqual(json.loads((self.output / "report.json").read_text()), report)
+
+    def test_output_parent_alias_refers_to_the_same_real_files(self):
+        target = self.output.parent / "real temporary parent"
+        target.mkdir()
+        alias = self.output.parent / "temporary parent alias"
+        try:
+            alias.symlink_to(target, target_is_directory=True)
+        except (OSError, NotImplementedError) as error:
+            self.skipTest(f"Directory symlink unavailable: {error}")
+        self.output = alias / "evidence with spaces"
+        report = self.invoke()
+        self.assertNotEqual(Path(report["srt"]), self.output / "recognized.srt")
+        self.assertTrue(Path(report["srt"]).samefile(self.output / "recognized.srt"))
+        report = self.invoke("--all-modes")
+        for case in report["cases"]:
+            self.assertTrue(Path(case["srt"]).samefile(self.output / case["mode"] / "recognized.srt"))
 
     def test_mode_and_all_modes_are_mutually_exclusive(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:

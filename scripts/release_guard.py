@@ -149,9 +149,13 @@ def validate_assets(directory: Path, sha: str, version: str, *, matrix: str = 'r
             if len(names) != len(set(names)) or (platform == 'windows' and len(names) != len({name.casefold() for name in names})):
                 raise RuntimeError(f'Duplicate ZIP entry: {archive.name}')
             for entry in bundle.infolist():
-                name = entry.filename
+                # ZipInfo.filename is already sanitized: on Windows a raw
+                # backslash becomes '/', and every platform truncates at NUL.
+                # Validate the archive's original spelling, not that lossy view.
+                name = entry.orig_filename
                 relative = PurePosixPath(name)
-                if (relative.is_absolute() or '..' in relative.parts or '\\' in name or ':' in name
+                if (name != entry.filename or '\x00' in name
+                        or relative.is_absolute() or '..' in relative.parts or '\\' in name or ':' in name
                         or not name.startswith(archive.stem + '/') or str(relative) != name.rstrip('/')
                         or stat.S_ISLNK(entry.external_attr >> 16) or entry.flag_bits & 1):
                     raise RuntimeError(f'Unsafe or unexpected ZIP entry: {name}')

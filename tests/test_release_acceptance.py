@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-from scripts.accept_release_archive import Evidence, SCENARIOS, accept_archives, main
+from scripts.accept_release_archive import Evidence, SCENARIOS, _file, accept_archives, main
 from scripts.bundle_bootstrap import sha256
 from scripts.release_guard import PADDLE_MODEL_CHECK, candidate_asset_names, required_acceptance_checks, validate_assets
 from scripts.release_profiles import PROFILES
@@ -117,7 +117,7 @@ class FinalReleaseAcceptanceTests(unittest.TestCase):
         self.assertFalse(self.receipt.exists(), 'stale success receipt survived a failed acceptance')
 
     def test_receipt_derives_all_checks_and_original_evidence_hashes(self):
-        self.assertEqual(self.accept(), [self.receipt])
+        self.assertEqual(self.accept(), [self.receipt.resolve()])
         receipt = json.loads(self.receipt.read_text())
         self.assertEqual(receipt['archive'], self.name)
         self.assertEqual(receipt['archive_sha256'], sha256(self.archive))
@@ -333,7 +333,7 @@ class FinalReleaseAcceptanceTests(unittest.TestCase):
     def test_untrusted_evidence_path_in_aggregate_is_not_followed(self):
         path = self.environment / 'portable-environment-report.json'
         self.mutate(path, lambda row: row['scenarios'][0].update(evidence='/arbitrary/not/read'))
-        self.assertEqual(self.accept(), [self.receipt])
+        self.assertEqual(self.accept(), [self.receipt.resolve()])
 
     def test_evidence_symlink_is_rejected(self):
         path = self.smoke / 'bundle-e2e/report.json'
@@ -428,6 +428,49 @@ class FinalReleaseAcceptanceTests(unittest.TestCase):
         self.mutate(self.smoke / 'bundle-e2e/report.json', lambda row: row.update(result='failed'))
         with self.assertRaisesRegex(RuntimeError, 'changed during acceptance'):
             evidence.assert_unchanged()
+
+    def alias_evidence_root(self):
+        # Model macOS /var -> /private/var without requiring a macOS host.
+        actual = self.root / 'private-var'
+        actual.mkdir()
+        canonical = actual / 'evidence'
+        canonical.mkdir()
+        alias = self.root / 'system-var'
+        alias.symlink_to(actual, target_is_directory=True)
+        return alias / 'evidence', canonical.resolve()
+
+    def test_evidence_root_ancestor_alias_accepts_only_same_canonical_file(self):
+        alias, canonical = self.alias_evidence_root()
+        write_json(canonical / 'report.json', {'result': 'passed'})
+        self.assertEqual(_file(alias / 'report.json', alias), canonical / 'report.json')
+        evidence = Evidence()
+        self.assertEqual(evidence.read(alias, 'report.json', 'fixture'), {'result': 'passed'})
+        self.assertEqual(evidence.sources[0][:2], (canonical / 'report.json', canonical))
+        evidence.assert_unchanged()
+        write_json(alias / 'report.json', {'result': 'failed'})
+        with self.assertRaisesRegex(RuntimeError, 'changed during acceptance'):
+            evidence.assert_unchanged()
+
+    def test_evidence_root_alias_does_not_allow_descendant_symlinks(self):
+        alias, canonical = self.alias_evidence_root()
+        write_json(canonical / 'real/report.json', {'result': 'passed'})
+        (canonical / 'linked').symlink_to(canonical / 'real', target_is_directory=True)
+        (canonical / 'linked.json').symlink_to(canonical / 'real/report.json')
+        for relative in ('linked/report.json', 'linked.json'):
+            with self.subTest(relative=relative), self.assertRaisesRegex(RuntimeError, 'Symlink'):
+                Evidence().read(alias, relative, 'fixture')
+
+    def test_evidence_root_alias_does_not_allow_escape_or_symlink_root(self):
+        alias, canonical = self.alias_evidence_root()
+        write_json(canonical.parent / 'outside.json', {'result': 'passed'})
+        with self.assertRaisesRegex(RuntimeError, 'escaped'):
+            Evidence().read(alias, '../outside.json', 'fixture')
+        with self.assertRaisesRegex(RuntimeError, 'escaped'):
+            _file(canonical.parent / 'outside.json', alias)
+        root_link = self.root / 'linked-root'
+        root_link.symlink_to(canonical, target_is_directory=True)
+        with self.assertRaisesRegex(RuntimeError, 'unsafe evidence directory'):
+            Evidence().read(root_link, 'report.json', 'fixture')
 
     def test_no_archives_is_a_failure_not_skip(self):
         empty = self.root / 'empty'

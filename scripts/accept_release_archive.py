@@ -62,14 +62,23 @@ def _file(path: Path, root: Path) -> Path:
         relative = path.relative_to(root)
     except ValueError as error:
         raise RuntimeError(f'Evidence escaped its expected directory: {path}') from error
+    if '..' in relative.parts:
+        raise RuntimeError(f'Evidence escaped its expected directory: {path}')
+    # macOS temporary paths can start at /var, an alias of /private/var.
+    # Establish one canonical boundary, while still inspecting each original
+    # descendant before resolving it: an in-root symlink is not valid evidence.
+    canonical_root = _root(root)
     current = root
     for part in relative.parts:
         current = current / part
         if current.is_symlink():
             raise RuntimeError(f'Symlink is not accepted as final evidence: {path}')
-    if not path.is_file() or not path.resolve(strict=True).is_relative_to(root):
+    if not path.is_file():
         raise RuntimeError(f'Missing or unsafe final evidence: {path}')
-    return path
+    resolved = path.resolve(strict=True)
+    if not resolved.is_relative_to(canonical_root) or resolved != canonical_root / relative:
+        raise RuntimeError(f'Missing or unsafe final evidence: {path}')
+    return resolved
 
 
 class Evidence:
@@ -79,6 +88,9 @@ class Evidence:
         self.sources = []
 
     def read(self, root: Path, relative: str, scope: str, kind=dict):
+        # Keep the established canonical root for the later unchanged check;
+        # an ancestor alias changing after this read must not redirect it.
+        root = _root(root)
         path = _file(root / relative, root)
         if path.stat().st_size > MAX_REPORT_BYTES:
             raise RuntimeError(f'Oversized final evidence: {path}')

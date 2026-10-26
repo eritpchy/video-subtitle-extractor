@@ -1,2 +1,12 @@
 # Release checksum fixtures are verified byte-for-byte on every platform.
 tests/fixtures/videosubfinder/*.SHA256SUMS -text
+
+# Frozen OCR trust roots and their text references are hashed as original bytes.
+native/ocr/model-source-pins.json -text
+native/ocr/tests/goldens/smoke.json -text
+native/ocr/tests/evidence/fixture-manifest.json -text
+native/ocr/tests/evidence/legacy/conversion-manifest.json -text
+native/ocr/tests/evidence/legacy/pipeline-comparison.json -text
+native/ocr/tests/evidence/missing/conversion-manifest.json -text
+native/ocr/tests/evidence/missing/pipeline-comparison.json -text
+native/ocr/tests/evidence/detection/direct-standalone-detection-baseline.json -text

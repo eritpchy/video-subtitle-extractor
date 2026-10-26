@@ -91,6 +91,56 @@ class CudaPackageTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'Missing/unverifiable'):
                     audit(root, 'cuda11.8', prepare=True)
 
+    def test_safe_ancestor_alias_uses_the_same_canonical_runtime_inventory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            real = parent / 'physical-parent'
+            (real / 'bundle').mkdir(parents=True)
+            alias = parent / 'ancestor-alias'
+            try:
+                alias.symlink_to(real, target_is_directory=True)
+            except OSError as error:
+                self.skipTest(f'Directory aliases unavailable: {error}')
+            root = alias / 'bundle'
+            packages, records, paddle = self.fixture(root)
+            with patch('scripts.cuda_package.sys.platform', 'win32'), patch('scripts.cuda_package.distributions', return_value=records), patch.dict('sys.modules', {'paddle': paddle, 'PySide6': SimpleNamespace()}):
+                report = audit(root, 'cuda11.8', prepare=True)
+                self.assertEqual(set(report['runtime_files']), {
+                    'runtime/Lib/site-packages/paddle/base/libpaddle.pyd',
+                    'runtime/Lib/site-packages/nvidia/cublas/bin/cublas64_11.dll'})
+                self.assertEqual(audit(real / 'bundle', 'cuda11.8')['runtime_files'], report['runtime_files'])
+                (packages / records[1].files[0].relative).write_bytes(b'tampered through alias')
+                with self.assertRaisesRegex(RuntimeError, 'Changed vendor'):
+                    audit(root, 'cuda11.8')
+
+    def test_valid_record_bytes_outside_the_package_are_still_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            root = parent / 'bundle'
+            packages, records, paddle = self.fixture(root)
+            records[1] = Distribution(parent / 'foreign', 'nvidia-cublas-cu11', '11.11.3.6',
+                                      'nvidia/cublas/bin/cublas64_11.dll')
+            with patch('scripts.cuda_package.sys.platform', 'win32'), patch('scripts.cuda_package.distributions', return_value=records):
+                with self.assertRaisesRegex(RuntimeError, 'Missing/unverifiable'):
+                    audit(root, 'cuda11.8', prepare=True)
+
+    def test_runtime_file_symlink_is_not_accepted_as_a_safe_ancestor_alias(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            root = parent / 'bundle'
+            packages, records, paddle = self.fixture(root)
+            target = packages / records[1].files[0].relative
+            foreign = parent / 'foreign.dll'
+            foreign.write_bytes(target.read_bytes())
+            target.unlink()
+            try:
+                target.symlink_to(foreign)
+            except OSError as error:
+                self.skipTest(f'File symlinks unavailable: {error}')
+            with patch('scripts.cuda_package.sys.platform', 'win32'), patch('scripts.cuda_package.distributions', return_value=records):
+                with self.assertRaisesRegex(RuntimeError, 'Missing/unverifiable'):
+                    audit(root, 'cuda11.8', prepare=True)
+
     def test_foreign_os_is_not_windows_validation(self):
         with tempfile.TemporaryDirectory() as temporary, patch('scripts.cuda_package.sys.platform', 'linux'):
             with self.assertRaisesRegex(RuntimeError, 'native Windows'):

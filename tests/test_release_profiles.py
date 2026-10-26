@@ -78,6 +78,9 @@ class ReleaseProfileTests(unittest.TestCase):
         self.assertIn('windows-2022', workflow)
         self.assertIn('windows-2025', workflow)
         self.assertIn('accept_release_archive.py', workflow)
+        self.assertIn("'.gitattributes'", workflow)
+        self.assertIn("'design/**'", workflow)
+        self.assertIn('--junitxml=test-results/profile-safety.xml', workflow)
         for profile in ('paddle-cpu', 'paddle-cuda11.8', 'paddle-cuda12.6', 'directml'):
             self.assertIn(profile, workflow)
         native = (ROOT / '.github/workflows/native-ocr.yml').read_text()
