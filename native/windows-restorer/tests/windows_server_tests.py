@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import struct
 import subprocess
@@ -136,7 +137,7 @@ def tar_path_probe(work):
     return report
 
 
-def fixture(directory: Path, *, large=False, impossible_space=False, deep=False, deflated=False, invalid_deflate=False, wrong_payload_hash=False):
+def fixture(directory: Path, *, large=False, deep=False, deflated=False, invalid_deflate=False, wrong_payload_hash=False):
     directory.mkdir()
     root = 'vse-restorer-SYNTHETIC-NOT-A-RELEASE'
     archive = directory / (root + '.zip')
@@ -180,31 +181,43 @@ def fixture(directory: Path, *, large=False, impossible_space=False, deep=False,
     # Test-only fixture generation. Production build.py has no bypass and calls
     # verify_transport. This deliberately carries no release receipt.
     header = metadata.render_verified(document)
-    if impossible_space:
-        header = header.replace(f'uncompressed_bytes = {size}ULL;', 'uncompressed_bytes = 9223372036854775807ULL;')
     (directory / 'bundle_metadata.hpp').write_text('// SYNTHETIC TEST ONLY. NEVER DISTRIBUTE.\n' + header, encoding='ascii')
     return document
 
 
-def compile_fixture(directory):
+def compile_fixture(directory, *, simulate_space_api=False):
     builder = load('native_builder', HERE / 'build.py')
     source_tools = load('native_source_tools', HERE / 'source_bundle.py')
     snapshot = source_tools.snapshot_sources(ROOT)
     identity = source_tools.git_identity(ROOT)
-    result = builder.compile_fixed(HERE, directory, directory)
-    source_tools.assert_sources_unchanged(ROOT, snapshot)
-    result.update({'scope': 'SYNTHETIC-NOT-FOR-DISTRIBUTION', 'git': identity,
-                   'source_sha256': {name: hashlib.sha256(data).hexdigest() for name, data in snapshot.items()},
-                   'fixed_header_sha256': sha(directory / 'bundle_metadata.hpp'),
-                   'client_restore_verified': False, 'gpu_inference_verified': False})
-    (directory / 'fixture-build-record.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
-    # Exact source files and fixed header can be uploaded as diagnostic evidence;
-    # do not upload this synthetic EXE/object or treat it as a release asset.
-    companion = directory / 'fixture-source'
-    companion.mkdir()
+    # Preserve exact source/header evidence even if a later compiler/map guard
+    # fails. These copies are diagnostic artifacts, never customer binaries.
+    companion = directory / 'fixture-source'; companion.mkdir()
     for name, data in snapshot.items():
         path = companion / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(data)
-    (companion / 'bundle_metadata.hpp').write_bytes((directory / 'bundle_metadata.hpp').read_bytes())
+    header = (directory / 'bundle_metadata.hpp').read_bytes()
+    (companion / 'bundle_metadata.hpp').write_bytes(header)
+    result = {'scope': 'SYNTHETIC-NOT-FOR-DISTRIBUTION', 'git': identity,
+              'source_sha256': {name: hashlib.sha256(data).hexdigest() for name, data in snapshot.items()},
+              'fixed_header_sha256': hashlib.sha256(header).hexdigest(),
+              'synthetic_space_fixture': simulate_space_api, 'real_disk_exhaustion_tested': False,
+              'client_restore_verified': False, 'gpu_inference_verified': False, 'result': 'compile-started'}
+    record_path = directory / 'fixture-build-record.json'
+    record_path.write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
+    try:
+        if simulate_space_api:
+            built = builder._compile_fixed_impl(HERE, directory, directory, synthetic_space_fixture=True)
+        else:
+            built = builder.compile_fixed(HERE, directory, directory)
+        result.update(built)
+        source_tools.assert_sources_unchanged(ROOT, snapshot)
+        if (directory / 'bundle_metadata.hpp').read_bytes() != header: raise RuntimeError('Synthetic header changed during compilation')
+        result['result'] = 'built-synthetic-not-client-certified'
+    except Exception as error:
+        result.update(result='failed', error=str(error))
+        raise
+    finally:
+        record_path.write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
     executable = directory / 'fixture-restorer-NOT-FOR-DISTRIBUTION.exe'
     (directory / 'restore.exe').rename(executable)
     return executable
@@ -396,8 +409,18 @@ def main():
             (existing / 'stdout.log').write_bytes(result.stdout); (existing / 'stderr.log').write_bytes(result.stderr)
             assert result.returncode != 0 and marker.read_bytes() == b'do not overwrite' and list(keep.iterdir()) == [marker]
         with collect_case(records, 'space-preflight'):
-            low_source = work / 'space-fixture'; fixture(low_source, impossible_space=True); low_exe = compile_fixture(low_source)
-            run_case(low_exe, low_source, work / 'insufficient-space', False, 'space-preflight', records)
+            low_source = work / 'space-fixture'; small = fixture(low_source, deflated=True)
+            assert small['archive']['uncompressed_bytes'] == 8 * 1024 * 1024
+            low_exe = compile_fixture(low_source, simulate_space_api=True)
+            destination = work / 'insufficient-space'
+            run_case(low_exe, low_source, destination, False, 'space-preflight', records)
+            stderr = (destination / 'stderr.log').read_bytes()
+            observations = re.findall(rb'SYNTHETIC-NOT-FOR-DISTRIBUTION space-api actual_available=([0-9]+) reported_available=0; NOT real disk exhaustion', stderr)
+            assert len(observations) == 1 and b'Insufficient free space:' in stderr
+            assert not list(destination.glob('.vse-incomplete-*')), 'Preflight refusal must precede staging'
+            records[-1].update(space_api_simulated=True, real_disk_exhaustion_tested=False,
+                               actual_available_bytes=int(observations[0]), reported_available_bytes=0,
+                               preflight_message_verified=True, no_stage_created=True)
         if args.large:
             big_exe = None
             with collect_case(records, 'real-over-2gib-zip64'):

@@ -209,20 +209,50 @@ files and tests valid/empty/multibuffer streams, truncated/invalid/trailing inpu
 size bounds and cancellation; source/index/link-map drift tests fail closed.
 **Linux success is not Windows execution evidence.**
 
-### Space-preflight compiler regression
+### Space-preflight fixture failures and isolated API simulation
 
-Run `40278641385` reached the real native gates on both Servers: 18/19 passed,
+Run `40278641385` reached the native gates on both Servers: 18/19 passed,
 including Unicode, long paths, stored ZIP64 over 2 GiB, expanded DEFLATE over
-2 GiB, invalid data and interruption. The remaining space-preflight fixture did
-not run: its deliberately oversized constant made the original bounds `if`
-constant-true, producing MSVC 14.44 C4127 under `/W4 /WX`. This was a fixture
-compilation failure, not a demonstrated disk-space preflight pass.
+2 GiB, invalid data and interruption. The remaining space fixture did not run:
+its deliberately invalid 9-EiB expanded-size constant caused MSVC C4127 under
+`/W4 /WX`. The equivalent bounds helper removed that compiler warning without
+weakening the one-TiB/central-offset/actual-size comparisons.
 
-The same expanded/central-offset/actual-size comparisons now use a pure,
-non-constexpr parameter helper; no safety bound, fixture constant or warning
-policy is removed. Boundary and oversized-value tests cover the helper. The
-next Server run must compile and execute all 19 cases; earlier 18/19 evidence
-cannot certify the corrected candidate or either real CUDA package.
+Run `40282919732` at `971a463` again reached 18/19: the same invalid space fixture
+compiled, but the full link-map guard rejected missing raw-inflate entry points.
+Original excerpts show `inflateInit2_`, `inflate`, `inflateEnd` defined in the
+space object table but absent from its final function map; the normal fixture's
+map contains all three. The object table is 20,467 bytes, SHA256
+`13faf2d3b47f913684681b26a1483062da14e65656d890843e049e2490f650cb`.
+The original compile argv was not saved; it is not reconstructed as evidence.
+The observations are consistent with optimization of an always-rejected invalid
+header, not missing inflate source. Neither a map exception nor `/OPT:NOREF` is
+used to make that invalid fixture appear to represent a normal package.
+
+The corrected space case uses a **real, internally consistent 8-MiB DEFLATE
+ZIP**. Only the independently marked synthetic test entry includes the unchanged
+production `restorer.cpp` with a redirected Win32 free-space function name. Its
+wrapper is a separate translation unit, compiled `/GL-` and linked `/LTCG:OFF`:
+it first queries the real path with `GetDiskFreeSpaceExW`, logs actual availability,
+and then reports `available=0` to the test caller. No large data generation,
+disk filling, elevation, policy/registry changes or client runtime switch occurs.
+This proves **simulated API report of insufficient space -> preflight refusal**,
+not actual physical disk exhaustion. The report must contain the original
+insufficient-space message, the explicit simulation marker, and no output stage.
+
+The public `compile_fixed` and production CLI reject synthetic entry/macros in
+source/header/options; their final map forbids the test symbol. The synthetic
+builder is an explicit private diagnostic path selecting only two fixed test
+sources. It uses the same static-import/PE/complete-inflate-map gates, additionally
+requiring the test API symbol; its records are marked non-distributable. A second
+check blocks such records from distribution. Actual source, object hashes and
+commands are retained before later guard failures, together with the fixed header.
+The test binary is never uploaded/distributed as a customer executable. The
+other 18 native cases, production source and safety limits are unchanged.
+
+All 19 cases still require a new Server result; old 18/19 evidence cannot certify
+this revision or either real CUDA package. Real write-time disk exhaustion is a
+separate integration requirement, not satisfied by this controlled simulation.
 
 ## Required independent Server 2022 + 2025 gate
 
@@ -242,7 +272,8 @@ runs Unicode/space/`&!%()` paths, poisoned PATH/SystemRoot/TAR_OPTIONS, a >260
 character ZIP member and a >260-character Unicode destination cwd,
 missing/modified/swapped/hardlinked volumes, ancestor
 junctions, UNC/device syntax, existing-user-data protection, insufficient-space
-preflight, a real >2-GiB stored ZIP/ZIP64 member, >2-GiB expanded DEFLATE,
+a separately labeled simulated-space-report preflight, a real >2-GiB stored
+ZIP/ZIP64 member, >2-GiB expanded DEFLATE,
 invalid raw DEFLATE, wrong expected payload SHA, and abrupt interruption during
 both merging and observed fixed-inflate output. The legacy first-case name still
 mentions `clean-system-tar` only for continuity with prior recorded failures;

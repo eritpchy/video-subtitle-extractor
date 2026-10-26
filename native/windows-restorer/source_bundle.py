@@ -23,6 +23,8 @@ SOURCE_PATHS = (
     'native/windows-restorer/tests/test_fixed_inflate.py', 'native/windows-restorer/tests/inflate_driver.cpp',
     'native/windows-restorer/tests/rename_probe.cpp', 'native/windows-restorer/tests/run_rename_probe.py',
     'native/windows-restorer/tests/test_rename_probe.py',
+    'native/windows-restorer/tests/space_preflight_driver.cpp', 'native/windows-restorer/tests/space_preflight_api.cpp',
+    'native/windows-restorer/tests/test_space_preflight_isolation.py',
     'scripts/release_volume_transport.py', 'scripts/release_guard.py',
     'scripts/release_profiles.py', 'scripts/package_release.py',
     'scripts/bundle_bootstrap.py', 'scripts/runtime_dependencies.py',

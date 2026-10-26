@@ -396,6 +396,8 @@ class PeDependencyPolicyTests(unittest.TestCase):
         include.parent.mkdir(parents=True, exist_ok=True); include.write_text('// synthetic SDK provenance')
         library = self.root / 'libcmt.lib'; library.write_bytes(b'unit library provenance')
         output = self.root / 'output'; output.mkdir(exist_ok=True)
+        (self.root / 'restorer.cpp').write_text('// synthetic unit compilation, not a real source build')
+        (self.root / 'bundle_metadata.hpp').write_text('// synthetic unit metadata')
 
         self.observed_compile_environments = []
         def closure(*args):
@@ -418,7 +420,7 @@ class PeDependencyPolicyTests(unittest.TestCase):
                 patch.object(builder.subprocess, 'run', side_effect=run), \
                 patch.dict(sys.modules, {'zlib_build': SimpleNamespace(
                     compile_closure=closure,
-                    inspect_link_map=lambda *a: {'synthetic_mock_not_native_proof': True}, verify_sources=lambda *a: None)}):
+                    inspect_link_map=lambda *a: {'synthetic_mock_not_native_proof': True, 'synthetic_space_shim_present': False}, verify_sources=lambda *a: None)}):
             return builder.compile_fixed(self.root, self.root, output)
 
     def test_compile_gate_ignores_singular_plural_and_localized_dumpbin_prose(self):

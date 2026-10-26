@@ -64,6 +64,7 @@ def compile_closure(source_directory, output, compiler, dumpbin, environment):
         command = [compiler, '/nologo', '/Bv', '/TC', '/std:c11', '/c', '/MT', '/O1', '/Os', '/W4', '/WX',
                    '/utf-8', '/GS', '/guard:cf', '/Brepro', '/DZ_SOLO', '/DNO_GZIP',
                    '/sourceDependencies', str(dependencies), f'/I{directory}', str(directory / name), f'/Fo{obj}']
+        (output / f'zlib-{stem}-command-record.json').write_text(json.dumps({'command': command, 'source_sha256': digest(directory / name)}, indent=2) + '\n', encoding='utf-8')
         built = subprocess.run(command, cwd=output, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                encoding='utf-8', errors='replace')
         (output / f'zlib-{stem}-compiler.log').write_text(built.stdout, encoding='utf-8')
@@ -79,6 +80,7 @@ def compile_closure(source_directory, output, compiler, dumpbin, environment):
         assert_no_excluded_symbols(defined); symbols.update(defined)
         records.append({'source': name, 'command': command, 'object_sha256': digest(obj),
                         'compiler_bv_and_log': built.stdout, 'defined_symbols': sorted(defined)})
+        (output / f'zlib-{stem}-object-record.json').write_text(json.dumps(records[-1], indent=2) + '\n', encoding='utf-8')
         objects.append(obj)
     if not {'inflateInit2_', 'inflate', 'inflateEnd'} <= symbols:
         raise RuntimeError('Required raw-inflate entry points missing')
@@ -89,12 +91,16 @@ def compile_closure(source_directory, output, compiler, dumpbin, environment):
                      'scope': 'restricted-source-closure-not-a-claim-of-no-unknown-vulnerabilities'}
 
 
-def inspect_link_map(path):
+def inspect_link_map(path, *, synthetic_space_fixture=False):
+    if type(synthetic_space_fixture) is not bool: raise RuntimeError('Invalid link-map build scope')
     text = Path(path).read_text(encoding='utf-8', errors='replace')
     symbols = set(re.findall(r'^\s*[0-9A-Fa-f]+:[0-9A-Fa-f]+\s+(\S+)\s+[0-9A-Fa-f]+\s', text, re.MULTILINE))
     if not {'inflateInit2_', 'inflate', 'inflateEnd'} <= symbols:
         raise RuntimeError('Final link map does not prove required raw-inflate entry points')
     assert_no_excluded_symbols(symbols)
-    return {'sha256': digest(Path(path)), 'bytes': Path(path).stat().st_size,
+    synthetic = {symbol for symbol in symbols if 'vsesynthetic' in symbol.lower()}
+    expected = {'VseSyntheticGetDiskFreeSpaceExW'} if synthetic_space_fixture else set()
+    if synthetic != expected: raise RuntimeError('Synthetic space symbols differ from the declared build scope')
+    return {'synthetic_space_shim_present': bool(synthetic), 'sha256': digest(Path(path)), 'bytes': Path(path).stat().st_size,
             'excluded_gzwrite_deflate_crc_archive_symbols_absent': True,
             'required_inflate_symbols_present': True}

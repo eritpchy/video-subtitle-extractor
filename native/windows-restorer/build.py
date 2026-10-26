@@ -159,8 +159,43 @@ def assert_pe_dependency_policy(executable: Path) -> dict:
             'dependent_load_flags_offset': 0x4e, 'dependent_load_flags': flags}
 
 
+def assert_production_sources(source_directory: Path, header_directory: Path):
+    """The public builder has no synthetic API/entry option, even for fixtures."""
+    forbidden = re.compile(r'VSE_SYNTHETIC|VseSynthetic|space_preflight_(?:driver|api)|#\s*define\s+GetDiskFreeSpaceExW', re.IGNORECASE)
+    for path in (source_directory / 'restorer.cpp', header_directory / 'bundle_metadata.hpp'):
+        if path.is_symlink() or not path.is_file() or forbidden.search(path.read_text(encoding='utf-8')):
+            raise RuntimeError('Production builder refuses a synthetic space API macro/entry')
+    for name in ('CL', '_CL_', 'LINK', '_LINK_'):
+        if forbidden.search(os.environ.get(name, '')):
+            raise RuntimeError('Production builder refuses synthetic compiler/linker options')
+
+
+def assert_distributable_record(record):
+    if (record.get('synthetic_space_fixture') is not False or
+            record.get('restricted_zlib', {}).get('final_link_map', {}).get('synthetic_space_shim_present') is not False):
+        raise RuntimeError('Synthetic or unproven space API must never enter distribution')
+
+
 def compile_fixed(source_directory: Path, header_directory: Path, output: Path) -> dict:
-    """Compile a fixed verified header; no transport imports/network involved."""
+    """Public production entry: no custom source, object, macro or simulation option."""
+    assert_production_sources(source_directory, header_directory)
+    result = _compile_fixed_impl(source_directory, header_directory, output)
+    assert_distributable_record(result)
+    return result
+
+
+def _compile_fixed_impl(source_directory: Path, header_directory: Path, output: Path, *, synthetic_space_fixture=False) -> dict:
+    """Shared strict compiler/PE/map implementation; test-only caller is explicit.
+
+    This private switch has no CLI exposure. It selects only two fixed test TUs,
+    never arbitrary source/objects. Such records are forbidden from distribution.
+    """
+    if type(synthetic_space_fixture) is not bool: raise RuntimeError('Invalid build scope')
+    if synthetic_space_fixture:
+        if not (header_directory / 'bundle_metadata.hpp').read_text(encoding='ascii').startswith('// SYNTHETIC TEST ONLY. NEVER DISTRIBUTE.'):
+            raise RuntimeError('Synthetic space entry requires a synthetic fixture header')
+    else:
+        assert_production_sources(source_directory, header_directory)
     if os.name != 'nt' or platform.machine().lower() not in ('amd64', 'x86_64'): raise RuntimeError('Native Windows x64 Server build required')
     compiler, linker, dumpbin = (shutil.which(name) for name in ('cl.exe', 'link.exe', 'dumpbin.exe'))
     if not all((compiler, linker, dumpbin)): raise RuntimeError('Run in the x64 MSVC Native Tools build environment')
@@ -172,17 +207,52 @@ def compile_fixed(source_directory: Path, header_directory: Path, output: Path) 
     sys.path.insert(0, str(source_directory))
     import zlib_build
     zlib_objects, zlib_record = zlib_build.compile_closure(source_directory, output, compiler, dumpbin, process_environment)
+    entry = source_directory / 'restorer.cpp'
+    extra_objects, extra_headers, simulation_records = [], set(), []
+    simulation_flags = []
+    if synthetic_space_fixture:
+        entry = source_directory / 'tests/space_preflight_driver.cpp'
+        api = source_directory / 'tests/space_preflight_api.cpp'
+        for path in (entry, api):
+            if path.is_symlink() or not path.is_file(): raise RuntimeError('Missing/plain synthetic source required')
+        obj, deps = output / 'synthetic-space-api.obj', output / 'synthetic-space-api-dependencies.json'
+        simulation_flags = ['/DVSE_SYNTHETIC_SPACE_PREFLIGHT=1', '/GL-']
+        api_command = [compiler, '/nologo', '/Bv', '/c', '/std:c++17', '/EHsc', '/MT', '/O1', '/Os', '/W4', '/WX',
+                       '/utf-8', '/GS', '/guard:cf', '/Brepro', '/DUNICODE', '/D_UNICODE', '/D_WIN32_WINNT=0x0A00',
+                       *simulation_flags, '/sourceDependencies', str(deps),
+                       str(api), f'/Fo{obj}']
+        (output / 'synthetic-space-api-command-record.json').write_text(json.dumps({'command': api_command, 'source': tool_record(api),
+            'scope': 'SYNTHETIC-NOT-FOR-DISTRIBUTION'}, indent=2) + '\n', encoding='utf-8')
+        api_built = subprocess.run(api_command, cwd=output, env=process_environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   encoding='utf-8', errors='replace')
+        (output / 'synthetic-space-api-compiler.log').write_text(api_built.stdout, encoding='utf-8'); api_built.check_returncode()
+        includes = json.loads(deps.read_text(encoding='utf-8-sig'))['Data']['Includes']
+        if not includes or any(not isinstance(path, str) for path in includes): raise RuntimeError('Synthetic API include provenance missing')
+        extra_headers.update(includes)
+        symbols = subprocess.run([dumpbin, '/SYMBOLS', str(obj)], env=process_environment, check=True, capture_output=True,
+                                 encoding='utf-8', errors='replace').stdout
+        (output / 'synthetic-space-api-symbols.txt').write_text(symbols, encoding='utf-8')
+        defined = zlib_build.defined_symbols(symbols); zlib_build.assert_no_excluded_symbols(defined)
+        if 'VseSyntheticGetDiskFreeSpaceExW' not in defined: raise RuntimeError('Synthetic API object symbol missing')
+        simulation_records.append({'source': tool_record(api), 'object': tool_record(obj), 'command': api_command,
+                                   'compiler_log': api_built.stdout, 'defined_symbols': sorted(defined)})
+        (output / 'synthetic-space-api-object-record.json').write_text(json.dumps(simulation_records[-1], indent=2) + '\n', encoding='utf-8')
+        extra_objects.append(obj)
     link_map = output / 'link-map.txt'
     dependencies_path = output / 'source-dependencies.json'
     command = [compiler, '/nologo', '/Bv', '/std:c++17', '/EHsc', '/MT', '/O1', '/Os', '/W4', '/WX', '/utf-8', '/bigobj', '/GS', '/guard:cf', '/Brepro',
                '/sourceDependencies', str(dependencies_path), '/DUNICODE', '/D_UNICODE', '/D_WIN32_WINNT=0x0A00',
-               '/DZ_SOLO', '/DNO_GZIP', f'/I{source_directory}', f'/I{header_directory}', str(source_directory / 'restorer.cpp'),
-               *[str(path) for path in zlib_objects],
+               '/DZ_SOLO', '/DNO_GZIP', f'/I{source_directory}', f'/I{header_directory}', *simulation_flags, str(entry),
+               *[str(path) for path in zlib_objects + extra_objects],
                f'/Fo{output / "restorer.obj"}', f'/Fe{executable}', '/link', f'/MAP:{link_map}', '/VERBOSE:LIB', '/INCREMENTAL:NO', '/DYNAMICBASE', '/NXCOMPAT', '/HIGHENTROPYVA', '/DEPENDENTLOADFLAG:0x800',
                '/MACHINE:X64', '/SUBSYSTEM:CONSOLE', '/MANIFEST:EMBED', "/MANIFESTUAC:level='asInvoker' uiAccess='false'"]
+    if synthetic_space_fixture: command.append('/LTCG:OFF')
+    (output / 'compile-command-record.json').write_text(json.dumps({'command': command, 'entry_source': tool_record(entry),
+        'synthetic_space_fixture': synthetic_space_fixture}, indent=2) + '\n', encoding='utf-8')
     built = subprocess.run(command, cwd=output, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding='utf-8', errors='replace', env=process_environment)
     (output / 'compiler.log').write_text(built.stdout, encoding='utf-8'); built.check_returncode()
-    zlib_record['final_link_map'] = zlib_build.inspect_link_map(link_map)
+    zlib_record['final_link_map'] = (zlib_build.inspect_link_map(link_map, synthetic_space_fixture=True)
+                                     if synthetic_space_fixture else zlib_build.inspect_link_map(link_map))
     zlib_build.verify_sources(source_directory)
     dependencies = subprocess.run([dumpbin, '/DEPENDENTS', str(executable)], check=True, capture_output=True, text=True, env=process_environment).stdout
     imports = assert_static_imports(dependencies)
@@ -197,7 +267,7 @@ def compile_fixed(source_directory: Path, header_directory: Path, output: Path) 
     if not includes or any(not isinstance(name, str) for name in includes): raise RuntimeError('Actual compiler header dependencies unavailable')
     # /sourceDependencies lists the headers actually consumed, not guessed SDK
     # paths from environment labels. /VERBOSE:LIB supplies resolved library paths.
-    include_records = [tool_record(Path(name)) for name in sorted(set(includes) | set(zlib_record['actual_header_paths']))]
+    include_records = [tool_record(Path(name)) for name in sorted(set(includes) | set(zlib_record['actual_header_paths']) | extra_headers)]
     libraries = sorted(set(re.findall(r'^\s*Searching\s+(.+?\.lib):\s*$', built.stdout, re.MULTILINE | re.IGNORECASE)))
     if not libraries: raise RuntimeError('Actual linker library provenance unavailable; inspect compiler.log')
     library_records = [tool_record(Path(name)) for name in libraries]
@@ -207,7 +277,8 @@ def compile_fixed(source_directory: Path, header_directory: Path, output: Path) 
                  'diagnostic_language': '1033', 'compiler_bv_and_link_log': built.stdout, 'actual_headers': include_records, 'actual_libraries': library_records,
                  'actual_sdk_headers': sdk_headers, 'environment_labels_only': {name: os.environ.get(name) for name in ('VCToolsVersion', 'WindowsSDKVersion', 'WindowsSdkDir')},
                  'python': {'version': sys.version, 'executable': tool_record(Path(sys.executable))}}
-    return {'command': command, 'toolchain': toolchain, 'imports': imports, 'pe_dependency_policy': pe_policy,
+    return {'command': command, 'synthetic_space_fixture': synthetic_space_fixture, 'entry_source': tool_record(entry),
+            'synthetic_translation_units': simulation_records, 'toolchain': toolchain, 'imports': imports, 'pe_dependency_policy': pe_policy,
             'restricted_zlib': zlib_record,
             'exe_sha256': digest(executable), 'exe_bytes': executable.stat().st_size,
             'bit_identical_rebuild_verified': False}
@@ -230,6 +301,7 @@ def main() -> int:
     manifest_bytes = args.manifest.read_bytes()
     subprocess.run([sys.executable, str(HERE / 'generate_metadata.py'), '--manifest', str(args.manifest.absolute()), '--output', str(output / 'bundle_metadata.hpp'), '--provenance-output', str(output / 'generator-dependencies.json')], check=True)
     record = compile_fixed(HERE, output, output)
+    assert_distributable_record(record)
     source_bundle.assert_sources_unchanged(ROOT, snapshot)
     if args.manifest.read_bytes() != manifest_bytes: raise RuntimeError('Transport manifest changed during build')
     record.update({'schema': 2, 'result': 'built-not-client-certified', 'git': original_git,
