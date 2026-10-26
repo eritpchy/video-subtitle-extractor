@@ -7,6 +7,7 @@ import sys
 import textwrap
 
 import pytest
+from scripts import source_ci_steps
 
 ROOT = Path(__file__).resolve().parents[1]
 PATHS = (
@@ -35,9 +36,9 @@ def workflow():
 
 def test_source_installs_into_new_venv_and_never_builds_custom_worker():
     value = workflow().split("\n  original-models:", 1)[0]
-    for required in ('ubuntu-24.04', 'macos-26', "python-version: '3.12'", 'python -m venv',
-                     'requirements-coreml-inference.txt', 'python -m pip check',
-                     'python -m pip freeze', 'custom_worker_files', 'selected_backend()',
+    for required in ('ubuntu-24.04', 'macos-26', "python-version: '3.12'", 'source_ci_steps.py init',
+                     '--step pip-install', '--step pip-check',
+                     'python -m pip freeze', '--step source-default',
                      'VSE_OCR_BACKEND=python-coreml', 'absent-native-worker'):
         assert required in value
     for forbidden in ('native/ocr/build.py', 'prepare_models.py', 'cmake --build',
@@ -51,21 +52,27 @@ def test_source_installs_into_new_venv_and_never_builds_custom_worker():
 def test_model_data_is_public_reverified_and_no_prior_action_artifact_is_required():
     value = workflow()
     assert 'prepare_source_models.py onnx --output build/source-models' in value
-    assert 'prepare_source_models.py verify --format onnx build/source-models' in value
+    assert '--step models-verify' in value
+    command = source_ci_steps.command({'identity': {'profile': 'linux-ort-cpu'}, 'environment': {'interpreter': 'python'}, 'paths': {'checkout': str(ROOT)}, 'models': 'build/source-models'}, ROOT, 'models-verify')
+    assert command[1:] == ['-S', 'scripts/prepare_source_models.py', 'verify', '--format', 'onnx', 'build/source-models']
     assert 'source-model-data-60e6f8098c058777273b5a6820d804731b5c93c45c78b14f5d8d1d1165361a11' in value
     assert 'restore-keys:' not in value
     assert '--version 6.10.7' in value
-    assert '--verify-only' in value
+    assert '--step vsf-verify' in value
 
 
 def test_real_source_cases_video_gui_and_failure_artifacts_cannot_be_skipped_by_unit_success():
     value = workflow()
-    assert 'python gui.py --smoke-test' in value
-    for provider, case in (('coreml', 'early'), ('coreml', 'models'), ('cpu', 'all'), ('coreml', 'all')):
+    assert '--step gui-smoke' in value
+    for provider, case in (('coreml', 'early'), ('coreml', 'models')):
         assert f'--provider {provider} --case-set {case}' in value
-    assert 'scripts/e2e_python_coreml.py' in value
+    assert '--step video' in value
+    for profile, provider in (('linux-ort-cpu', 'cpu'), ('macos-ort-cpu-coreml', 'both')):
+        command = source_ci_steps.command({'identity': {'profile': profile}, 'environment': {'interpreter': 'python'}, 'paths': {'checkout': str(ROOT)}, 'models': 'models'}, ROOT, 'video')
+        assert command[1] == 'scripts/e2e_python_coreml.py'
+        assert command[command.index('--provider') + 1] == provider
     assert 'tests/test_check_python_coreml.py' in value
-    assert value.index('--case-set early') < value.index('--case-set models') < value.index('--provider coreml --case-set all')
+    assert value.index('--case-set early') < value.index('--case-set models') < value.index('--step image-coreml')
     artifact = value.split('- name: Preserve source evidence including genuine failures', 1)[1].split('- name:', 1)[0]
     assert 'if: always()' in artifact and 'test-results/python-source/' in artifact
     assert 'not physical GPU' in value
@@ -129,23 +136,22 @@ def test_actual_workflow_cleanup_starts_a_fresh_venv_without_poisoned_loader_val
 
 
 def test_cuda_source_uses_only_two_server2022_profiles_with_normal_pip_and_no_worker():
-    value = workflow().split('  windows-source-cuda:', 1)[1]
+    value = workflow().split('  windows-source-cuda:', 1)[1].split('  source-set:', 1)[0]
     assert 'runs-on: windows-2022' in value
     assert 'windows-2025' not in value
     assert value.count("cuda: '") == 2
-    assert 'if root.exists() or root.is_symlink():' in value
+    assert '--venv "$RUNNER_TEMP/cuda-source-venv"' in value
+    assert 'source_ci_steps.py init' in value
     for required in ('requirements-source-cuda118.txt', 'requirements-source-cuda126.txt',
-                     "'-m', 'venv'", 'python -m pip install -r ${{ matrix.requirements }}',
-                     'python -m pip check', 'check_source_cuda_environment.py', 'cpu-all.json',
-                     'scripts/check_paddle_models.py --app-root .', 'python gui.py --smoke-test',
-                     'scripts/e2e_smoke.py --all-modes --provider cpu',
+                      '--step pip-install', '--step pip-check', '--step cuda-environment',
+                     '--step image-cpu', '--step gui-smoke', '--step video',
                      'test_source_cuda_requirements.py', 'test_source_cuda_environment.py'):
         assert required in value
     for forbidden in ('--no-deps', 'prepare_release_profile.py', 'package_release.py',
                       'native/ocr/build.py', 'cmake', '--gpu-probe', 'continue-on-error:',
                       '--publish', 'contents: write', 'DYLD_', '--extra-index-url'):
         assert forbidden not in value
-    assert value.index('pip check') < value.index('check_source_cuda_environment.py') < value.index('check_paddle_models.py --app-root')
+    assert value.index('--step pip-check') < value.index('--step cuda-environment') < value.index('--step image-cpu')
     assert 'if: always()' in value.split('Preserve source CUDA evidence', 1)[1]
 
 
@@ -158,6 +164,72 @@ def test_ci_paddle_seed_is_explicit_data_reuse_not_a_public_source_login_require
     assert 'needs: original-models' in windows
     assert 'paddle-original-models-${{ github.sha }}' in windows
     assert 'paddle_model_seed_ci.py --verify-seed build/paddle-seed' in windows
-    assert 'prepare_source_models.py verify --format paddle build/paddle-seed/models' in windows
+    assert '--step models-verify' in windows
     assert 'prepare_source_models.py paddle --output' not in windows  # No retry of denied origins.
     assert 'GPU hardware/OCR certification' in windows
+
+
+def test_reusable_source_gate_requires_all_four_profiles_same_run_and_exact_receipt_hash():
+    value = workflow()
+    assert '  workflow_call:' in value and '  workflow_dispatch:' in value
+    assert '  push:' not in value
+    assert value.count('      max-parallel: 2') == 2
+    assert value.count('      fail-fast: false') == 2
+    aggregate = value.split('  source-set:', 1)[1]
+    assert 'needs: [source, windows-source-cuda]' in aggregate
+    assert "if: ${{ !cancelled() && needs.source.result == 'success' && needs.windows-source-cuda.result == 'success' }}" in aggregate
+    assert 'always()' not in aggregate and 'continue-on-error:' not in value
+    for profile in source_ci_steps.PROFILES:
+        assert f'name: source-evidence-{profile}-${{{{ github.sha }}}}-${{{{ github.run_id }}}}-${{{{ github.run_attempt }}}}' in aggregate
+        assert f'path: build/source-evidence/{profile}' in aggregate
+    assert 'python -I -S scripts/source_acceptance.py aggregate' in aggregate
+    assert '--run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT"' in aggregate
+    assert 'acceptance_sha256=' in aggregate
+    for key in ('acceptance_artifact', 'acceptance_sha256'):
+        assert '${{ jobs.source-set.outputs.' + key + ' }}' in value
+    release = (ROOT / '.github/workflows/release.yml').read_text()
+    caller = release.split('  python-source:', 1)[1].split('  native:', 1)[0]
+    assert 'needs: original-models' in caller and 'reuse_original_models: true' in caller
+    assert 'uses: ./.github/workflows/python-source.yml' in caller
+    candidate = release.split('  candidate-set:', 1)[1]
+    assert 'needs: [native, windows-paddle, windows-directml, python-source]' in candidate
+    assert "if: ${{ !cancelled() && needs.native.result == 'success' && needs.windows-paddle.result == 'success' && needs.windows-directml.result == 'success' && needs.python-source.result == 'success' }}" in candidate
+    output_gate = candidate.index('Reject empty or foreign source receipt outputs before downloading')
+    assert output_gate < candidate.index('name: ${{ needs.python-source.outputs.acceptance_artifact }}')
+    assert 'Missing or foreign Python source acceptance output' in candidate
+    assert 're.fullmatch(r"[a-f0-9]{64}"' in candidate
+    assert 'name: ${{ needs.python-source.outputs.acceptance_artifact }}' in candidate
+    assert 'SOURCE_ACCEPTANCE_SHA256: ${{ needs.python-source.outputs.acceptance_sha256 }}' in candidate
+    assert 'python -I -S scripts/source_acceptance.py verify' in candidate
+    assert '--sha256 "$SOURCE_ACCEPTANCE_SHA256"' in candidate
+    assert 'pattern: release-candidate-*' in candidate  # Source artifacts never enter ZIP set.
+
+
+def test_reuse_skips_only_duplicate_seed_producer_not_source_model_integrity():
+    value = workflow()
+    interface = value.split('  workflow_call:', 1)[1].split('permissions:', 1)[0]
+    assert 'reuse_original_models:' in interface and 'type: boolean' in interface and 'default: false' in interface
+    manual = value.split('  workflow_dispatch:', 1)[1].split('  workflow_call:', 1)[0]
+    assert 'reuse_original_models' not in manual
+    seed = value.split('  original-models:', 1)[1].split('  windows-source-cuda:', 1)[0]
+    assert 'if: ${{ !inputs.reuse_original_models }}' in seed
+    windows = value.split('  windows-source-cuda:', 1)[1].split('  source-set:', 1)[0]
+    assert "needs.original-models.result == 'success'" in windows
+    assert "inputs.reuse_original_models && needs.original-models.result == 'skipped'" in windows
+    assert 'paddle-original-models-${{ github.sha }}' in windows
+    assert '--verify-seed build/paddle-seed' in windows and '--step models-verify' in windows
+    download = windows.split('uses: actions/download-artifact@v4', 1)[1].split('      - name:', 1)[0]
+    for forbidden in ('run-id:', 'repository:', 'github-token:', 'pattern:'):
+        assert forbidden not in download
+    assert 'contents: write' not in value and 'secrets: inherit' not in value
+    assert value.count('actions: read') == 1  # Only optional nested bootstrap needs cross-run read.
+
+
+def test_actual_command_wrappers_keep_exit_codes_not_shell_tee_success():
+    value = workflow()
+    assert 'shell: bash' in value and '| tee' not in value
+    assert value.count('scripts/source_acceptance.py produce --evidence') == 2
+    for step in ('pip-install', 'pip-check', 'source-default', 'models-verify', 'vsf-verify',
+                 'gui-smoke', 'cli-version', 'cli-help', 'image-cpu', 'video'):
+        assert value.count('--step ' + step) == 2
+    assert value.count('--step image-coreml') == 1 and value.count('--step cuda-environment') == 1

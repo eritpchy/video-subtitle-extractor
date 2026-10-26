@@ -2,6 +2,17 @@ name: Complete Python source inference validation
 
 on:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      reuse_original_models:
+        description: Internal caller already completed this run's fixed model seed job
+        type: boolean
+        default: false
+    outputs:
+      acceptance_artifact:
+        value: ${{ jobs.source-set.outputs.acceptance_artifact }}
+      acceptance_sha256:
+        value: ${{ jobs.source-set.outputs.acceptance_sha256 }}
 
 permissions:
   contents: read
@@ -11,7 +22,7 @@ defaults:
     shell: bash
 
 concurrency:
-  group: python-source-${{ github.ref }}
+  group: python-source-${{ github.workflow }}-${{ github.ref }}-${{ github.run_id }}-${{ github.run_attempt }}
   cancel-in-progress: false
 
 jobs:
@@ -19,16 +30,19 @@ jobs:
     name: Clean Python 3.12 / ${{ matrix.name }} / no custom worker
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         include:
           - os: ubuntu-24.04
             name: Linux explicit CPU
             architecture: x64
             provider: cpu
+            profile: linux-ort-cpu
           - os: macos-26
             name: macOS explicit CPU and CoreML
             architecture: arm64
             provider: both
+            profile: macos-ort-cpu-coreml
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     env:
@@ -54,8 +68,10 @@ jobs:
           libxcb-glx0 libxkbcommon-x11-0
       - name: Create a new interpreter environment and empty user cache
         run: |
-          python -m venv "$RUNNER_TEMP/python-source-venv"
-          mkdir -p "$RUNNER_TEMP/python-source-home" test-results/python-source
+          mkdir -p "$RUNNER_TEMP/python-source-home" test-results
+          python scripts/source_ci_steps.py init --evidence test-results/python-source \
+            --profile ${{ matrix.profile }} --venv "$RUNNER_TEMP/python-source-venv" \
+            --models "$GITHUB_WORKSPACE/build/source-models"
           echo "$RUNNER_TEMP/python-source-venv/bin" >> "$GITHUB_PATH"
           echo "HOME=$RUNNER_TEMP/python-source-home" >> "$GITHUB_ENV"
           echo "XDG_CACHE_HOME=$RUNNER_TEMP/python-source-home/cache" >> "$GITHUB_ENV"
@@ -80,26 +96,15 @@ jobs:
           PY
       - name: Install public Python source dependencies in the new environment
         run: |
-          python -m pip install -r requirements-coreml-inference.txt pytest==8.3.5 --report test-results/python-source/pip-install.json
-          python -m pip check
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source --step pip-install
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source --step pip-check
           python -m pip freeze > test-results/python-source/pip-freeze.txt
       - name: Check default source dispatch without any inference runtime initialization
-        run: |
-          python - <<'PY'
-          import json, os, pathlib, subprocess, sys
-          root = pathlib.Path.cwd()
-          env = {key: value for key, value in os.environ.items() if not key.startswith('VSE_')}
-          code = "import sys; sys.path.insert(0, sys.argv[1]); from backend.tools.native_ocr import selected_backend; assert selected_backend() == 'paddle'; assert not {'paddle','onnxruntime','PySide6'} & set(sys.modules); print('Python Paddle is the source default; no custom worker or inference runtime initialized')"
-          result = subprocess.run([sys.executable, '-I', '-S', '-c', code, str(root)], env=env, check=True, capture_output=True, text=True)
-          workers = [str(path.relative_to(root)) for path in root.rglob('*') if path.is_file() and path.name in ('native-ocr', 'native-ocr.exe')]
-          if workers:
-              raise RuntimeError('A compiled custom OCR worker unexpectedly exists in the source checkout: ' + str(workers))
-          pathlib.Path('test-results/python-source/source-default.json').write_text(json.dumps({'source_default': 'paddle', 'custom_worker_files': workers, 'stdout': result.stdout, 'interpreter': sys.executable, 'scope': 'Clean source selection, not an inference or GPU claim'}, indent=2) + '\n')
-          PY
+        run: python scripts/source_ci_steps.py run-step --evidence test-results/python-source --step source-default
       - name: Unit tests for Python provider, source-only data and evidence contracts
         run: >-
           python -m pytest tests/test_python_coreml*.py tests/test_check_python_coreml.py
-          tests/test_prepare_source_models.py
+          tests/test_prepare_source_models.py tests/test_source_ci_steps.py tests/test_source_acceptance.py
           tests/test_e2e_python_coreml.py tests/test_python_source_workflow.py
           -q --junitxml=test-results/python-source/contracts.xml
       - name: Restore only the exact immutable public model-data archive
@@ -110,11 +115,11 @@ jobs:
       - name: Prepare all 15 ONNX graphs from public data, never a worker dependency
         run: |
           python -S scripts/prepare_source_models.py onnx --output build/source-models --cache build/source-model-downloads
-          python -S scripts/prepare_source_models.py verify --format onnx build/source-models
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source --step models-verify
       - name: Install and verify the unchanged third-party video tool
         run: |
           python scripts/install_videosubfinder.py --version 6.10.7
-          python scripts/install_videosubfinder.py --verify-only
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source --step vsf-verify
       - name: Select the complete Python inference backend, not the native distribution
         run: |
           echo "VSE_OCR_BACKEND=python-coreml" >> "$GITHUB_ENV"
@@ -123,9 +128,9 @@ jobs:
           echo "VSE_OFFLINE=1" >> "$GITHUB_ENV"
       - name: Real Python GUI startup and CLI entrypoint
         run: |
-          python gui.py --smoke-test
-          python -m backend.cli --version
-          python -m backend.cli --help
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source --step gui-smoke
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source --step cli-version
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source --step cli-help
       - name: Actual Python CoreML small and medium compatibility before wider coverage
         if: runner.os == 'macOS'
         run: >-
@@ -140,27 +145,22 @@ jobs:
           --report test-results/python-source/coreml-models.json
       - name: All 168 cases across three production modes on explicit Python CPU
         run: >-
-          python scripts/check_python_coreml.py --models build/source-models
-          --fixtures native/ocr/tests/evidence --provider cpu --case-set all
-          --report test-results/python-source/cpu-all.json
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source --step image-cpu
       - name: All 168 cases across three production modes on Python CoreML
         if: runner.os == 'macOS'
         run: >-
-          python scripts/check_python_coreml.py --models build/source-models
-          --fixtures native/ocr/tests/evidence --provider coreml --case-set all
-          --report test-results/python-source/coreml-all.json
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source --step image-coreml
       - name: Real source CLI video to SRT in all modes with same-video provider comparison
         run: >-
-          python scripts/e2e_python_coreml.py --models build/source-models
-          --provider ${{ matrix.provider }} --output test-results/python-source/video
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source --step video
+      - name: Bind successful source steps and raw inference to this exact run
+        run: python scripts/source_acceptance.py produce --evidence test-results/python-source
       - name: Preserve source evidence including genuine failures
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: python-source-evidence-${{ matrix.os }}-${{ github.sha }}
-          path: |
-            test-results/python-source/
-            backend/tools/python_coreml_runtime.json
+          name: source-evidence-${{ matrix.profile }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/python-source/
           if-no-files-found: warn
           retention-days: 14
       - name: Keep source, native distribution and GPU proof separate
@@ -171,6 +171,7 @@ jobs:
 
 
   original-models:
+    if: ${{ !inputs.reuse_original_models }}
     # CI reuses already accepted original data; source users use public model URLs.
     permissions:
       contents: read
@@ -180,10 +181,14 @@ jobs:
   windows-source-cuda:
     name: Windows Server 2022 / Python source CUDA ${{ matrix.cuda }} / explicit CPU acceptance
     needs: original-models
+    # A main-workflow caller must itself need the successful original-models
+    # job before requesting reuse. The consumer still verifies same-run bytes.
+    if: ${{ !cancelled() && (needs.original-models.result == 'success' || (inputs.reuse_original_models && needs.original-models.result == 'skipped')) }}
     runs-on: windows-2022
     timeout-minutes: 90
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         include:
           - cuda: '11.8'
@@ -207,31 +212,25 @@ jobs:
           architecture: x64
       - name: Create a distinct empty Python source virtual environment
         run: |
-          python - <<'PY'
-          import os, pathlib, subprocess, sys
-          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'cuda-source-venv'
-          if root.exists() or root.is_symlink():
-              raise RuntimeError('Source validation requires a new virtual environment, never an existing directory')
-          subprocess.run([sys.executable, '-m', 'venv', str(root)], check=True)
-          pathlib.Path('test-results/python-source-cuda').mkdir(parents=True)
-          with open(os.environ['GITHUB_PATH'], 'a', encoding='utf-8') as target:
-              target.write(str(root / 'Scripts') + '\n')
-          PY
+          mkdir -p test-results
+          python scripts/source_ci_steps.py init --evidence test-results/python-source-cuda \
+            --profile windows-cuda${{ matrix.cuda }} --venv "$RUNNER_TEMP/cuda-source-venv" \
+            --models "$GITHUB_WORKSPACE/build/paddle-seed/models"
+          echo "$RUNNER_TEMP/cuda-source-venv/Scripts" >> "$GITHUB_PATH"
       - name: Ordinary source pip install, not distribution meta-package substitution
         run: |
-          python -m pip install -r ${{ matrix.requirements }} pytest==8.3.5 --report test-results/python-source-cuda/pip-install.json
-          python -m pip check
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source-cuda --step pip-install
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source-cuda --step pip-check
           python -m pip freeze > test-results/python-source-cuda/pip-freeze.txt
       - name: Verify exact whole-wheel identity and genuine CUDA build, while selecting CPU
         run: >-
-          python scripts/check_source_cuda_environment.py --cuda ${{ matrix.cuda }}
-          --pip-report test-results/python-source-cuda/pip-install.json
-          --report test-results/python-source-cuda/environment.json
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source-cuda --step cuda-environment
       - name: Source dependency and fail-closed environment contracts
         run: >-
           python -m pytest tests/test_source_cuda_requirements.py tests/test_source_cuda_environment.py
           tests/test_python_source_workflow.py tests/test_paddle_package_models.py
-          tests/test_check_paddle_models.py tests/test_e2e_modes.py -q
+          tests/test_check_paddle_models.py tests/test_e2e_modes.py
+          tests/test_source_ci_steps.py tests/test_source_acceptance.py -q
           --junitxml=test-results/python-source-cuda/contracts.xml
       - name: Download this run's independently verified original-model seed
         uses: actions/download-artifact@v4
@@ -241,39 +240,31 @@ jobs:
       - name: Recheck all source model bytes without any model-origin request
         run: |
           python scripts/paddle_model_seed_ci.py --verify-seed build/paddle-seed
-          python -S scripts/prepare_source_models.py verify --format paddle build/paddle-seed/models
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source-cuda --step models-verify
       - name: Verify the unchanged VSF release and absence of a project OCR worker
         run: |
           python scripts/install_videosubfinder.py --version 6.10.7
-          python scripts/install_videosubfinder.py --verify-only
-          python - <<'PY'
-          import pathlib
-          workers = [str(path) for path in pathlib.Path('.').rglob('*') if path.is_file() and path.name in ('native-ocr', 'native-ocr.exe')]
-          if workers:
-              raise RuntimeError('Custom OCR workers must not be present in source validation: ' + str(workers))
-          PY
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source-cuda --step vsf-verify
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source-cuda --step source-default
       - name: Actual Python GUI startup and CLI entrypoint
         run: |
-          python gui.py --smoke-test
-          python -m backend.cli --version
-          python -m backend.cli --help
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source-cuda --step gui-smoke
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source-cuda --step cli-version
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source-cuda --step cli-help
       - name: All 15 original models and 168 real source CPU cases in all three modes
         run: >-
-          python scripts/check_paddle_models.py --app-root .
-          --fixtures native/ocr/tests/evidence --report test-results/python-source-cuda/cpu-all.json
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source-cuda --step image-cpu
       - name: Actual source CLI video extraction in all three modes, explicitly CPU
         run: >-
-          python scripts/e2e_smoke.py --all-modes --provider cpu
-          --output test-results/python-source-cuda/video
+          python scripts/source_ci_steps.py run-step --evidence test-results/python-source-cuda --step video
+      - name: Bind successful Python CUDA source evidence without GPU certification
+        run: python scripts/source_acceptance.py produce --evidence test-results/python-source-cuda
       - name: Preserve source CUDA evidence including failures
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: python-source-cuda-${{ matrix.cuda }}-${{ github.sha }}
-          path: |
-            test-results/python-source-cuda/
-            docs/audits/source-cuda-wheel-pins.json
-            requirements-source*.txt
+          name: source-evidence-windows-cuda${{ matrix.cuda }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/python-source-cuda/
           if-no-files-found: warn
           retention-days: 14
       - name: Keep compiled CUDA identity and real GPU execution distinct
@@ -281,3 +272,59 @@ jobs:
         run: |
           echo 'Fresh ordinary-pip Python source environment; no project C++ worker or package bootstrap. Every OCR gate explicitly selects CPU.' >> "$GITHUB_STEP_SUMMARY"
           echo 'CUDA wheel identity is not GPU hardware/OCR certification. Client one-click packages remain a separate acceptance chain.' >> "$GITHUB_STEP_SUMMARY"
+
+  source-set:
+    name: Verify the complete same-commit Python source evidence set
+    needs: [source, windows-source-cuda]
+    # The reusable caller intentionally skips the duplicate seed producer.
+    # Override ancestor-skip propagation, never either real source matrix's
+    # success requirement; a cancelled/failed/skipped source job cannot pass.
+    if: ${{ !cancelled() && needs.source.result == 'success' && needs.windows-source-cuda.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      acceptance_artifact: ${{ steps.receipt.outputs.acceptance_artifact }}
+      acceptance_sha256: ${{ steps.receipt.outputs.acceptance_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: source-evidence-linux-ort-cpu-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/source-evidence/linux-ort-cpu
+      - uses: actions/download-artifact@v4
+        with:
+          name: source-evidence-macos-ort-cpu-coreml-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/source-evidence/macos-ort-cpu-coreml
+      - uses: actions/download-artifact@v4
+        with:
+          name: source-evidence-windows-cuda11.8-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/source-evidence/windows-cuda11.8
+      - uses: actions/download-artifact@v4
+        with:
+          name: source-evidence-windows-cuda12.6-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/source-evidence/windows-cuda12.6
+      - name: Revalidate every original report and actual command before aggregation
+        run: >-
+          python -I -S scripts/source_acceptance.py aggregate --evidence-root build/source-evidence
+          --commit "$GITHUB_SHA" --repository "$GITHUB_REPOSITORY"
+          --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT"
+          --output build/source-acceptance.json
+      - name: Bind the independently rechecked source artifact to this caller
+        id: receipt
+        run: |
+          python - <<'PY'
+          import hashlib, os, pathlib
+          path = pathlib.Path('build/source-acceptance.json')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('acceptance_artifact=source-acceptance-' + os.environ['GITHUB_SHA'] + '-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT'] + '\n')
+              output.write('acceptance_sha256=' + hashlib.sha256(path.read_bytes()).hexdigest() + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.receipt.outputs.acceptance_artifact }}
+          path: build/source-acceptance.json
+          if-no-files-found: error
+          retention-days: 14

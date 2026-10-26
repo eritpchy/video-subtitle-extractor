@@ -33,6 +33,16 @@ jobs:
   original-models:
     uses: ./.github/workflows/paddle-models.yml
 
+  python-source:
+    name: Complete Python source from this exact candidate commit
+    needs: original-models
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/python-source.yml
+    with:
+      reuse_original_models: true
+
   native:
     name: Native CPU and dual-provider Mac CoreML matrix
     uses: ./.github/workflows/native-ocr.yml
@@ -204,7 +214,8 @@ jobs:
 
   candidate-set:
     name: Verify approved candidate matrix (not publication)
-    needs: [native, windows-paddle, windows-directml]
+    needs: [native, windows-paddle, windows-directml, python-source]
+    if: ${{ !cancelled() && needs.native.result == 'success' && needs.windows-paddle.result == 'success' && needs.windows-directml.result == 'success' && needs.python-source.result == 'success' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -217,13 +228,36 @@ jobs:
           pattern: release-candidate-*
           path: dist
           merge-multiple: true
+      - name: Reject empty or foreign source receipt outputs before downloading
+        env:
+          SOURCE_ACCEPTANCE_ARTIFACT: ${{ needs.python-source.outputs.acceptance_artifact }}
+          SOURCE_ACCEPTANCE_SHA256: ${{ needs.python-source.outputs.acceptance_sha256 }}
+        run: |
+          python -I -S - <<'PYCODE'
+          import os, re
+          expected = "source-acceptance-{}-{}-{}".format(os.environ["GITHUB_SHA"], os.environ["GITHUB_RUN_ID"], os.environ["GITHUB_RUN_ATTEMPT"])
+          if os.environ["SOURCE_ACCEPTANCE_ARTIFACT"] != expected or not re.fullmatch(r"[a-f0-9]{64}", os.environ["SOURCE_ACCEPTANCE_SHA256"]):
+              raise SystemExit("Missing or foreign Python source acceptance output")
+          PYCODE
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.python-source.outputs.acceptance_artifact }}
+          path: source-acceptance
+      - name: Require the complete same-run Python source receipt independently of ZIPs
+        env:
+          SOURCE_ACCEPTANCE_SHA256: ${{ needs.python-source.outputs.acceptance_sha256 }}
+        run: >-
+          python -I -S scripts/source_acceptance.py verify
+          --aggregate source-acceptance/source-acceptance.json --sha256 "$SOURCE_ACCEPTANCE_SHA256"
+          --commit "$GITHUB_SHA" --repository "$GITHUB_REPOSITORY"
+          --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT"
       - name: Reject missing, mislabeled, stale or unaccepted ZIPs
         run: python scripts/release_guard.py --validate-assets --sha "$GITHUB_SHA" --matrix restored-candidates --assets dist
       - name: Record compatibility and validation boundary
         shell: bash
         run: |
           {
-            echo 'Seven hash-bound candidates validated. No tag or GitHub release was created or modified.'
+            echo 'Seven hash-bound candidates and four same-run Python source profiles validated. No tag or GitHub release was created or modified.'
             echo 'CUDA 10.2 remains available in the immutable 2.2.0 release, not as a new PP-OCRv6 package.'
             echo 'CUDA 11.8 includes SM61 in the vendor wheel; this is not real GTX 10-series/GPU OCR certification.'
             echo 'Windows evidence covers Server 2022/2025 only. CUDA/DirectML GPU inference was not tested.'

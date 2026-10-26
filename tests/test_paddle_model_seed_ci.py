@@ -95,8 +95,8 @@ class SeedWorkflowContracts(unittest.TestCase):
         self.assertIn('scripts/verify_portable_environment.py', workflow)
         self.assertIn('scripts/accept_release_archive.py', workflow)
         aggregate = workflow.split('  candidate-set:\n', 1)[1]
-        self.assertIn('needs: [native, windows-paddle, windows-directml]', aggregate)
-        self.assertNotRegex(aggregate, r'(?m)^    if:')
+        self.assertIn('needs: [native, windows-paddle, windows-directml, python-source]', aggregate)
+        self.assertIn("if: ${{ !cancelled() && needs.native.result == 'success' && needs.windows-paddle.result == 'success' && needs.windows-directml.result == 'success' && needs.python-source.result == 'success' }}", aggregate)
         self.assertNotIn('continue-on-error:', aggregate)
 
 

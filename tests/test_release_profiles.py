@@ -87,8 +87,8 @@ class ReleaseProfileTests(unittest.TestCase):
         self.assertIn('scripts/package_release.py --verify dist --smoke', directml)
         self.assertIn('scripts/accept_release_archive.py --archives dist', directml)
         aggregate = workflow.split('  candidate-set:\n', 1)[1]
-        self.assertIn('    needs: [native, windows-paddle, windows-directml]\n', aggregate)
-        self.assertNotRegex(aggregate, r'(?m)^    if:')  # Keep GitHub's implicit success() gate.
+        self.assertIn('    needs: [native, windows-paddle, windows-directml, python-source]\n', aggregate)
+        self.assertIn("if: ${{ !cancelled() && needs.native.result == 'success' && needs.windows-paddle.result == 'success' && needs.windows-directml.result == 'success' && needs.python-source.result == 'success' }}", aggregate)
         self.assertNotIn('continue-on-error:', aggregate)
         self.assertIn('scripts/release_guard.py --validate-assets', aggregate)
 

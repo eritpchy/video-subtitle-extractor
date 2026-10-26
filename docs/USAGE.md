@@ -14,6 +14,13 @@ No customer Python, pip or virtual-environment installation is required.
 - macOS: open `Video Subtitle Extractor.app`; the complete `.app` may be moved together.
 - Linux: run `Start-VSE.sh` on the supported OS baseline documented by the release.
 
+For the current Windows launcher, choose an extraction directory without `%`.
+The automated launcher contract accepts Unicode, spaces and `&!()`, but rejects
+percent-containing command paths rather than risking `cmd.exe` expansion. The
+native split-volume recovery tool's separate `%` path test does not certify
+launching the extracted application from that path. Server 2022/2025 validation
+also does not imply that every Windows client version has been tested.
+
 Configuration, temporary extraction files and model caches use user-writable
 locations, not application resources. The package includes its interpreter and
 curated inference libraries; there is no first-run dependency installation.

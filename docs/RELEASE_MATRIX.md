@@ -38,6 +38,12 @@ This is not Windows 10/11 or real GPU certification. Native CPU still runs its
 existing model/worker tests; this workflow does not replace GPU packages with it.
 VSF remains pinned to 6.10.7.
 
+The current Windows automated launcher rejects percent-containing command paths;
+use a directory without `%`. Unicode, spaces and `&!()` remain in its supported
+validation contract. The recovery tool's independent `&!%()` path coverage does
+not broaden the BAT launcher's acceptance or certify arbitrary client Windows
+versions. The accepted 306 baseline is not modified to hide this boundary.
+
 **macOS requirement correction:** the reviewed full Qt 6.12.0 payload declares
 an actual maximum Mach-O minimum of **macOS 26.0**, not 14.0/14.4. In particular,
 Apple's own `otool -arch arm64 -l` reports `LC_BUILD_VERSION minos 26.0` for
@@ -165,3 +171,36 @@ measurement is presented as the size of the whole application.
 4. Coordinate any separately authorized version/publication decision only after
    final-package gates pass. Never overwrite 2.3.0 or claim real GPU validation
    from the hosted Server jobs.
+
+## Complete Python source gate
+
+The repository keeps its editable Python GUI, CLI, OCR preprocessing/postprocessing,
+model preparation, mode selection and provider routing. Python source execution
+uses normal third-party dependencies; it does not require building or supplying
+this project's native OCR worker. The native distribution remains a separate,
+self-contained delivery format, not a replacement for runnable source.
+
+The final candidate workflow also calls `python-source.yml` for the **same checkout
+SHA, repository, run and attempt**. Four independently named source profiles are
+required: Linux Python ORT CPU; macOS Python ORT CPU plus CoreML; and Windows
+Server 2022 Python Paddle CUDA 11.8 and 12.6, with explicit CPU inference acceptance.
+Each starts a new ordinary-pip virtual environment and performs dependency,
+model, GUI/CLI, 168-case all-model/three-mode, and three-mode video checks. Mac
+runs both providers, including full SRT parity. A compiled CUDA build or CoreML
+EP event is not physical GPU certification.
+
+The source workflow records the actual commands, exit codes, interpreter and
+clean-environment probe, original output hashes and source identities. Its
+aggregate revalidates all four profiles' raw evidence before emitting a separate
+`source-acceptance-<sha>-<run>-<attempt>` artifact. The candidate aggregator
+requires that workflow to succeed and verifies the externally passed aggregate
+hash; it never treats source evidence as final ZIP acceptance, or an older
+source commit's successful run as proof for a new commit. These receipts are
+unsigned CI execution records, not independent cryptographic attestations.
+
+When called by the candidate workflow, source jobs reuse only that same run's
+already verified original Paddle model artifact, then recheck all 45 files.
+The manual source workflow prepares its own verified seed. Public source users
+use the documented public model-data preparation commands, not private Actions
+credentials or these temporary CI artifacts. Diagnostic branch trigger exclusions
+are not part of the final production workflow.
