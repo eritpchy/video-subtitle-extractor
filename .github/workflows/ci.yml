@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -22,8 +23,12 @@ env:
   VSE_RUN_VSF_INTEGRATION: '1'
 
 jobs:
+  original-models:
+    uses: ./.github/workflows/paddle-models.yml
+
   native:
     name: Paddle CPU / ${{ matrix.name }}
+    needs: original-models
     strategy:
       fail-fast: false
       max-parallel: 4
@@ -39,6 +44,7 @@ jobs:
             name: macOS arm64
     runs-on: ${{ matrix.os }}
     env:
+      VSE_MODEL_DIR: ${{ github.workspace }}/build/paddle-seed/models
       QT_QPA_PLATFORM: ${{ matrix.os == 'macos-15' && 'cocoa' || 'offscreen' }}
     # Each native platform repeats full launcher acceptance under two host environments.
     timeout-minutes: 75
@@ -72,8 +78,13 @@ jobs:
         run: python scripts/install_videosubfinder.py --version 6.10.7
       - name: Verify native VideoSubFinder
         run: python scripts/install_videosubfinder.py --verify-only
-      - name: Download and verify small and medium PP-OCRv6 models
-        run: python -m backend.tools.model_download --tiers small medium --output backend/models/V6
+      - name: Download this run's complete pinned original models (no origin request)
+        uses: actions/download-artifact@v4
+        with:
+          name: paddle-original-models-${{ github.sha }}
+          path: build/paddle-seed
+      - name: Verify original model bytes and accepted source identity offline
+        run: python scripts/paddle_model_seed_ci.py --verify-seed build/paddle-seed
       - name: Unit, GUI, model and real CPU OCR tests
         id: source-tests
         timeout-minutes: 12
@@ -134,8 +145,8 @@ jobs:
       - name: Build self-contained inference distribution
         id: package-build
         run: |
-          python scripts/paddle_package_models.py --output build/paddle-models --cache build/paddle-model-cache
-          python scripts/package_release.py --paddle-models build/paddle-models --wheelhouse build/wheelhouse --output dist-ci
+          python scripts/paddle_model_seed_ci.py --verify-seed build/paddle-seed
+          python scripts/package_release.py --paddle-models build/paddle-seed/models --wheelhouse build/wheelhouse --output dist-ci
       - name: Verify self-contained Linux distribution with native X11
         if: runner.os == 'Linux'
         shell: bash

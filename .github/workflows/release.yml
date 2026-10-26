@@ -30,6 +30,9 @@ env:
   POLYGRAPHY_AUTOINSTALL_DEPS: '0'
 
 jobs:
+  original-models:
+    uses: ./.github/workflows/paddle-models.yml
+
   native:
     name: Retained Native CPU matrix
     uses: ./.github/workflows/native-ocr.yml
@@ -38,6 +41,7 @@ jobs:
 
   windows-paddle:
     name: ${{ matrix.profile }} / ${{ matrix.os }} (GPU hardware not tested)
+    needs: original-models
     strategy:
       fail-fast: false
       matrix:
@@ -79,12 +83,17 @@ jobs:
           tests/test_frozen_checkout_bytes.py -q --junitxml=test-results/profile-safety.xml
       - name: Install fixed verified VideoSubFinder
         run: python scripts/install_videosubfinder.py --version 6.10.7
-      - name: Prepare all 15 pinned original Paddle models (including Tamil/Telugu/Kannada)
-        run: python scripts/paddle_package_models.py --output build/paddle-models --cache build/paddle-model-cache
+      - name: Download this run's complete pinned original models (no origin request)
+        uses: actions/download-artifact@v4
+        with:
+          name: paddle-original-models-${{ github.sha }}
+          path: build/paddle-seed
+      - name: Verify original model bytes and accepted source identity offline
+        run: python scripts/paddle_model_seed_ci.py --verify-seed build/paddle-seed
       - name: Build self-contained package with exact backend identity
         run: >-
           python scripts/package_release.py --profile paddle --accelerator ${{ matrix.accelerator }}
-          --paddle-models build/paddle-models --wheelhouse build/wheelhouse --output dist
+          --paddle-models build/paddle-seed/models --wheelhouse build/wheelhouse --output dist
       - name: Final ZIP launcher, three CPU modes, media and dependency acceptance
         run: python scripts/package_release.py --verify dist --smoke
       - name: Final ZIP under clean PATH and contaminated host environment

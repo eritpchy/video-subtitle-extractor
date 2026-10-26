@@ -1,0 +1,63 @@
+name: Verified original Paddle model seed
+
+# Consumers never contact the model archive origin. An unavailable bootstrap and
+# absent/invalid cache is a hard failure, not permission to retry a rejected URL.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  seed:
+    name: Reuse accepted 15-model original bytes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install packaging pytest==8.3.5
+      - name: Offline seed security and workflow contracts
+        run: python -m pytest tests/test_paddle_model_seed.py tests/test_paddle_model_seed_ci.py -q
+      - name: Read reviewed bootstrap identity (not current consumer identity)
+        id: identity
+        run: python scripts/paddle_model_seed_ci.py --github-outputs "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        id: cache
+        with:
+          path: build/paddle-seed
+          key: ${{ steps.identity.outputs.cache_key }}
+      - name: Get the exact existing successful CPU artifact on cache miss
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.identity.outputs.source_artifact_name }}
+          run-id: ${{ steps.identity.outputs.source_run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: build/accepted-seed-bootstrap
+      - name: Extract only fixed original model bytes, never runtime files
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: >-
+          python scripts/paddle_model_seed_ci.py --bootstrap-directory build/accepted-seed-bootstrap
+          --output build/paddle-seed
+      - name: Reverify all 45 original files and source provenance even on cache hit
+        run: python scripts/paddle_model_seed_ci.py --verify-seed build/paddle-seed
+      - uses: actions/cache/save@v4
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: build/paddle-seed
+          key: ${{ steps.identity.outputs.cache_key }}
+      - name: Pass only verified models to consumers of this exact checkout
+        uses: actions/upload-artifact@v4
+        with:
+          name: paddle-original-models-${{ github.sha }}
+          path: build/paddle-seed/
+          if-no-files-found: error
+          retention-days: 14
