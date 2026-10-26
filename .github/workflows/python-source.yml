@@ -35,6 +35,14 @@ on:
       - 'README.md'
       - 'README_en.md'
       - 'docs/USAGE.md'
+      - 'requirements-source*.txt'
+      - 'docs/audits/source-cuda-wheel-pins.json'
+      - 'scripts/check_source_cuda_environment.py'
+      - 'tests/test_source_cuda_environment.py'
+      - 'tests/test_source_cuda_requirements.py'
+      - '.github/workflows/paddle-models.yml'
+      - 'scripts/paddle_model_seed*.py'
+      - 'scripts/check_paddle_models.py'
   workflow_dispatch:
 
 permissions:
