@@ -178,9 +178,43 @@ class MachOMinimumTests(unittest.TestCase):
         value = bytearray(build_command(platform=2)); struct.pack_into('<I', value, 0, 0x80000032)
         self.assert_bad(thin(commands=[legacy(), bytes(value)]), 'required-bit')
 
-    def test_invalid_version_and_sdk_rejected(self):
-        for value in (build_command(0), build_command(version(9)), build_command(sdk=version(13))):
-            self.assert_bad(thin(commands=[value]), 'version/SDK')
+    def test_paddle_official_wheel_lower_sdk_keeps_actual_minimum(self):
+        # Raw LC_BUILD_VERSION bytes from official PyPI paddlepaddle 3.3.1,
+        # cp312-cp312-macosx_11_0_arm64.whl; the full Mach-O below is synthetic.
+        # Wheel SHA256: d7827d867503b502a881c718e3743d9b91648a62d01f93bcd5ba3d7846de5ab5
+        # libpaddle.so SHA256: bff593abfe751577c45a35821c7862c8933b50b647fa33afdece8476dc4f7956
+        # CI log ZIP SHA256: 123bab186a8b7824e5e84afb486bbf3a7eb140813430141c5726e5c2a14c6d0f
+        # CI job 121402083299 logged this filename but did not upload its wheel
+        # digest/bytes: this reproduces the failure, not CI byte equivalence.
+        command = bytes.fromhex('32000000200000000100000000050e0000040e000100000003000000000c1d04')
+        row = minimum.macho_minimums(thin(commands=[command]))[0]
+        self.assertEqual(row['minimum_encoded'], version(14, 5))
+        self.assertEqual(row['minimum_macos_version'], '14.5')
+        self.assertEqual(row['deployment_commands'], [{'command': 'LC_BUILD_VERSION',
+                         'minimum_encoded': version(14, 5), 'sdk_encoded': version(14, 4),
+                         'tools': [{'tool': 3, 'version_encoded': 0x041d0c00}]}])
+
+    def test_sdk_metadata_never_replaces_or_caps_the_deployment_minimum(self):
+        for make_command in (build_command, legacy):
+            for sdk in (0, version(13), version(14, 5), version(26)):
+                with self.subTest(command=make_command.__name__, sdk=sdk):
+                    row = minimum.macho_minimums(thin(commands=[make_command(version(14, 5), sdk=sdk)]))[0]
+                    self.assertEqual(row['minimum_encoded'], version(14, 5))
+                    self.assertEqual(row['deployment_commands'][0]['sdk_encoded'], sdk)
+
+    def test_invalid_minimum_rejected_with_raw_command_diagnostics(self):
+        for make_command in (build_command, legacy):
+            for value in (0, version(9)):
+                for sdk in (0, version(14)):
+                    with self.subTest(command=make_command.__name__, minimum=value, sdk=sdk):
+                        with self.assertRaises(RuntimeError) as error:
+                            minimum.macho_minimums(thin(commands=[make_command(value, sdk=sdk)]))
+                        message = str(error.exception)
+                        for expected in ('Invalid macOS deployment version', 'cpu=0x100000c/0x0',
+                                         'slice_offset=0x0', 'command=LC_', 'command_offset=0x20',
+                                         f'minimum={minimum.version_text(value)} ({value:#010x})',
+                                         f'sdk={minimum.version_text(sdk)} ({sdk:#010x})'):
+                            self.assertIn(expected, message)
 
     def test_header_truncation_and_reserved_field(self):
         good = thin()
@@ -250,6 +284,16 @@ class MachOMinimumTests(unittest.TestCase):
             (root / 'universal').write_bytes(fat([(0x100000c, 0, thin()), (0x1000007, 3, thin(cpu=0x1000007, commands=[build_command(version(15, 0))]))]))
             self.assertEqual(minimum.audit_minimum_system(root, expected_arches=('arm64',))['minimum_macos_version'], '15.0')
             with self.assertRaisesRegex(RuntimeError, 'required architecture'): minimum.audit_minimum_system(root, expected_arches=('ppc',))
+
+    def test_stage_maximum_uses_deployments_not_sdk_versions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'higher-minimum').write_bytes(thin(commands=[build_command(version(14, 5), sdk=version(14, 4))]))
+            (root / 'higher-sdk').write_bytes(thin(commands=[legacy(version(13), sdk=version(26))]))
+            report = minimum.audit_minimum_system(root, expected_arches=('arm64',))
+            self.assertEqual(report['minimum_macos_version'], '14.5')
+            self.assertEqual(report['minimum_encoded'], version(14, 5))
+            self.assertEqual(report['limiting_files'], ['higher-minimum'])
 
     def test_empty_tree_and_runtime_without_min_fail(self):
         with tempfile.TemporaryDirectory() as temporary:

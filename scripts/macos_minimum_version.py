@@ -116,7 +116,14 @@ def _thin(reader: _Reader, offset: int, length: int, declared: tuple[int, int] |
                 command_name = 'LC_VERSION_MIN_MACOSX' if platform == 1 else f'unsupported-{command:#x}'
             if runtime:
                 if platform != 1: _fail(reader.label, f'Non-macOS/unsupported runtime platform in {command_name}: {platform}')
-                if minimum >> 16 < 10 or (sdk and sdk < minimum): _fail(reader.label, 'Invalid macOS deployment version/SDK bound')
+                # Apple's mach-o/loader.h defines minimum/version and sdk as
+                # separate fields. The SDK records build metadata, not the
+                # runtime floor; it may be zero or lower than the deployment
+                # minimum. Preserve both raw values without imposing an order.
+                if minimum >> 16 < 10:
+                    _fail(reader.label, f'Invalid macOS deployment version: cpu={cpu:#x}/{subtype:#x} '
+                          f'slice_offset={offset:#x} command={command_name} command_offset={offset + header_size + position:#x} '
+                          f'minimum={version_text(minimum)} ({minimum:#010x}) sdk={version_text(sdk)} ({sdk:#010x})')
                 deployments.append({'command': command_name, 'minimum_encoded': minimum, 'sdk_encoded': sdk,
                                     'tools': [{'tool': tool, 'version_encoded': version} for tool, version in tool_rows]})
         position += width
