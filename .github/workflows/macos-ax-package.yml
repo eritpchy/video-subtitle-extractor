@@ -1,0 +1,75 @@
+name: macOS AX diagnostic final ZIP (not for release)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/macos-accessibility]
+    paths:
+      - .github/workflows/macos-ax-package.yml
+      - scripts/package_macos_ax_candidate.py
+      - scripts/macos_ax_archive.py
+      - scripts/macos_minimum_version.py
+      - tests/test_macos_ax_package.py
+      - tests/test_macos_ax_archive.py
+      - tests/test_macos_minimum_version.py
+      - native/qt/macos-ax-package-pins.json
+      - docs/audits/macos-ax-candidate-package.md
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: macos-ax-final-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  diagnostic-zip:
+    runs-on: macos-15
+    timeout-minutes: 100
+    env:
+      QT_QPA_PLATFORM: cocoa
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUTF8: '1'
+      VSE_OFFLINE: '1'
+      VSE_OCR_BACKEND: native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: arm64
+      - name: Install host-side validation tools (never into the final runtime)
+        run: python -m pip install packaging pytest==8.3.5
+      - name: Check candidate-only boundaries, archive safety and deployment metadata
+        run: python -m pytest tests/test_macos_ax_archive.py tests/test_macos_ax_package.py tests/test_macos_minimum_version.py -q
+      - name: Fetch exact accepted base and exact source-attributed AX artifact by immutable IDs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/package_macos_ax_candidate.py download
+      - name: Create new AX-DIAGNOSTIC ZIP; retain base and production guards unchanged
+        run: python scripts/package_macos_ax_candidate.py package
+      - name: Verify final ZIP launcher, three real OCR modes, native AX and actual Qt image loads
+        run: python scripts/package_macos_ax_candidate.py verify
+      - name: Preserve exact diagnostic evidence and unfinished external-AX acceptance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-ax-final-zip-evidence-${{ github.sha }}
+          path: |
+            build/macos-ax-package/reports/
+            build/macos-ax-package/output/test-results/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Preserve diagnostic package only; never publish release assets or tags
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-ax-final-zip-NOT-FOR-RELEASE-${{ github.sha }}
+          path: |
+            build/macos-ax-package/output/*.zip
+            build/macos-ax-package/output/*.sha256
+            build/macos-ax-package/output/*.diagnostic-acceptance.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

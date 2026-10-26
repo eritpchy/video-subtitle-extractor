@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "repository": "eritpchy/video-subtitle-extractor",
+  "diagnostic_only": true,
+  "production_integration_allowed": false,
+  "base": {
+    "artifact_id": 12623898599,
+    "artifact_name": "release-candidate-macos-arm64-native-cpu",
+    "run_id": 40259119763,
+    "commit": "59749ccc02e369f374c69846b2bde6279084577d",
+    "archive": "vse-2.3.0-macos-arm64-native-cpu.zip",
+    "archive_bytes": 517468847,
+    "archive_sha256": "5cec865b8ea53f8ebd545a5ad12ac1e3231a0ea7334360205459401ff389fdd5"
+  },
+  "candidate": {
+    "artifact_id": 12624219589,
+    "artifact_name": "macos-qt-ax-diagnostic-not-for-release-561de09ed45180362732725d24640862d3fa1ceb",
+    "artifact_sha256": "25bbdcc961ece4f05bed906df085a66bbab86c1007e086013d17b0a21ab40747",
+    "run_id": 40260642504,
+    "commit": "561de09ed45180362732725d24640862d3fa1ceb",
+    "plugin_sha256": "d23ea2a1e3201ec85f4fd35ee8bff32d7217ce6b0bbb51058339f1abca612941",
+    "plugin_uuid": "0ebfed21-3178-3917-962b-cf2cc420fcfa",
+    "acceptance_sha256": "b0ded8733bce52400cee17a05b43fcb3db319561d37d5a7994eecb1d5f902bf9"
+  },
+  "evidence": {
+    "artifact_id": 12624434196,
+    "artifact_name": "macos-qt-ax-evidence-561de09ed45180362732725d24640862d3fa1ceb",
+    "artifact_sha256": "df30f1357747c60a71e1e880ce5a81ea43457c85ef4a6eb5430b764d7755e301",
+    "run_id": 40260642504,
+    "commit": "561de09ed45180362732725d24640862d3fa1ceb"
+  },
+  "official_frameworks": {
+    "QtCore": "f9b5066d08409573d5d380738debe8fb6fdbd62b85488747647e71671fc6a079",
+    "QtGui": "a637b9db8047245b28520c901a3b1c915b4c7af17b4b558a38c6ef760ee7ceb4"
+  }
+}
