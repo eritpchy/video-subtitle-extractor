@@ -1,0 +1,27 @@
+{
+  "python": "3.12",
+  "schema": 1,
+  "source": "https://pypi.org/project/onnxruntime/1.31.0/#files",
+  "version": "1.31.0",
+  "wheels": {
+    "darwin-arm64-cp312": {
+      "bytes": 20882054,
+      "filename": "onnxruntime-1.31.0-cp312-cp312-macosx_14_0_arm64.whl",
+      "native_files": {
+        "capi/libonnxruntime.1.31.0.dylib": "ff52828ce7c6dd1aea99a5e9f5da9e2786e3d03e467fbf8b6893a4b624334920",
+        "capi/onnxruntime_pybind11_state.so": "605defa19ccbb0e2254be08e783ebf1eb8aa4e6353d5308f04ffbeaedbdaf742"
+      },
+      "sha256": "aaab9b3af536b06ca27ab5e35e3d429c97457ce76cf298af103f687e8b9975c0"
+    },
+    "linux-x86_64-cp312": {
+      "bytes": 23760984,
+      "filename": "onnxruntime-1.31.0-cp312-cp312-manylinux_2_28_x86_64.whl",
+      "native_files": {
+        "capi/libonnxruntime.so.1.31.0": "21901b1b02233484b80888c16f4f5473742f796bf5528d5d0c4073dbe9802001",
+        "capi/libonnxruntime_providers_shared.so": "086ec1d5388f64153d9c63470d126693db9a182c8ce236d3a1119068471b8a0d",
+        "capi/onnxruntime_pybind11_state.cpython-312-x86_64-linux-gnu.so": "2377ce1c968f274da1e694680ea8dc19fdc619bd61c192d8b2dff3362710ec4e"
+      },
+      "sha256": "5e129d6c56abd53e659cb70f00a108d6824086470ff99c2e47a82e5786563db3"
+    }
+  }
+}

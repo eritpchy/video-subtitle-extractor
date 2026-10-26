@@ -53,7 +53,7 @@ def default_extraction_work_dir(video_name):
 
 def use_detection_frame_extraction(hardware_accelerator, mode):
     """Preserve native CPU/CoreML algorithm parity; acceleration is not routing."""
-    return selected_backend() != 'native' and hardware_accelerator.has_accelerator() and mode == 'accurate'
+    return selected_backend() not in ('native', 'python-coreml') and hardware_accelerator.has_accelerator() and mode == 'accurate'
 
 
 class SubtitleExtractor:

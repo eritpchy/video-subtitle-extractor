@@ -14,6 +14,10 @@ class SubtitleDetect:
         if selected_backend() == 'native':
             self.text_detector = NativeOcr(model_config, detection_only=True)
             return
+        if selected_backend() == 'python-coreml':
+            from backend.tools.python_coreml_ocr import PythonCoreMlOcr
+            self.text_detector = PythonCoreMlOcr(model_config, detection_only=True)
+            return
         if selected_backend() == 'directml':
             from backend.tools.directml_ocr import DirectMlOcr
             self.text_detector = DirectMlOcr(model_config, detection_only=True)

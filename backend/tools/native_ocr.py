@@ -51,7 +51,7 @@ VALIDATED_LEGACY_MODELS = frozenset({
 
 def selected_backend():
     backend = os.environ.get('VSE_OCR_BACKEND', 'paddle').strip().lower()
-    if backend not in ('paddle', 'native', 'directml'):
+    if backend not in ('paddle', 'native', 'directml', 'python-coreml'):
         raise ValueError(f'Unsupported VSE_OCR_BACKEND: {backend}')
     if backend == 'native':
         configured_native_provider()
