@@ -1,0 +1,114 @@
+name: macOS focus activation diagnostic
+
+on:
+  push:
+    branches: [fix/macos-focus-activation]
+    paths:
+      - .github/workflows/macos-focus-activation-diagnostic.yml
+      - diagnostics/macos-focus-activation/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-focus-activation-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  focus:
+    if: github.ref == 'refs/heads/fix/macos-focus-activation'
+    runs-on: macos-26
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+      QT_QPA_PLATFORM: cocoa
+      PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: 'True'
+      GIT_LFS_SKIP_SMUDGE: '1'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out only the diagnostic driver
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: diagnostic
+          persist-credentials: false
+          sparse-checkout: diagnostics/macos-focus-activation
+      - name: Check out the unchanged original test source
+        uses: actions/checkout@v4
+        with:
+          ref: aeb41d02cfd1257711236c08fc223156c35cc5f6
+          path: source-aeb
+          sparse-checkout: |
+            /*
+            !/backend/models/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+          lfs: false
+          submodules: false
+      - name: Set up the original Python version and architecture
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.10'
+          architecture: arm64
+      - name: Prepare the same observed dependency versions (no models or project native build)
+        id: prepare
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/focus-activation-evidence"
+          python -B -m pip install --disable-pip-version-check \
+            -r "$GITHUB_WORKSPACE/source-aeb/requirements.txt" \
+            -c "$GITHUB_WORKSPACE/diagnostic/diagnostics/macos-focus-activation/aeb-installed-constraints.txt" \
+            pytest==8.3.5 2>&1 | tee "$RUNNER_TEMP/focus-activation-evidence/install.log"
+          python -B -m pip check 2>&1 | tee "$RUNNER_TEMP/focus-activation-evidence/pip-check.log"
+          python -B -m pip freeze > "$RUNNER_TEMP/focus-activation-evidence/pip-freeze.txt"
+          python -B -m unittest discover \
+            -s "$GITHUB_WORKSPACE/diagnostic/diagnostics/macos-focus-activation" \
+            -p 'test_*.py' -v \
+            2>&1 | tee "$RUNNER_TEMP/focus-activation-evidence/offline-contracts.log"
+      - name: Run the original focus-wait test once in its own process
+        id: wait
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          set +e
+          python -B "$GITHUB_WORKSPACE/diagnostic/diagnostics/macos-focus-activation/server_focus_probe.py" \
+            --checkout "$GITHUB_WORKSPACE/source-aeb" --case wait \
+            --output "$RUNNER_TEMP/focus-activation-evidence/wait" \
+            2>&1 | tee "$RUNNER_TEMP/focus-activation-evidence/wait.log"
+          pipeline_status=("${PIPESTATUS[@]}")
+          result=${pipeline_status[0]}
+          tee_result=${pipeline_status[1]}
+          set -e
+          printf '%s\n' "$result" > "$RUNNER_TEMP/focus-activation-evidence/wait.exitcode"
+          if (( result != 0 )); then exit "$result"; fi
+          exit "$tee_result"
+      - name: Run the original forward/backward Tab test once in a separate process
+        id: tab
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          set +e
+          python -B "$GITHUB_WORKSPACE/diagnostic/diagnostics/macos-focus-activation/server_focus_probe.py" \
+            --checkout "$GITHUB_WORKSPACE/source-aeb" --case tab \
+            --output "$RUNNER_TEMP/focus-activation-evidence/tab" \
+            2>&1 | tee "$RUNNER_TEMP/focus-activation-evidence/tab.log"
+          pipeline_status=("${PIPESTATUS[@]}")
+          result=${pipeline_status[0]}
+          tee_result=${pipeline_status[1]}
+          set -e
+          printf '%s\n' "$result" > "$RUNNER_TEMP/focus-activation-evidence/tab.exitcode"
+          if (( result != 0 )); then exit "$result"; fi
+          exit "$tee_result"
+      - name: Preserve original and diagnostic reports even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-focus-one-activation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/focus-activation-evidence/
+            source-aeb/test-results/macos-setting-controls/
+          if-no-files-found: error
+          retention-days: 30

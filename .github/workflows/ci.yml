@@ -2,7 +2,7 @@ name: Cross-platform CI
 
 on:
   push:
-    branches: ['**']
+    branches: ['**', '!fix/macos-focus-activation']
   pull_request:
   workflow_dispatch:
   workflow_call:
