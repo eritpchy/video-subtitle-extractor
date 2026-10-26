@@ -32,6 +32,8 @@ class HardwareAccelerator:
         if self.__backend == 'directml':
             self.check_onnx()
             return
+        if self.__backend == 'python-coreml':
+            return  # Lazy probe: --cpu must work without a CoreML EP.
         if self.__backend == 'native':
             self.__native_provider = configured_native_provider()
             # Probe lazily, after --cpu / GUI-disable has been applied. A user
@@ -64,12 +66,18 @@ class HardwareAccelerator:
         if self.__backend == 'native' and self.__enabled and self.__native_provider == 'coreml':
             self.has_coreml()  # Missing provider is an error, not an implicit CPU choice.
             return 'CoreML (CPU + GPU requested; physical GPU execution not verified)'
+        if self.__backend == 'python-coreml' and self.__enabled:
+            self.has_coreml()
+            return 'Python CoreML (CPU + GPU requested; physical GPU execution not verified)'
         if self.__backend == 'directml' and self.__enabled:
             return 'DirectML' if self.has_directml() else 'DirectML (unavailable; CPU fallback disabled)'
         return 'GPU (CUDA)' if self.has_cuda() else 'CPU'
 
     @property
     def onnx_providers(self):
+        if self.__backend == 'python-coreml' and self.__enabled:
+            self.has_coreml()
+            return list(self.__native_capabilities['available_providers'])
         if self.__backend == 'native' and self.__enabled and self.__native_provider == 'coreml':
             self.has_coreml()
             return list(self.__native_capabilities['available_providers'])
@@ -83,6 +91,11 @@ class HardwareAccelerator:
         return self.__backend == 'directml' and self.__enabled and 'DmlExecutionProvider' in self.__onnx_providers
 
     def has_coreml(self):
+        if self.__backend == 'python-coreml' and self.__enabled:
+            if self.__native_capabilities is None:
+                from backend.tools.python_coreml_ocr import python_coreml_capabilities
+                self.__native_capabilities = python_coreml_capabilities()
+            return True
         if self.__backend != 'native' or not self.__enabled or self.__native_provider != 'coreml':
             return False
         if self.__native_capabilities is None:

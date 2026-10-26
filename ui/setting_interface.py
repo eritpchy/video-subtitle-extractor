@@ -53,7 +53,7 @@ class SettingInterface(QtWidgets.QVBoxLayout):
         native_cpu = native and configured_native_provider() == 'cpu'
         native_coreml = native and configured_native_provider() == 'coreml'
         acceleration_description = tr["Setting"]["HardwareAccelerationDesc"]
-        if native_coreml:
+        if native_coreml or selected_backend() == 'python-coreml':
             acceleration_description += "\nCoreML (CPU + GPU; ANE disabled; no automatic CPU fallback)"
 
         # 是否启用硬件加速

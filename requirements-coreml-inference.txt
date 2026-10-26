@@ -1,0 +1,26 @@
+# Python source GUI/CLI backend; no VSE native worker/compiler required.
+# Use a separate venv from onnxruntime-directml; exact wheel native bytes are verified.
+onnxruntime @ https://files.pythonhosted.org/packages/b3/bd/2ac094311163b803e3626c3937461d6900934bd56cca7601f6150ff860c3/onnxruntime-1.31.0-cp312-cp312-macosx_14_0_arm64.whl#sha256=aaab9b3af536b06ca27ab5e35e3d429c97457ce76cf298af103f687e8b9975c0 ; python_version == "3.12" and sys_platform == "darwin" and platform_machine == "arm64"
+onnxruntime @ https://files.pythonhosted.org/packages/6c/44/1e9e762b95b7da0a8424913a1ed7c38cdaf88624a3c41ddba24ebac88bc9/onnxruntime-1.31.0-cp312-cp312-manylinux_2_28_x86_64.whl#sha256=5e129d6c56abd53e659cb70f00a108d6824086470ff99c2e47a82e5786563db3 ; python_version == "3.12" and sys_platform == "linux" and platform_machine == "x86_64"
+pyclipper~=1.3
+opencv-contrib-python-headless==4.10.0.84
+Levenshtein==0.26.0
+pillow==10.4.0
+tqdm~=4.67
+pysrt~=1.1
+wordsegment~=1.3
+pyside6-essentials~=6.11
+pyside6-fluent-widgets~=1.8
+numpy~=2.2
+shapely~=2.1
+six~=1.17
+setuptools~=80.9
+python-bidi~=0.6
+chardet>=5,<8
+requests>=2.32,<3
+packaging>=24,<27
+je-showinfilemanager==1.1.6a4
+imageio-ffmpeg~=0.6
+pyobjc-core; sys_platform == "darwin"
+pyobjc-framework-Cocoa; sys_platform == "darwin"
+pyobjc-framework-Quartz; sys_platform == "darwin"
