@@ -503,6 +503,7 @@ jobs:
           name: native-coreml-diagnostic-frontend-${{ github.sha }}
           path: |
             build/native-diagnostic/vse-provider-diagnostic
+            build/native-diagnostic/libonnxruntime*
             build/native-diagnostic/build-inputs.json
             build/native-diagnostic/build-*.log
           if-no-files-found: warn

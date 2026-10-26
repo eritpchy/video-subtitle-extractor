@@ -10,6 +10,7 @@ DIAGNOSTIC_PATHS = (
     'backend/tools/native_ocr.py', 'backend/tools/hardware_accelerator.py',
     'backend/tools/paddle_model_config.py', 'backend/tools/ocr.py',
     'backend/tools/subtitle_detect.py', 'backend/tools/directml_ocr.py',
+    'scripts/native_diagnostics/**', 'tests/test_native_diagnostics.py',
     'scripts/check_native_models.py', 'scripts/check_paddle_models.py', 'scripts/native_package.py',
 )
 
@@ -65,3 +66,31 @@ def test_only_the_isolated_snapshot_may_add_its_precise_push_trigger():
             assert '!fix/macos-coreml' not in push
     assert '  pull_request:' in release and '  pull_request:' in standard
     assert '  workflow_dispatch:' in release and '  workflow_dispatch:' in standard
+
+
+def test_separate_control_frontend_always_preserves_loader_local_runtime():
+    for name in ('macos-coreml.yml', 'native-ocr.yml'):
+        value = (ROOT / '.github/workflows' / name).read_text(encoding='utf-8')
+        build = value.split('python scripts/native_diagnostics/benchmark.py build', 1)
+        assert len(build) == 2
+        condition = build[0].rsplit('- name:', 1)[1]
+        assert "steps.native-build.outcome == 'success'" in condition
+        assert '!cancelled()' in condition
+        for argument in ('--sdk build/native-build/ort-sdk', '--deps build/native-build/sources',
+                         '--opencv-dir build/native-build/opencv-install/lib/cmake/opencv4',
+                         '--output build/native-diagnostic'):
+            assert argument in build[1].split('- name:', 1)[0]
+        artifact = build[1].split('uses: actions/upload-artifact@v4', 1)
+        assert len(artifact) == 2 and 'always()' in artifact[0]
+        paths = artifact[1].split('- name:', 1)[0]
+        for path in ('build/native-diagnostic/vse-provider-diagnostic',
+                     'build/native-diagnostic/libonnxruntime*',
+                     'build/native-diagnostic/build-inputs.json',
+                     'build/native-diagnostic/build-*.log'):
+            assert path in paths
+        assert 'DYLD_' not in value
+    # Controls remain a different artifact and cannot substitute for the real worker.
+    fast = WORKFLOW.read_text(encoding='utf-8')
+    assert fast.index('--verify-report') < fast.index('benchmark.py build')
+    assert 'production-coreml-worker-${{ github.sha }}' in fast
+    assert 'native-coreml-diagnostic-frontend-${{ github.sha }}' in fast
