@@ -15,6 +15,7 @@ from PySide6 import QtCore, QtGui, QtTest, QtWidgets
 from qfluentwidgets import ComboBox, ComboBoxSettingCard, FluentIcon, Theme, qconfig, themeColor
 
 from backend.config import config
+from helpers.cocoa_focus_activation import inactive_cocoa_activation
 from test_theme import ThemeTestCase
 from ui.macos_setting_controls import MacSettingComboBox, adapt_macos_setting_combo
 
@@ -279,8 +280,10 @@ class MacSettingControlsTests(ThemeTestCase):
             record("after-show-request")
             # Cocoa activation is asynchronous. processEvents() once is not a
             # guarantee that the source field can receive keyboard focus.
-            active = QtTest.QTest.qWaitForWindowActive(window, 5000)
-            self.assertTrue(active, record("after-window-activation-wait"))
+            with inactive_cocoa_activation(self.app, window, QtCore,
+                    ROOT / "test-results/macos-setting-controls/native-activation-tab.json"):
+                active = QtTest.QTest.qWaitForWindowActive(window, 5000)
+                self.assertTrue(active, record("after-window-activation-wait"))
             before.setFocus(QtCore.Qt.FocusReason.OtherFocusReason)
             self.assertTrue(wait_for_focus(before), record("before-first-tab"))
             for source, target, modifiers in (
@@ -313,7 +316,9 @@ class MacSettingControlsTests(ThemeTestCase):
         layout.addWidget(before)
         layout.addWidget(after)
         self.show(window)
-        self.assertTrue(QtTest.QTest.qWaitForWindowActive(window, 5000))
+        with inactive_cocoa_activation(self.app, window, QtCore,
+                ROOT / "test-results/macos-setting-controls/native-activation-wait.json"):
+            self.assertTrue(QtTest.QTest.qWaitForWindowActive(window, 5000))
         before.setFocus()
         self.assertTrue(wait_for_focus(before))
         self.assertFalse(wait_for_focus(after, timeout=20))
