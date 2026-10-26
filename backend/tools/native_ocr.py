@@ -88,6 +88,9 @@ def _worker_location(root=None):
 
 def _worker_environment(root):
     environment = dict(os.environ, ORT_DISABLE_TELEMETRY='1', VSE_OCR_PARENT_PID=str(os.getpid()))
+    # Normal GUI/CLI and capability discovery must not inherit Metal tracing.
+    # The explicit diagnostic harness owns its own opt-in child environment.
+    environment.pop('MTL_CAPTURE_ENABLED', None)
     if os.name != 'nt':
         key = 'DYLD_LIBRARY_PATH' if sys.platform == 'darwin' else 'LD_LIBRARY_PATH'
         environment[key] = str(root) + (os.pathsep + environment[key] if environment.get(key) else '')

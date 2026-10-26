@@ -73,6 +73,25 @@ def test_native_capability_probe_is_bounded_and_disables_telemetry(native_root, 
     assert os.environ['ORT_DISABLE_TELEMETRY'] == '0', 'Only child telemetry environment changes'
 
 
+@pytest.mark.parametrize('inherited', ['', '0', '1', 'unexpected'])
+def test_normal_worker_and_capability_probe_remove_inherited_metal_capture(native_root, coreml_host, monkeypatch, inherited):
+    monkeypatch.setenv('MTL_CAPTURE_ENABLED', inherited)
+    launch = adapter.subprocess.Popen
+    commands = []
+    def checked_launch(command, **kwargs):
+        assert 'MTL_CAPTURE_ENABLED' not in kwargs['env']
+        assert kwargs['env']['ORT_DISABLE_TELEMETRY'] == '1'
+        commands.append(command)
+        return launch(command, **kwargs)
+    monkeypatch.setattr(adapter.subprocess, 'Popen', checked_launch)
+    adapter.native_capabilities(native_root)
+    with adapter.NativeOcr(PaddleModelConfig(HardwareAccelerator(), 'ch', 'fast')) as native:
+        list(native.predict_iter(np.zeros((32, 64, 3), np.uint8)))
+    assert len(commands) == 3 and sum('--capabilities' in command for command in commands) == 2
+    assert not any(any('--diagnostic' in value for value in command) for command in commands)
+    assert os.environ['MTL_CAPTURE_ENABLED'] == inherited
+
+
 @pytest.mark.parametrize('behavior,match', [('error', 'probe failed'), ('oversize', 'bounded JSON'), ('bad_json', None), ('gpu_claim', 'GPU execution')])
 def test_bad_capability_response_fails_closed(native_root, coreml_host, monkeypatch, behavior, match):
     monkeypatch.setenv('NATIVE_TEST_CAPABILITY', behavior)
