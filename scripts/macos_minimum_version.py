@@ -184,15 +184,30 @@ def macho_minimums(source: Path | bytes, *, label: str | None = None) -> list[di
     """
     if isinstance(source, bytes): return _parse(_Reader(io.BytesIO(source), len(source), label or '<bytes>'))
     path = Path(source)
+
+    def identity(value):
+        # CPython 3.12 on Windows exposes creation time via lstat().ctime,
+        # but ChangeTime via fstat().ctime. Preserve both same-API mutation
+        # checks; compare only stable identity fields across the two APIs.
+        # https://github.com/python/cpython/issues/157671
+        return (value.st_dev, value.st_ino, value.st_mode, value.st_size,
+                value.st_mtime_ns, getattr(value, 'st_birthtime_ns', None))
+
     before = path.lstat()
     if not stat.S_ISREG(before.st_mode): _fail(str(path), 'Expected a non-symlink regular file')
     flags = os.O_RDONLY | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_NOFOLLOW', 0)
     descriptor = os.open(path, flags)
     with os.fdopen(descriptor, 'rb') as stream:
-        if _stamp(os.fstat(stream.fileno())) != _stamp(before): _fail(str(path), 'Input changed while opening')
+        opened = os.fstat(stream.fileno())
+        if identity(opened) != identity(before): _fail(str(path), 'Input changed while opening')
         result = _parse(_Reader(stream, before.st_size, label or str(path)))
-        if _stamp(os.fstat(stream.fileno())) != _stamp(before): _fail(str(path), 'Input changed during scan')
-    if _stamp(path.lstat()) != _stamp(before): _fail(str(path), 'Input path changed during scan')
+        finished = os.fstat(stream.fileno())
+        if _stamp(finished) != _stamp(opened) or identity(finished) != identity(opened):
+            _fail(str(path), 'Input changed during scan')
+    after = path.lstat()
+    if (_stamp(after) != _stamp(before) or identity(after) != identity(before)
+            or identity(after) != identity(finished)):
+        _fail(str(path), 'Input path changed during scan')
     return result
 
 

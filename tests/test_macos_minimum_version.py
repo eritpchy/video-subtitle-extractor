@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 from scripts import macos_minimum_version as minimum
 
@@ -65,6 +66,49 @@ class MachOMinimumTests(unittest.TestCase):
                     row = minimum.macho_minimums(thin(bits=bits, endian=endian))[0]
                     self.assertEqual(row['bits'], bits); self.assertEqual(row['minimum_macos_version'], '14.4')
                     self.assertEqual(row['byte_order'], 'little' if endian == '<' else 'big')
+
+    def inspect_two_stat_clocks(self, *, fd_before=None, fd_after=None, path_after=None):
+        # Synthetic Windows lstat/fstat time semantics, exercised on every
+        # host; the file descriptor and Mach-O structural reads remain real.
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary).resolve() / 'image'
+            data = thin(); path.write_bytes(data)
+            common = {'st_dev': 7, 'st_ino': 11, 'st_mode': path.stat().st_mode,
+                      'st_size': len(data), 'st_mtime_ns': 1000, 'st_birthtime_ns': 100}
+            original_path = {**common, 'st_ctime_ns': 100}
+            original_fd = {**common, 'st_ctime_ns': 900, **(fd_before or {})}
+            with patch.object(Path, 'lstat', side_effect=[SimpleNamespace(**original_path),
+                    SimpleNamespace(**{**original_path, **(path_after or {})})]), \
+                    patch.object(minimum.os, 'fstat', side_effect=[SimpleNamespace(**original_fd),
+                    SimpleNamespace(**{**original_fd, **(fd_after or {})})]):
+                return minimum.macho_minimums(path)
+
+    def test_distinct_stable_lstat_and_fstat_ctime_clocks_are_allowed(self):
+        self.assertEqual(self.inspect_two_stat_clocks()[0]['minimum_macos_version'], '14.4')
+
+    def test_same_api_ctime_changes_are_never_ignored(self):
+        for mutation in ({'fd_after': {'st_ctime_ns': 901}},
+                         {'path_after': {'st_ctime_ns': 101}}):
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(RuntimeError, 'changed during scan'):
+                self.inspect_two_stat_clocks(**mutation)
+
+    def test_cross_api_identity_changes_fail_while_opening(self):
+        for field in ('st_dev', 'st_ino', 'st_mode', 'st_size', 'st_mtime_ns', 'st_birthtime_ns'):
+            with self.subTest(field=field), self.assertRaisesRegex(RuntimeError, 'changed while opening'):
+                self.inspect_two_stat_clocks(fd_before={field: 9999})
+
+    def test_same_api_identity_changes_fail_after_scan(self):
+        for scope in ('fd_after', 'path_after'):
+            for field in ('st_dev', 'st_ino', 'st_mode', 'st_size', 'st_mtime_ns', 'st_birthtime_ns'):
+                with self.subTest(scope=scope, field=field), self.assertRaisesRegex(RuntimeError, 'changed during scan'):
+                    self.inspect_two_stat_clocks(**{scope: {field: 9999}})
+
+    def test_rewriting_same_file_does_not_fake_a_during_scan_mutation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary).resolve() / 'image'
+            for minor in range(4):
+                path.write_bytes(thin(commands=[build_command(version(14, minor))]))
+                self.assertEqual(minimum.macho_minimums(path)[0]['minimum_encoded'], version(14, minor))
 
     def test_legacy_patch_version_and_zero_sdk(self):
         rows = minimum.macho_minimums(thin(commands=[legacy(version(10, 13, 6), sdk=0)]))
