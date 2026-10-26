@@ -32,6 +32,18 @@ def staged(tmp_path, resource, purelib, monkeypatch):
     monkeypatch.setattr(overlay, 'apply_to_stage', lambda stage, python, resource, candidate_testing:
                         overlay._apply(runtime_lib, stage / 'runtime' / overlay.RECEIPT,
                                        resource, context='candidate-package-stage'))
+    # This is a synthetic Mac-origin receipt relocated onto the test host.
+    # Keep the real local path through apply_candidate's sysconfig/root check,
+    # then map only the fixture origin at the reviewed rebind boundary. The
+    # actual validator, original records and all local runtime bytes stay real.
+    real_rebind = package.rebind_prune
+    def mac_origin_rebind(before, actual_purelib, receipt):
+        logical = '/synthetic-mac/package/runtime/lib/python3.12/site-packages'
+        if receipt['purelib'] != logical:
+            receipt['purelib'] = logical
+            overlay._atomic_json(stage / 'runtime' / overlay.RECEIPT, receipt)
+        return real_rebind(before, actual_purelib, receipt)
+    monkeypatch.setattr(package, 'rebind_prune', mac_origin_rebind)
     source = tmp_path / 'source.tar.xz'
     source.write_bytes(b'source')
     metadata = package.apply_candidate(stage, stage / 'runtime/bin/python3.12', resource.archive, source)
