@@ -2,6 +2,8 @@
 import copy
 import hashlib
 import json
+import shutil
+from unittest.mock import patch
 from pathlib import Path
 import subprocess
 import sys
@@ -25,13 +27,22 @@ def inventory(path):
     return {'bytes': path.stat().st_size, 'sha256': gate._sha(path)}
 
 
-def record(case, state, provider, window, *, pid=123, engine=1):
+def fixture_inputs(profile):
+    # One real read per make, never a cross-test cache or production-validator
+    # replacement. Every generated record gets independent mutable values.
+    pins = gate._json(gate.ROOT / 'native/ocr/model-source-pins.json')
+    key = 'darwin-arm64-cp312' if profile.startswith('macos') else 'linux-x86_64-cp312'
+    return {'pins': pins, 'model_hashes': {row['name']: row['onnx_sha256'] for row in pins['models']},
+            'wheel': gate._json(gate.ROOT / 'backend/tools/python_coreml_runtime.json')['wheels'][key],
+            'source_files': impl._source_identity(),
+            'cases': gate.frozen.load_cases(gate.ROOT / 'native/ocr/tests/evidence')}
+
+
+def record(case, state, provider, window, *, inputs, pid=123, engine=1):
     tier, operation = case['tier'], case['operation']
     rec = case['rec_model'] or f'PP-OCRv6_{tier}_rec'
-    fixed = gate._json(gate.ROOT / 'native/ocr/model-source-pins.json')
-    hashes = {row['name']: row['onnx_sha256'] for row in fixed['models']}
-    key = 'darwin-arm64-cp312' if state['identity']['profile'].startswith('macos') else 'linux-x86_64-cp312'
-    wheel = gate._json(gate.ROOT / 'backend/tools/python_coreml_runtime.json')['wheels'][key]
+    hashes = inputs['model_hashes']
+    wheel = copy.deepcopy(inputs['wheel'])
     base = window['started_utc_ns'] + engine * 100
     def clock(t): return {'process_pid': pid, 'utc_ns': base + t, 'monotonic_ns': base + t}
     empty = not (case['actual'][1] if operation == 'ocr' else case['actual'])
@@ -54,7 +65,7 @@ def record(case, state, provider, window, *, pid=123, engine=1):
     return {'schema': 1, 'scope': 'python-source-inference', 'backend': 'python-coreml', 'provider': provider,
         'process_pid': pid, 'engine_id': engine, 'request_id': 1,
         'interpreter': state['environment']['interpreter'], 'interpreter_sha256': state['environment']['interpreter_sha256'],
-        'source_files': impl._source_identity(),
+        'source_files': copy.deepcopy(inputs['source_files']),
         'runtime': {'package_root': str(gate._path(state, state['environment']['prefix']) / 'site-packages/onnxruntime'),
             'binding_path': str(gate._path(state, state['environment']['prefix']) / 'site-packages/onnxruntime/capi/binding.so'), 'version': impl.ORT_VERSION, 'wheel_filename': wheel['filename'], 'wheel_sha256': wheel['sha256'],
             'native_files': wheel['native_files'], 'telemetry_disabled_before_import': True,
@@ -67,17 +78,17 @@ def record(case, state, provider, window, *, pid=123, engine=1):
         'sessions': sessions, 'gpu_execution_verified': False, 'internal_coreml_precision_verified': False}
 
 
-def image_report(state, provider, window):
-    cases = gate.frozen.load_cases(gate.ROOT / 'native/ocr/tests/evidence')
+def image_report(state, provider, window, inputs):
+    cases = [copy.deepcopy(case) for case in inputs['cases']]
     for row in cases:
         row['actual'] = copy.deepcopy(row['expected'])
         if row['operation'] == 'ocr': row.update(gate.frozen.compare_ocr(row['actual'], row['expected']))
         else: row['passed'] = True
-        r = record(row, state, provider, window, engine=row['id'] + 1)
+        r = record(row, state, provider, window, inputs=inputs, engine=row['id'] + 1)
         row['request_evidence'] = r
         row['executed_models'] = sorted(s['model'] for s in r['sessions'].values() if s)
     runtime = cases[0]['request_evidence']['runtime']
-    pins = gate._json(gate.ROOT / 'native/ocr/model-source-pins.json')
+    pins = inputs['pins']
     model_files = {'model-source-pins.json': gate.frozen.SOURCE_PINS_SHA256, 'model-manifest.json': 'f' * 64,
         **pins['config_sha256'], **{'models/' + r['name'] + '_infer.onnx': r['onnx_sha256'] for r in pins['models']}}
     return {'synthetic_unit_fixture': True, 'schema': 1, 'scope': 'python-source-correctness', 'backend': 'python-coreml',
@@ -86,7 +97,7 @@ def image_report(state, provider, window):
         'internal_coreml_precision_verified': False, 'final_package_accepted': False, 'models_unchanged': True,
         'source_unchanged': True, 'paddle_imported': False, 'runtime_files_unchanged': True, 'loader_environment_clean': True,
         'confidence_tolerance': gate.frozen.TOLERANCE, 'interpreter': state['environment']['interpreter'],
-        'cases': cases, 'covered_models': sorted(gate.frozen.ALL_MODELS), 'source_files': impl._source_identity(),
+        'cases': cases, 'covered_models': sorted(gate.frozen.ALL_MODELS), 'source_files': copy.deepcopy(inputs['source_files']),
         'runtime': runtime, 'runtime_native_files_before': runtime['native_files'], 'runtime_native_files_after': runtime['native_files'],
         'model_files': model_files}
 
@@ -94,6 +105,7 @@ def image_report(state, provider, window):
 def make(root, profile):
     root.mkdir(parents=True)
     windows = profile.startswith('windows-')
+    inputs = None if windows else fixture_inputs(profile)
     P = gate.PureWindowsPath if windows else gate.PurePosixPath
     checkout, evidence, venv = [P('C:/synthetic' if windows else '/synthetic') / x for x in ('checkout', 'evidence', 'venv')]
     target = runner.PROFILES[profile]
@@ -132,11 +144,11 @@ def make(root, profile):
         from scripts.paddle_package_models import _model_path
         pins = gate._json(gate.ROOT / 'native/ocr/model-source-pins.json')
         report['model_files'] = {_model_path(r['name']) + '/' + n: {'sha256': d, 'bytes': 1} for r in pins['models'] for n, d in r['files'].items()}
-    else: report = image_report(state, 'cpu', steps['image-cpu'])
+    else: report = image_report(state, 'cpu', steps['image-cpu'], inputs)
     write(root / 'cpu-all.json', report)
-    if profile.startswith('macos'): write(root / 'coreml-all.json', image_report(state, 'coreml', steps['image-coreml']))
-    install(root, state)
-    video(root, state, steps['video'])
+    if profile.startswith('macos'): write(root / 'coreml-all.json', image_report(state, 'coreml', steps['image-coreml'], inputs))
+    install(root, state, inputs)
+    video(root, state, steps['video'], inputs)
     return root, state
 
 
@@ -182,7 +194,7 @@ def sync_qt_stdout(root, state):
     row['qt_overlay']['receipt'].update(inventory(root / 'qt-overlay.json'))
 
 
-def install(root, state):
+def install(root, state, inputs):
     profile = state['identity']['profile']; windows = profile.startswith('windows')
     if windows:
         cuda = profile.removeprefix('windows-cuda'); pin, wheels = gate.cuda_checker.load_profile(cuda)
@@ -190,8 +202,7 @@ def install(root, state):
                      'download_info': {'url': row['url'], 'archive_info': {'hashes': {'sha256': row['sha256']}}},
                      'is_direct': True, 'requested': True} for name, row in wheels.items()]
     else:
-        key = 'darwin-arm64-cp312' if profile.startswith('macos') else 'linux-x86_64-cp312'
-        pin = gate._json(gate.ROOT / 'backend/tools/python_coreml_runtime.json')['wheels'][key]
+        pin = inputs['wheel']
         text = (gate.ROOT / 'requirements-coreml-inference.txt').read_text()
         url = next(u.split('#')[0] for u in gate.re.findall(r'onnxruntime @ (https://\S+)', text) if '/' + pin['filename'] + '#' in u)
         installs = [{'metadata': {'name': 'onnxruntime', 'version': '1.31.0'}, 'download_info': {'url': url,
@@ -217,7 +228,7 @@ def install(root, state):
         'sha256sums_sha256':gate._json(gate.ROOT/'backend/tools/videosubfinder_release.json')['sha256sums_sha256']})
 
 
-def video(root, state, window):
+def video(root, state, window, inputs):
     profile=state['identity']['profile']; windows=profile.startswith('windows')
     providers=('cpu','coreml') if profile.startswith('macos') else ('cpu',)
     cases=[]; env=state['environment']
@@ -240,7 +251,7 @@ def video(root, state, window):
                  **gate._srt(srt),'srt_sha256':gate._sha(srt),'input_video_sha256':gate._sha(source)}
             if not windows:
                 tier='medium' if mode=='accurate' else 'small'
-                r=record({'tier':tier,'operation':'ocr','rec_model':f'PP-OCRv6_{tier}_rec','actual':[[1],[1]]},state,provider,window,pid=500+i*2+j)
+                r=record({'tier':tier,'operation':'ocr','rec_model':f'PP-OCRv6_{tier}_rec','actual':[[1],[1]]},state,provider,window,inputs=inputs,pid=500+i*2+j)
                 name='python-ocr-{}-1-1.json'.format(r['process_pid']);path=folder/'python-requests'/name;write(path,r)
                 row.update(timing_is_benchmark=False,executed_models=sorted(s['model'] for s in r['sessions'].values()),
                            python_requests=[{'path':name,**inventory(path)}])
@@ -497,3 +508,63 @@ def test_qt_provenance_cannot_hide_on_a_non_qt_step(linux):
     state['steps'][2]['qt_overlay'] = {'synthetic_unit_fixture': True}
     write(linux / 'steps.json', state)
     reject(linux)
+
+
+def test_fixture_inputs_are_read_once_per_make_and_next_make_sees_changed_bytes(tmp_path, monkeypatch):
+    # Isolate actual files, not validator functions. Instrumented readers call
+    # their real implementations; no production identity is cached or mocked.
+    checkout = tmp_path / 'real-input-copy'
+    for name in gate.contract_files():
+        path = checkout / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(gate.ROOT / name, path)
+    shutil.copytree(gate.ROOT / 'native/ocr/tests/evidence', checkout / 'native/ocr/tests/evidence', dirs_exist_ok=True)
+    monkeypatch.setattr(gate, 'ROOT', checkout)
+    monkeypatch.setattr(impl, '__file__', str(checkout / 'backend/tools/python_coreml_ocr.py'))
+    source = checkout / 'backend/tools/ocr.py'
+    with patch.object(impl, '_source_identity', wraps=impl._source_identity) as identities, \
+            patch.object(gate, '_json', wraps=gate._json) as documents, \
+            patch.object(gate.frozen, 'load_cases', wraps=gate.frozen.load_cases) as frozen:
+        first, _ = make(tmp_path / 'first', 'macos-ort-cpu-coreml')
+        assert identities.call_count == frozen.call_count == 1
+        for name in ('native/ocr/model-source-pins.json', 'backend/tools/python_coreml_runtime.json'):
+            assert sum(Path(call.args[0]) == checkout / name for call in documents.call_args_list) == 1
+        old_record = gate._json(first / 'cpu-all.json')['cases'][0]['request_evidence']
+        source.write_bytes(source.read_bytes() + b'\n# synthetic source mutation in isolated checkout\n')
+        second, _ = make(tmp_path / 'second', 'macos-ort-cpu-coreml')
+        assert identities.call_count == frozen.call_count == 2
+        for name in ('native/ocr/model-source-pins.json', 'backend/tools/python_coreml_runtime.json'):
+            assert sum(Path(call.args[0]) == checkout / name for call in documents.call_args_list) == 2
+        new_record = gate._json(second / 'cpu-all.json')['cases'][0]['request_evidence']
+    assert old_record['source_files']['backend/tools/ocr.py'] != new_record['source_files']['backend/tools/ocr.py']
+    # The real, unmodified production validator still rejects old source bytes.
+    with pytest.raises(ValueError, match='producer modules differ'):
+        impl.validate_python_coreml_record(old_record, provider='cpu')
+    impl.validate_python_coreml_record(new_record, provider='cpu')
+
+
+def test_fixture_records_do_not_share_nested_mutable_input_or_provider_state(tmp_path):
+    root, state = make(tmp_path / 'evidence', 'macos-ort-cpu-coreml')
+    inputs = fixture_inputs('macos-ort-cpu-coreml')
+    window = next(row for row in state['steps'] if row['name'] == 'image-cpu')
+    case = copy.deepcopy(inputs['cases'][0]); case['actual'] = copy.deepcopy(case['expected'])
+    first = record(case, state, 'cpu', window, inputs=inputs)
+    second = record(case, state, 'cpu', window, inputs=inputs)
+    untouched_inputs, untouched_second = copy.deepcopy(inputs), copy.deepcopy(second)
+    first['source_files'].clear()
+    first['runtime']['native_files'].clear()
+    first['runtime']['available_providers'].clear()
+    first['model_sha256'].clear()
+    first['sessions']['det']['shape_sessions'][0]['input_shape'][0] = 99
+    assert inputs == untouched_inputs and second == untouched_second
+    cpu = image_report(state, 'cpu', window, inputs)
+    coreml = image_report(state, 'coreml', window, inputs)
+    untouched_coreml = copy.deepcopy(coreml)
+    assert len(cpu['cases']) == len(coreml['cases']) == 168
+    cpu['cases'][0]['expected'][0].clear()
+    assert cpu['cases'][112]['expected'] == inputs['cases'][112]['expected']
+    cpu['cases'][0]['request_evidence']['runtime']['native_files'].clear()
+    assert coreml == untouched_coreml and inputs == untouched_inputs
+    # This test never substitutes a smaller suite or a summary-only fixture.
+    assert len(gate._json(root / 'cpu-all.json')['cases']) == 168
+    assert len(gate._json(root / 'coreml-all.json')['cases']) == 168
