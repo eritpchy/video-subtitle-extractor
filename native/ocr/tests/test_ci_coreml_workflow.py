@@ -85,6 +85,7 @@ def test_separate_control_frontend_always_preserves_loader_local_runtime():
         paths = artifact[1].split('- name:', 1)[0]
         for path in ('build/native-diagnostic/vse-provider-diagnostic',
                      'build/native-diagnostic/libonnxruntime*',
+                     'build/native-diagnostic/ort-notices/',
                      'build/native-diagnostic/build-inputs.json',
                      'build/native-diagnostic/build-*.log'):
             assert path in paths

@@ -116,6 +116,7 @@ jobs:
           path: |
             build/native-diagnostic/vse-provider-diagnostic
             build/native-diagnostic/libonnxruntime*
+            build/native-diagnostic/ort-notices/
             build/native-diagnostic/build-inputs.json
             build/native-diagnostic/build-*.log
           if-no-files-found: warn
