@@ -174,13 +174,67 @@ def test_minimal_runtime_probe_requires_optout_before_dynamic_load():
 def test_build_provenance_covers_production_provider_helper():
     source = (diag.HERE / 'benchmark.py').read_text()
     assert "'production_included_source_sha256'" in source
-    for name in ('worker.cpp', 'provider_evidence.hpp', 'protocol_output.hpp', 'metal_capture.hpp',
+    for name in ('worker.cpp', 'provider_evidence.hpp', 'protocol_output.hpp', 'input_shape.hpp', 'metal_capture.hpp',
                  'metal_capture.mm', 'metal_capture_stub.cpp'):
         assert repr(name) in source
     runner = (diag.HERE / 'runner.cpp').read_text()
     assert runner.index('native_protocol::Output protocol;') < runner.index('original = OrtGetApiBase()')
     assert 'protocol.capabilities(info.dump(2))' in runner
     assert 'std::cout' not in runner
+
+
+def test_runtime_sidecar_is_pinned_and_named_for_portable_loader(tmp_path):
+    sdk, output = tmp_path / 'sdk', tmp_path / 'output'
+    sdk.mkdir(); output.mkdir()
+    source = sdk / 'libonnxruntime.1.31.0.dylib'; source.write_bytes(b'pinned-runtime')
+    record = {'library': source.name, 'files': [
+        {'path': source.name, 'role': 'runtime', 'sha256': diag.digest(source)}]}
+    result = diag.stage_runtime(sdk, record, 'macos-arm64', output)
+    assert result[0]['file'] == 'libonnxruntime.1.dylib'
+    assert (output / result[0]['file']).read_bytes() == source.read_bytes()
+    source.write_bytes(b'changed')
+    with pytest.raises(ValueError):
+        diag.stage_runtime(sdk, record, 'macos-arm64', output)
+
+
+def test_bundled_runtime_retains_pinned_license_and_notices(tmp_path):
+    sdk, output = tmp_path / 'sdk', tmp_path / 'output'
+    sdk.mkdir(); output.mkdir()
+    records = []
+    for name in ('LICENSE', 'ThirdPartyNotices.txt', 'Privacy.md'):
+        path = sdk / name; path.write_text('original pinned ' + name)
+        records.append({'path': name, 'role': 'notice', 'sha256': diag.digest(path)})
+    copied = diag.stage_runtime_notices(sdk, {'files': records}, output)
+    assert {row['file'] for row in copied} == {'ort-notices/' + row['path'] for row in records}
+    assert all(diag.digest(output / row['file']) == row['sha256'] for row in copied)
+
+
+def test_macos_diagnostic_rejects_absolute_ci_rpath_or_other_dependencies():
+    deps = 'worker:\n\t@rpath/libonnxruntime.1.dylib (compatibility version 0.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n'
+    commands = 'Load command 1\n          cmd LC_RPATH\n      cmdsize 32\n         path @loader_path (offset 12)\n'
+    assert diag.validate_macos_linkage(deps, commands)['rpaths'] == ['@loader_path']
+    for bad_deps, bad_commands in ((deps, commands.replace('@loader_path', '/Users/runner/cache')),
+                                   (deps + '\t/opt/local/libbad.dylib (compatibility version 0.0.0)\n', commands),
+                                   (deps, commands + commands)):
+        with pytest.raises(ValueError):
+            diag.validate_macos_linkage(bad_deps, bad_commands)
+
+
+def test_relocation_probe_uses_copied_runtime_and_cleans_loader_environment(tmp_path, monkeypatch):
+    binary = tmp_path / 'runner'; binary.write_bytes(b'runner')
+    runtime = tmp_path / 'libonnxruntime.1.dylib'; runtime.write_bytes(b'runtime')
+    monkeypatch.setenv('DYLD_LIBRARY_PATH', '/untrusted')
+    monkeypatch.setenv('MTL_CAPTURE_ENABLED', '1')
+    def launch(command, **options):
+        copied = Path(command[0])
+        assert copied.parent != tmp_path and copied.read_bytes() == binary.read_bytes()
+        assert 'DYLD_LIBRARY_PATH' not in options['env'] and 'MTL_CAPTURE_ENABLED' not in options['env']
+        assert options['env']['ORT_DISABLE_TELEMETRY'] == '1'
+        return SimpleNamespace(returncode=0, stderr='', stdout=json.dumps({
+            'ort_version': '1.31.0', 'loaded_ort_library': str(copied.parent / runtime.name)}))
+    monkeypatch.setattr(diag.subprocess, 'run', launch)
+    report = diag.relocated_runtime_probe(binary, [{'file': runtime.name, 'sha256': diag.digest(runtime)}])
+    assert report['passed'] and report['loader_environment_override'] is False
 
 
 def test_metal_capture_environment_is_explicit_and_never_in_timing(monkeypatch):

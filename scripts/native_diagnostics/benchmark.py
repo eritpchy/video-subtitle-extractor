@@ -16,9 +16,11 @@ import os
 from pathlib import Path
 import platform
 import random
+import shutil
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -202,6 +204,82 @@ def verify_runtime(path):
     return pinned_file(Path(path).resolve(strict=True), expected['sha256'])
 
 
+def stage_runtime(sdk, record, target, output):
+    """Copy only existing pinned runtime bytes beside the relocatable frontend."""
+    files = []
+    for row in record['files']:
+        if row['role'] != 'runtime':
+            continue
+        source = sdk / row['path']
+        pinned_file(source, row['sha256'])
+        name = Path(row['path']).name
+        if row['path'] == record['library']:
+            name = 'libonnxruntime.1.dylib' if target == 'macos-arm64' else 'libonnxruntime.so.1'
+        destination = output / name
+        shutil.copy2(source, destination)
+        files.append({'file': name, **pinned_file(destination, row['sha256'])})
+    return files
+
+
+def stage_runtime_notices(sdk, record, output):
+    directory = output / 'ort-notices'
+    directory.mkdir()
+    files = []
+    for row in record['files']:
+        if row['role'] != 'notice':
+            continue
+        source = sdk / row['path']
+        pinned_file(source, row['sha256'])
+        destination = directory / Path(row['path']).name
+        shutil.copy2(source, destination)
+        files.append({'file': str(destination.relative_to(output)),
+                      **pinned_file(destination, row['sha256'])})
+    return files
+
+
+def validate_macos_linkage(dependencies, commands):
+    """Reject CI/build-directory linkage instead of requiring DYLD overrides."""
+    libraries = [line.strip().split(' (compatibility version', 1)[0]
+                 for line in dependencies.splitlines()[1:] if line.strip()]
+    expected = '@rpath/libonnxruntime.1.dylib'
+    if expected not in libraries or any(name != expected and not name.startswith(
+            ('/System/Library/', '/usr/lib/')) for name in libraries):
+        raise ValueError('Diagnostic has non-portable non-system dependencies')
+    lines = commands.splitlines()
+    paths = [lines[index + 2].strip().split(' (offset ', 1)[0]
+             for index, line in enumerate(lines) if line.strip() == 'cmd LC_RPATH']
+    if paths != ['path @loader_path']:
+        raise ValueError('Diagnostic must resolve its pinned runtime only beside itself')
+    return {'dependencies': libraries, 'rpaths': ['@loader_path']}
+
+
+def relocated_runtime_probe(binary, runtime_files):
+    """Execute a copied frontend outside its build tree, with no loader override."""
+    with tempfile.TemporaryDirectory(prefix='vse-relocated-diagnostic-') as temporary:
+        root = Path(temporary).resolve()
+        copied = root / binary.name
+        shutil.copy2(binary, copied)
+        for row in runtime_files:
+            shutil.copy2(binary.parent / row['file'], root / row['file'])
+            pinned_file(root / row['file'], row['sha256'])
+        result = subprocess.run([str(copied), '--probe'], capture_output=True, text=True,
+                                timeout=60, env=diagnostic_environment())
+        report = {'scope': 'Relocated capability-only process; no models, sessions, capture or GPU proof',
+                  'returncode': result.returncode, 'stderr': result.stderr,
+                  'loader_environment_override': False, 'passed': False}
+        if result.returncode != 0 or len(result.stdout.encode('utf-8')) > 65536:
+            return report
+        value = json.loads(result.stdout)
+        library = Path(value['loaded_ort_library']).resolve(strict=True)
+        allowed = {row['file']: row['sha256'] for row in runtime_files}
+        if library.parent != root or library.name not in allowed or value['ort_version'] != '1.31.0':
+            raise ValueError('Relocated frontend loaded a runtime outside its pinned sidecars')
+        report.update(passed=True, loaded_runtime_file=library.name,
+                      runtime_sha256=pinned_file(library, allowed[library.name])['sha256'],
+                      runner_sha256=digest(copied))
+        return report
+
+
 def build(args):
     target = target_for_host()
     sdk = args.sdk.resolve(strict=True)
@@ -228,7 +306,7 @@ def build(args):
                   'production_worker_source_sha256': digest(ROOT / 'native/ocr/worker.cpp'),
                   'production_included_source_sha256': {
                       name: digest(ROOT / 'native/ocr' / name)
-                      for name in ('worker.cpp', 'provider_evidence.hpp', 'protocol_output.hpp', 'metal_capture.hpp',
+                      for name in ('worker.cpp', 'provider_evidence.hpp', 'protocol_output.hpp', 'input_shape.hpp', 'metal_capture.hpp',
                                    'metal_capture.mm', 'metal_capture_stub.cpp')},
                   'diagnostic_source_sha256': {p.name: digest(p) for p in HERE.iterdir() if p.is_file()},
                   'commands': commands, 'runtime_rebuilt': False,
@@ -241,7 +319,17 @@ def build(args):
         with (output / f'build-{index}.log').open('w') as stream:
             subprocess.run(command, stdout=stream, stderr=subprocess.STDOUT, check=True)
     binary = output / 'vse-provider-diagnostic'
+    provenance['bundled_runtime_files'] = stage_runtime(sdk, record, target, output)
+    provenance['bundled_runtime_notices'] = stage_runtime_notices(sdk, record, output)
+    if target == 'macos-arm64':
+        dependencies = subprocess.check_output(['otool', '-L', str(binary)], text=True)
+        commands = subprocess.check_output(['otool', '-l', str(binary)], text=True)
+        provenance['relocatable_linkage'] = validate_macos_linkage(dependencies, commands)
     provenance['binary_sha256'] = digest(binary)
+    provenance['relocated_runtime_probe'] = relocated_runtime_probe(binary, provenance['bundled_runtime_files'])
+    write_json(output / 'build-inputs.json', provenance)
+    if not provenance['relocated_runtime_probe']['passed']:
+        raise ValueError('Diagnostic relocation probe failed; see build-inputs.json, no loader override attempted')
     provenance['build_succeeded'] = True
     write_json(output / 'build-inputs.json', provenance)
     print(binary)
