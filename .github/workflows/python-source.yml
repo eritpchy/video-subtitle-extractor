@@ -128,6 +128,7 @@ jobs:
           python -m pytest tests/test_python_coreml*.py tests/test_check_python_coreml.py
           tests/test_prepare_source_models.py tests/test_source_ci_steps.py tests/test_source_acceptance.py
           tests/test_e2e_python_coreml.py tests/test_python_source_workflow.py tests/test_macos_setting_controls.py
+          tests/test_home_preview_lifecycle.py
           -q --junitxml=test-results/python-source/contracts.xml
       - name: Restore only the exact immutable public model-data archive
         uses: actions/cache@v4
@@ -252,7 +253,7 @@ jobs:
           python -m pytest tests/test_source_cuda_requirements.py tests/test_source_cuda_environment.py
           tests/test_python_source_workflow.py tests/test_paddle_package_models.py
           tests/test_check_paddle_models.py tests/test_e2e_modes.py
-          tests/test_source_ci_steps.py tests/test_source_acceptance.py -q
+          tests/test_source_ci_steps.py tests/test_source_acceptance.py tests/test_home_preview_lifecycle.py -q
           --junitxml=test-results/python-source-cuda/contracts.xml
       - name: Download this run's independently verified original-model seed
         uses: actions/download-artifact@v4

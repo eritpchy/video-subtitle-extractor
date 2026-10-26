@@ -80,6 +80,17 @@ def test_real_source_cases_video_gui_and_failure_artifacts_cannot_be_skipped_by_
     assert 'not physical GPU' in value
 
 
+def test_preview_lifecycle_regression_runs_for_source_and_packaged_runtime_profiles():
+    value = workflow()
+    for section in (value.split('  original-models:', 1)[0],
+                    value.split('  windows-source-cuda:', 1)[1].split('  source-set:', 1)[0]):
+        assert 'tests/test_home_preview_lifecycle.py' in section
+    native = (ROOT / '.github/workflows/native-ocr.yml').read_text(encoding='utf-8')
+    assert 'tests/test_home_preview_lifecycle.py' in native
+    release = (ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8')
+    assert release.count('tests/test_home_preview_lifecycle.py') == 2  # Paddle and DirectML jobs.
+
+
 def test_only_a_separate_diagnostic_snapshot_can_add_its_exact_trigger():
     value = workflow()
     assert '  workflow_dispatch:' in value

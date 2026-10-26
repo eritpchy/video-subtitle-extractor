@@ -95,7 +95,7 @@ jobs:
           tests/test_cuda_profile_audit.py tests/test_prune_cuda_development.py
           tests/test_runtime_dependencies.py tests/test_portable_environment.py tests/test_e2e_modes.py
           tests/test_paddle_package_models.py tests/test_check_paddle_models.py tests/test_final_paddle_launcher.py
-          tests/test_isolated_model_verifier.py
+          tests/test_isolated_model_verifier.py tests/test_home_preview_lifecycle.py
           tests/test_frozen_checkout_bytes.py -q --junitxml=test-results/profile-safety.xml
       - name: Install fixed verified VideoSubFinder
         run: python scripts/install_videosubfinder.py --version 6.10.7
@@ -179,7 +179,7 @@ jobs:
         run: >-
           python -c "import pathlib,subprocess,sys; subprocess.run([sys.executable,'-m','pip','install','--no-index','--no-deps','--no-compile',*map(str,sorted(pathlib.Path('build/wheelhouse').glob('*.whl')))],check=True)"
       - name: DirectML provider, all-model integrity and packaging unit tests
-        run: python -m pytest tests/test_directml_ocr.py tests/test_directml_windows_verification.py tests/test_release_profiles.py tests/test_e2e_modes.py tests/test_frozen_checkout_bytes.py -q --junitxml=test-results/directml-unit.xml
+        run: python -m pytest tests/test_directml_ocr.py tests/test_directml_windows_verification.py tests/test_release_profiles.py tests/test_home_preview_lifecycle.py tests/test_e2e_modes.py tests/test_frozen_checkout_bytes.py -q --junitxml=test-results/directml-unit.xml
       - name: Frozen models and fixtures on explicit CPU (not GPU proof)
         run: python scripts/check_directml.py --models build/native-models --provider cpu --report test-results/directml-cpu-parity.json
       - run: python scripts/install_videosubfinder.py --version 6.10.7

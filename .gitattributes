@@ -62,3 +62,5 @@ tests/fixtures/qt-overlay/artifact-12624219589.json -text
 /ui/setting_interface.py -text
 /ui/advanced_setting_interface.py -text
 /ui/macos_setting_controls.py -text
+/ui/home_interface.py -text
+/backend/tools/subtitle_extractor_remote_call.py -text
