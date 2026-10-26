@@ -204,6 +204,16 @@ def test_dispatcher_bounded_lru_cannot_revive_evicted_identity(fake_runtime, rol
 
 def test_safe_emitter_default_external_new_name_only(tmp_path):
     data = record('cpu'); directory = tmp_path / '中文 & !'; directory.mkdir()
+    if os.name != 'posix':
+        # Windows is not a Python-CoreML runtime target. Exercise its real
+        # refusal rather than skip this safety test or invent an unsafe writer.
+        marker = directory / 'existing-user-file'; marker.write_bytes(b'preserve me')
+        before = {path.name: path.read_bytes() for path in directory.iterdir()}
+        with pytest.raises(RuntimeError, match='secure POSIX directory-relative I/O'):
+            impl._emit_source_record(data, directory)
+        assert {path.name: path.read_bytes() for path in directory.iterdir()} == before
+        assert not list(directory.glob('python-ocr-*.json'))
+        return
     path = impl._emit_source_record(data, directory)
     assert path.name == 'python-ocr-123-1-1.json' and json.loads(path.read_bytes()) == data
     assert path.stat().st_mode & 0o777 == 0o600
@@ -212,6 +222,31 @@ def test_safe_emitter_default_external_new_name_only(tmp_path):
     with pytest.raises(ValueError): impl._emit_source_record(data, alias)
     data['engine_id'] = '../evil'
     with pytest.raises(ValueError): impl._emit_source_record(data, directory)
+
+
+@pytest.mark.parametrize('missing', ['platform', 'O_DIRECTORY', 'O_NOFOLLOW', 'dir_fd'])
+def test_source_evidence_missing_secure_io_refuses_before_any_filesystem_write(tmp_path, monkeypatch, missing):
+    data = record('cpu')
+    directory = tmp_path / 'untouched'; directory.mkdir()
+    (directory / 'existing').write_bytes(b'keep exact bytes')
+    def no_open(*args, **kwargs):
+        pytest.fail('Unsupported platform must not open a directory/file')
+    capabilities = dict(name='posix', O_DIRECTORY=1, O_NOFOLLOW=2, open=no_open, supports_dir_fd={no_open})
+    if missing == 'platform': capabilities['name'] = 'nt'
+    elif missing == 'dir_fd': capabilities['supports_dir_fd'] = set()
+    else: del capabilities[missing]
+    with monkeypatch.context() as patch:
+        patch.setattr(impl, 'os', SimpleNamespace(**capabilities))
+        with pytest.raises(RuntimeError, match='no unsafe platform fallback'):
+            impl._emit_source_record(data, directory)
+    assert {path.name: path.read_bytes() for path in directory.iterdir()} == {'existing': b'keep exact bytes'}
+
+
+def test_python_coreml_runtime_support_does_not_advertise_windows():
+    # Other Windows source backends remain supported; only this optional
+    # Python ORT/CoreML backend and its diagnostic emitter are scoped here.
+    pins = json.loads(Path(impl.__file__).with_name('python_coreml_runtime.json').read_bytes())
+    assert set(pins['wheels']) == {'darwin-arm64-cp312', 'linux-x86_64-cp312'}
 
 
 def test_telemetry_must_precede_import_and_conflicting_packages_fail(monkeypatch):

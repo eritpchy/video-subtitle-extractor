@@ -359,8 +359,20 @@ def _source_identity():
 
 
 def _emit_source_record(record, directory):
-    """Explicit diagnostic-only safe creation; never overwrite earlier evidence."""
+    """Explicit diagnostic-only POSIX creation; never use an unsafe fallback.
+
+    This backend has reviewed runtime wheels only for Linux CPU and macOS
+    CPU/CoreML. Windows source inference uses Paddle or DirectML instead.
+    Reject unsupported directory-relative I/O before touching the destination;
+    an AttributeError or pathname-only write is not a safe portability policy.
+    """
     import stat
+    if (os.name != 'posix'
+            or any(type(getattr(os, name, None)) is not int or not getattr(os, name)
+                   for name in ('O_DIRECTORY', 'O_NOFOLLOW'))
+            or os.open not in getattr(os, 'supports_dir_fd', ())):
+        raise RuntimeError('Python source evidence requires secure POSIX directory-relative I/O; '
+                           'no unsafe platform fallback is permitted')
     path = Path(directory).expanduser().absolute()
     if path.is_symlink() or '..' in path.parts or str(path).startswith('\\\\'):
         raise ValueError('Unsafe Python source evidence directory')
