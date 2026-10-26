@@ -28,12 +28,13 @@ for separate type inspection; `internal_coreml_precision_verified` remains false
 until that inspection is actually performed. Do not substitute the default
 `NeuralNetwork` format: its GPU precision behavior is different.
 
-The C++ frontend includes the unchanged `native/ocr/worker.cpp` under a renamed,
+The C++ frontend includes `native/ocr/worker.cpp` under a renamed,
 unused production entrypoint. Its own main uses the same `Engine`/preprocessing/
 postprocessing. A private copy of the ORT API table clones session options before
 registering a provider and records timings/profile files. It never edits a
 production session's options, changes the original source or uses the production
-IPC provider guard to enable GPU. CPU diagnostic equivalence is checked against
+IPC provider guard to enable GPU. Build provenance hashes both the included
+worker and its provider-evidence helper. CPU diagnostic equivalence is checked against
 the frozen original boxes/text/confidence tolerance (`1e-5`).
 
 ## Telemetry must be disabled *before process creation*
@@ -172,9 +173,10 @@ The report separates:
 
 It excludes SRT text merging/post-processing and deliberately uses explicit FFmpeg
 frame decoding. Therefore `production_video_end_to_end_seconds` is **null** and
-the measured number is named `diagnostic_video_to_ocr_json_seconds`. The production
-`accurate` path switches from VSF to detection-based frame selection when
-`has_accelerator()` becomes true (`backend/main.py:215–221`). Comparing those two
+the measured number is named `diagnostic_video_to_ocr_json_seconds`. The earlier
+production `accurate` path switched from VSF to detection-based frame selection
+when `has_accelerator()` became true. The separately authorized native-CoreML
+rollout must preserve VSF for the matched CPU/CoreML comparison. Comparing different
 paths without fixing the input schedule would confound algorithm and device.
 Production end-to-end speed requires a further authorized, identical-path study;
 do not label this diagnostic as the shipping application's GPU speedup.
@@ -200,7 +202,46 @@ permissions, enable privileged counters or open a permissions UI to force a
 trace. If that route is unavailable, report the limitation; activity-monitor
 utilization, global GPU busy%, the model's speed, and a compute plan do not replace
 attributable execution evidence. A separate trace run also avoids contaminating
-benchmark latency. No trace is automatically launched by these scripts.
+benchmark latency. No trace is automatically launched by normal probe/suite/video commands.
+
+### Optional application-local Metal capture (explicit evidence command)
+
+The independent frontend also has an explicit Apple public-API capture path.
+It does not use Instruments, read its denied cache, attach to another process,
+change system permissions, or open Xcode. On macOS it links only the existing
+Foundation and Metal system frameworks; Linux builds a refusing stub. This is
+not linked into the shipping worker. Merely building it does not capture anything.
+
+```sh
+python scripts/native_diagnostics/benchmark.py metal-probe \
+  --runner /new/diagnostic-build/vse-provider-diagnostic --output /new/metal-capability
+python scripts/native_diagnostics/benchmark.py metal-capture \
+  --runner /new/diagnostic-build/vse-provider-diagnostic \
+  --artifact /existing/native-model-root --case 0 --mode coreml-gpu-permitted \
+  --output /new/one-frozen-case-metal-evidence
+```
+
+`metal-probe` sets `MTL_CAPTURE_ENABLED=1` before process creation and checks
+`supportsDestination(GPUTraceDocument)`; it does not capture. `metal-capture`
+accepts only a frozen, hash-verified OCR fixture by index, records one cold pass,
+and saves `.gputrace` only to its new evidence directory. Model/tensor bytes can
+be present in that local trace. Each synchronous ORT call is associated with
+model name, exact input/output hashes, PID and UTC/monotonic time windows. Stop on
+any permission error; no alternate permission/cache strategy is attempted.
+
+The selected `MTLCreateSystemDefaultDevice` object may not be the object CoreML
+uses. Missing commands are therefore inconclusive, not proof of CPU execution.
+Conversely, a nonempty trace or submitted command buffer is not by itself proof
+of actual CoreML GPU dispatch. A reviewer must attribute relevant compute commands
+and execution to this prediction, not compilation, another task, or synthetic
+calibration. The report deliberately keeps device-object match, coverage and GPU
+verification unconfirmed. Inspecting the trace requires existing, authorized
+tools; do not install or grant permissions automatically. Capture overhead makes
+**all capture-run timings ineligible for performance comparisons**. Normal probe,
+suite and video processes remove `MTL_CAPTURE_ENABLED`, even if inherited.
+
+See [Apple's programmatic capture contract](https://developer.apple.com/documentation/xcode/capturing-a-metal-workload-programmatically)
+and [command-line GPU trace inspection](https://developer.apple.com/documentation/xcode/debugging-with-interactive-command-line-tools).
 
 The reports deliberately leave `gpu_execution_verified=false` and
 `gpu_speedup=null`; even a manually supplied trace must be reviewed before making

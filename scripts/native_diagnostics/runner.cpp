@@ -1,11 +1,12 @@
 // Diagnostic only. Reuse the exact production pipeline, never its IPC entrypoint.
-// The original source, provider refusal, GUI and release targets remain intact.
+// This frontend does not change production selection, GUI or release targets.
 #define main unused_production_worker_main
 #include "../../native/ocr/worker.cpp"
 #undef main
 #include <dlfcn.h>
 #include <sys/resource.h>
 #include <unordered_map>
+#include "metal_capture.hpp"
 
 namespace diagnostic {
 using Clock = std::chrono::steady_clock;
@@ -21,6 +22,12 @@ size_t trace_sequence = 0, trace_bytes = 0;
 double run_seconds = 0, create_seconds = 0;
 J sessions = J::array(), traces = J::array(), errors = J::array();
 std::unordered_map<const OrtSession *, size_t> session_index;
+J execution_clock() {
+  return {{"utc_unix_ns", std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::system_clock::now().time_since_epoch()).count()},
+          {"steady_clock_ns", std::chrono::duration_cast<std::chrono::nanoseconds>(
+      Clock::now().time_since_epoch()).count()}};
+}
 
 J providers() {
   char **names = nullptr;
@@ -100,16 +107,20 @@ OrtStatus *ORT_API_CALL run(OrtSession *session, const OrtRunOptions *options,
                           const char *const *input_names, const OrtValue *const *inputs,
                           size_t input_count, const char *const *output_names,
                           size_t output_count, OrtValue **outputs) noexcept {
+  const auto run_begin = capture ? execution_clock() : J(nullptr);
   const auto started = Clock::now();
   auto *status = original->Run(session, options, input_names, inputs, input_count,
                                output_names, output_count, outputs);
   run_seconds += seconds(started);
+  const auto run_end = capture ? execution_clock() : J(nullptr);
   if (status || !capture) return status;
   try {
     if (input_count != 1 || output_count != 1)
       throw std::runtime_error("only one-input/one-output OCR models are supported");
     const auto stem = "tensor-" + std::to_string(trace_sequence++);
     traces.push_back({{"model", sessions.at(session_index.at(session)).at("model")},
+                      {"execution_window", {{"worker_pid", getpid()}, {"begin", run_begin},
+                                             {"end", run_end}, {"scope", "synchronous OrtRun"}}},
                       {"input", tensor_file(inputs[0], stem + "-input.f32")},
                       {"output", tensor_file(outputs[0], stem + "-output.f32")}});
     return nullptr;
@@ -175,8 +186,12 @@ int main(int argc, char **argv) {
     if (!original || std::string(OrtGetApiBase()->GetVersionString()) != "1.31.0")
       throw std::runtime_error("diagnostic requires the pinned ORT 1.31.0 runtime");
     api = original;
-    if (argc == 2 && std::string(argv[1]) == "--probe") {
-      std::cout << runtime_info().dump(2) << '\n';
+    if (argc == 2 && (std::string(argv[1]) == "--probe" ||
+                      std::string(argv[1]) == "--probe-metal")) {
+      auto info = runtime_info();
+      if (std::string(argv[1]) == "--probe-metal")
+        info["metal_capture"] = diagnostic_capture::capabilities();
+      std::cout << info.dump(2) << '\n';
       return 0;
     }
     if (argc != 3) throw std::runtime_error("usage: diagnostic REQUEST.json NEW_OUTPUT_DIR | --probe");
@@ -197,6 +212,11 @@ int main(int argc, char **argv) {
     output_dir = fs::absolute(argv[2]);
     if (!fs::create_directory(output_dir)) throw std::runtime_error("output must not exist");
     evidence = request.value("evidence", false);
+    const bool metal_capture = request.value("metal_capture", false);
+    if (metal_capture && (!evidence || request.value("warmup", 0) != 0 ||
+                         request.value("repeats", 0) != 0))
+      throw std::runtime_error("Metal capture is single-pass evidence only, never timed/warmup samples");
+    struct CaptureGuard { ~CaptureGuard() { diagnostic_capture::stop(); } } capture_guard;
     wrapped = *original;
     wrapped.CreateSession = create_session;
     wrapped.Run = run;
@@ -248,6 +268,8 @@ int main(int argc, char **argv) {
       for (int pass = -1 - warmups; pass < repeats; ++pass) {
         // One cold pass, N additional discarded warmups, then N measured passes.
         capture = evidence && pass == -1 - warmups;
+        if (metal_capture && capture)
+          report["metal_capture"] = diagnostic_capture::start(output_dir / "metal-capture.gputrace");
         J result = J::array();
         const double before_run = run_seconds, before_create = create_seconds;
         const auto started = Clock::now();
@@ -259,6 +281,11 @@ int main(int argc, char **argv) {
             // Numerical outputs are captured only in the separate evidence pass.
             result.push_back({{"shape", output.shape}});
           }
+        }
+        if (metal_capture && capture) {
+          diagnostic_capture::stop();
+          report["metal_capture"]["stopped"] = true;
+          report["metal_capture"]["worker_pid"] = getpid();
         }
         J timing = {{"wall_seconds", seconds(started)},
                     {"ort_run_seconds", run_seconds - before_run},

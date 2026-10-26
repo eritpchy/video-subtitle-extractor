@@ -35,6 +35,7 @@ def test_coreml_and_cpu_fallback_are_not_gpu_proof(tmp_path):
     diag.write_json(path, [
         {'cat': 'Node', 'name': 'fused_kernel_time', 'dur': 50, 'args': {'provider': 'CoreMLExecutionProvider'}},
         {'cat': 'Node', 'name': 'shape_kernel_time', 'dur': 10, 'args': {'provider': 'CPUExecutionProvider'}},
+        {'cat': 'Node', 'name': 'fused_fence_before', 'dur': 100, 'args': {'provider': 'CoreMLExecutionProvider'}},
         {'cat': 'Session', 'dur': 1000, 'args': {}}])
     report = diag.profile_evidence(tmp_path, [{'model': 'm.onnx', 'profile': path.name}], 'coreml-gpu-permitted')
     assert report['coreml_ep_execution_observed']
@@ -163,3 +164,46 @@ def test_minimal_runtime_probe_requires_optout_before_dynamic_load():
     assert 'api->GetAvailableProviders' in source
     assert 'CreateEnv(' not in source and 'CreateSession(' not in source
     assert '#include <opencv' not in source.lower()
+
+
+def test_build_provenance_covers_production_provider_helper():
+    source = (diag.HERE / 'benchmark.py').read_text()
+    assert "'production_included_source_sha256'" in source
+    assert "('worker.cpp', 'provider_evidence.hpp')" in source
+
+
+def test_metal_capture_environment_is_explicit_and_never_in_timing(monkeypatch):
+    monkeypatch.setenv('MTL_CAPTURE_ENABLED', '1')
+    monkeypatch.setenv('ORT_DISABLE_TELEMETRY', '0')
+    assert 'MTL_CAPTURE_ENABLED' not in diag.diagnostic_environment()
+    assert diag.diagnostic_environment()['ORT_DISABLE_TELEMETRY'] == '1'
+    assert diag.diagnostic_environment(True)['MTL_CAPTURE_ENABLED'] == '1'
+
+
+def test_metal_capture_is_private_evidence_not_gpu_certification():
+    source = (diag.HERE / 'metal_capture.mm').read_text()
+    assert 'MTLCaptureDestinationGPUTraceDocument' in source
+    assert 'supportsDestination:' in source
+    assert 'descriptor.captureObject = device' in source
+    assert 'descriptor.outputURL' in source
+    assert 'coreml_device_object_match_verified", false' in source
+    assert 'gpu_execution_verified", false' in source
+    assert 'DeveloperTools' not in source and 'xctrace' not in source
+    assert 'system(' not in source and 'chmod' not in source
+    runner = (diag.HERE / 'runner.cpp').read_text()
+    assert 'Metal capture is single-pass evidence only' in runner
+    assert 'request.value("warmup", 0) != 0' in runner
+    assert 'request.value("repeats", 0) != 0' in runner
+    assert 'CaptureGuard' in runner
+    assert '"scope", "synchronous OrtRun"' in runner
+    assert 'metal_capture' not in (diag.ROOT / 'native/ocr/CMakeLists.txt').read_text()
+
+
+def test_metal_capture_missing_capability_refuses_before_output(tmp_path, monkeypatch):
+    monkeypatch.setattr(diag, 'verify_models', lambda _: ({}, {}))
+    monkeypatch.setattr(diag, 'selected_cases', lambda _: ({}, [(0, {})]))
+    monkeypatch.setattr(diag, 'metal_probe', lambda _: {'metal_capture': {'available': False}})
+    args = SimpleNamespace(runner=tmp_path, artifact=tmp_path, case=0, output=tmp_path / 'output')
+    with pytest.raises(ValueError, match='no alternative profiler'):
+        diag.capture_case(args)
+    assert not args.output.exists()

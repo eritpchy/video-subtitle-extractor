@@ -36,6 +36,15 @@ def offline_runtime_environment():
     return dict(os.environ, ORT_DISABLE_TELEMETRY='1')
 
 
+def diagnostic_environment(metal_capture=False):
+    env = offline_runtime_environment()
+    # Even capture-enabled launch overhead must not contaminate normal timings.
+    env.pop('MTL_CAPTURE_ENABLED', None)
+    if metal_capture:
+        env['MTL_CAPTURE_ENABLED'] = '1'
+    return env
+
+
 def digest(path):
     value = hashlib.sha256()
     with Path(path).open('rb') as stream:
@@ -99,7 +108,8 @@ def profile_evidence(directory, sessions, mode='ort-cpu'):
         for event in read_json(path):
             provider = event.get('args', {}).get('provider')
             # ORT kernel events prove EP execution, not the CoreML internal device.
-            if event.get('cat') != 'Node' or not provider:
+            if (event.get('cat') != 'Node' or not provider or
+                    not event.get('name', '').endswith('_kernel_time')):
                 continue
             duration = event.get('dur', 0)
             if not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration < 0:
@@ -213,6 +223,9 @@ def build(args):
     provenance = {'schema_version': 1, 'diagnostic_only': True, 'target': target,
                   'sdk_inputs': sdk_inputs, 'frontend_sources': sources,
                   'production_worker_source_sha256': digest(ROOT / 'native/ocr/worker.cpp'),
+                  'production_included_source_sha256': {
+                      name: digest(ROOT / 'native/ocr' / name)
+                      for name in ('worker.cpp', 'provider_evidence.hpp')},
                   'diagnostic_source_sha256': {p.name: digest(p) for p in HERE.iterdir() if p.is_file()},
                   'commands': commands, 'runtime_rebuilt': False,
                   'opencv_static_archives': [{'path': str(p.resolve()), 'sha256': digest(p)}
@@ -273,7 +286,7 @@ def runtime_probe(args):
 
 def probe(binary):
     result = subprocess.run([str(binary), '--probe'], capture_output=True, text=True, timeout=60, check=True,
-                            env=offline_runtime_environment())
+                            env=diagnostic_environment())
     evidence = json.loads(result.stdout)
     if evidence['ort_version'] != '1.31.0':
         raise ValueError('Unexpected runtime version')
@@ -296,6 +309,16 @@ def probe(binary):
     return evidence
 
 
+def metal_probe(binary):
+    child = subprocess.run([str(binary), '--probe-metal'], capture_output=True, text=True,
+                           timeout=60, check=True, env=diagnostic_environment(True))
+    result = json.loads(child.stdout)
+    result['runtime_integrity'] = verify_runtime(result['loaded_ort_library'])
+    result.update({'runner_sha256': digest(binary), 'gpu_execution_verified': False,
+                   'capture_executed': False, 'permission_changes_attempted': False})
+    return result
+
+
 def execute(binary, root, label, request, timeout):
     request_path, directory = root / (label + '.request.json'), root / label
     write_json(request_path, request)
@@ -304,7 +327,7 @@ def execute(binary, root, label, request, timeout):
         try:
             child = subprocess.run([str(binary), str(request_path), str(directory)],
                                    stdout=log, stderr=subprocess.STDOUT, timeout=timeout,
-                                   env=offline_runtime_environment())
+                                   env=diagnostic_environment(request.get('metal_capture', False)))
             status = child.returncode
         except subprocess.TimeoutExpired:
             return {'status': 'timeout', 'process_wall_seconds': time.monotonic() - started,
@@ -331,6 +354,46 @@ def execute(binary, root, label, request, timeout):
         for key in ('wall_seconds', 'ort_run_seconds', 'lazy_session_seconds'):
             result[key + '_summary'] = summarize([row[key] for row in result['samples']])
     return result
+
+
+def capture_case(args):
+    """One frozen OCR case; capture is separate from every performance run."""
+    binary, artifact = args.runner.resolve(strict=True), args.artifact.resolve(strict=True)
+    models, configs = verify_models(artifact)
+    goldens, cases = selected_cases([args.case])
+    index, case = cases[0]
+    host = metal_probe(binary)
+    if not host.get('metal_capture', {}).get('available'):
+        raise ValueError('Metal capture capability unavailable; no alternative profiler attempted')
+    if args.mode != 'ort-cpu' and 'CoreMLExecutionProvider' not in host['available_providers']:
+        raise ValueError('CoreML EP absent; no CPU substitution')
+    output = new_directory(args.output)
+    request = {'schema_version': 1, 'kind': 'pipeline', 'mode': args.mode,
+               'models': str(artifact / 'models'), 'config': str(artifact / 'config'),
+               'tier': case['tier'], 'rec_model': case['rec_model'], 'images': [case['image']],
+               'threads': args.threads, 'batch_size': args.batch_size, 'timeout_ms': 120000,
+               'evidence': True, 'metal_capture': True, 'warmup': 0, 'repeats': 0}
+    result = execute(binary, output, 'capture', request, args.timeout)
+    report = {'schema_version': 1, 'host': host, 'case_index': index,
+              'fixture_sha256': case['fixture_sha256'], 'models': models, 'configs': configs,
+              'mode': args.mode, 'result': result, 'gpu_execution_verified': False,
+              'timing_eligible': False, 'gpu_speedup': None,
+              'scope': 'Application-local default Metal device capture. CoreML device-object match, '
+                       'command attribution and actual executed GPU dispatch must be independently '
+                       'verified. A trace file, commands submitted, or a CoreML EP profile alone '
+                       'do not certify GPU execution; never use these timings as performance data.'}
+    if result['status'] == 'completed':
+        result['frozen_golden_parity'] = pipeline_parity(result['first_result'], [case['expected']],
+                                                        goldens['confidence_tolerance'])
+        trace = output / result['directory'] / 'metal-capture.gputrace'
+        entries = sorted(trace.rglob('*')) if trace.is_dir() else [trace]
+        if trace.is_symlink() or any(path.is_symlink() for path in entries):
+            raise ValueError('Refusing to read links in captured trace')
+        report['trace_files'] = [{'file': str(path.relative_to(output)), 'sha256': digest(path),
+                                  'bytes': path.stat().st_size} for path in entries if path.is_file()]
+        report['trace_files_present'] = bool(report['trace_files'])
+    write_json(output / 'capture-report.json', report)
+    print(output / 'capture-report.json')
 
 
 def aggregate_runs(runs, input_count=1):
@@ -382,8 +445,7 @@ def suite(args):
               'gpu_execution_verified': False, 'gpu_speedup': None,
               'production_video_end_to_end_seconds': None,
               'scope': 'Configuration performance, not proven GPU acceleration. Frozen OCR inputs and '
-                       'FP32 tensor replay; production accurate mode changes frame-selection algorithm '
-                       'when has_accelerator is true, so that switch is deliberately not used.',
+                       'FP32 tensor replay; no device-dependent frame-selection algorithm change.',
               'precision': {'onnx_dtype': 'FP32 pinned bytes', 'coreml_format': 'MLProgram',
                             'low_precision_accumulation_allowed': False, 'ane_allowed': False,
                             'internal_coreml_precision_verified': False,
@@ -513,6 +575,20 @@ def main(argv=None):
     command.add_argument('--runner', type=Path, required=True)
     command.add_argument('--output', type=Path, required=True)
     command.set_defaults(action=lambda a: write_json(new_directory(a.output) / 'probe.json', probe(a.runner.resolve(strict=True))))
+    command = commands.add_parser('metal-probe', help='Explicit public in-process capture capability check; does not capture')
+    command.add_argument('--runner', type=Path, required=True)
+    command.add_argument('--output', type=Path, required=True)
+    command.set_defaults(action=lambda a: write_json(new_directory(a.output) / 'metal-probe.json', metal_probe(a.runner.resolve(strict=True))))
+    command = commands.add_parser('metal-capture', help='Explicit single frozen-case evidence only; never performance data')
+    command.add_argument('--runner', type=Path, required=True)
+    command.add_argument('--artifact', type=Path, required=True)
+    command.add_argument('--output', type=Path, required=True)
+    command.add_argument('--case', type=int, required=True)
+    command.add_argument('--mode', choices=MODES, required=True)
+    command.add_argument('--threads', type=int, default=4)
+    command.add_argument('--batch-size', type=int, default=6)
+    command.add_argument('--timeout', type=int, default=240)
+    command.set_defaults(action=capture_case)
     command = commands.add_parser('suite', help='Same-host frozen pipeline + tensor tests for all 15 pinned models')
     command.add_argument('--runner', type=Path, required=True)
     command.add_argument('--artifact', type=Path, required=True)
