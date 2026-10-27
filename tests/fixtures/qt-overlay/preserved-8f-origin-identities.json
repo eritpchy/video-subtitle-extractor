@@ -1,0 +1,20 @@
+{
+  "scope": "Bounded identity fields copied from the actual authorized GET responses, not a complete API response",
+  "run": {
+    "id": 40391756697,
+    "head_sha": "8f08e7f6887a950f75cb7967f1f80e344935ecaa",
+    "head_branch": "fix/restore-release-matrix",
+    "run_attempt": 2,
+    "status": "completed",
+    "conclusion": "success"
+  },
+  "job": {
+    "id": 121842501324,
+    "run_id": 40391756697,
+    "run_attempt": 2,
+    "head_sha": "8f08e7f6887a950f75cb7967f1f80e344935ecaa",
+    "status": "completed",
+    "conclusion": "success",
+    "name": "qt-overlay-resources / resources"
+  }
+}

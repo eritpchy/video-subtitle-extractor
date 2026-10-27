@@ -406,8 +406,9 @@ jobs:
           tests/test_coreml_package.py tests/test_native_coreml_adapter.py tests/test_native_shape_evidence.py tests/test_check_native_models.py
           tests/test_native_diagnostics.py tests/test_coreml_e2e_acceptance.py
           tests/test_home_preview_lifecycle.py
-          tests/test_macos_setting_controls.py tests/test_macos_qt_overlay.py tests/test_prepare_macos_qt.py
+          tests/test_macos_setting_controls.py tests/test_macos_setting_control_paint.py tests/test_macos_qt_overlay.py tests/test_prepare_macos_qt.py
           tests/test_package_macos_qt_overlay.py tests/test_qt_overlay_workflow.py
+          tests/test_qt_overlay_resources_ci.py tests/test_qt_preserved_resources_ci.py
           tests/test_windows_runtime_isolation.py tests/test_check_runtime.py
           tests/test_windows_app_local_runtime.py tests/test_windows_os_evidence.py tests/test_windows_native_worker_evidence.py
           tests/test_standalone_runtime_probe.py tests/test_windows_verification.py

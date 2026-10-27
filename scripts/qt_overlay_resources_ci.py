@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Prepare exact prepublication Qt resources on hosted CI, without compiling Qt.
 
-Only one reviewed Actions artifact is accepted. Ordinary source users use the
+The original candidate and preserved final assets are separate, explicit input
+contracts. Neither falls back to the other. Ordinary source users use the
 separate public-release resource path, never this CI-only credentialed helper.
 """
 from __future__ import annotations
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 
@@ -31,6 +34,79 @@ RUN = {'id': 40260642504, 'head_sha': '561de09ed45180362732725d24640862d3fa1ceb'
        'head_branch': 'fix/macos-accessibility', 'repository_id': 342871390,
        'head_repository_id': 342871390}
 ENDPOINT = 'repos/eritpchy/video-subtitle-extractor/actions/artifacts/12624219589'
+
+# The original endpoint returned 404 after expiry on 2026-10-27. Its identity
+# above remains unchanged; the following is a DIFFERENT container of the exact
+# final assets, produced and verified by the successful 8f attempt 2 job.
+PRESERVED_CONTRACT = 'preserved-8f-attempt2'
+PRESERVED_ARTIFACT = {
+    'id': 12688107623,
+    'name': 'qt-overlay-resources-8f08e7f6887a950f75cb7967f1f80e344935ecaa-40391756697-2',
+    'size_in_bytes': 53651264,
+    'digest': 'sha256:f1e47e5ee2e765dc0661d5ae5288435ec5da181d49f998bdd6e2f263580fef65',
+    'expired': False,
+}
+PRESERVED_RUN = {'id': 40391756697, 'head_sha': '8f08e7f6887a950f75cb7967f1f80e344935ecaa',
+                 'head_branch': 'fix/restore-release-matrix', 'repository_id': 342871390,
+                 'head_repository_id': 342871390}
+PRESERVED_ATTEMPT = 2
+PRESERVED_JOB = 121842501324
+PRESERVED_ENDPOINT = 'repos/eritpchy/video-subtitle-extractor/actions/artifacts/12688107623'
+PRESERVED_RUN_ENDPOINT = 'repos/eritpchy/video-subtitle-extractor/actions/runs/40391756697/attempts/2'
+PRESERVED_JOB_ENDPOINT = 'repos/eritpchy/video-subtitle-extractor/actions/jobs/121842501324'
+PRESERVED_ASSETS = {
+    'resource': {'name': 'vse-qt6.12.0-macos-arm64-ax772484-ps6.zip', 'bytes': 2547078,
+                 'sha256': '9ffa26a3ecf5296d9d9eb9841789307e75aa352eafc9539f31ae80e382135441'},
+    'source_resource': {'name': 'vse-qtbase6.12.0-ax772484-ps6-source.tar.xz', 'bytes': 51103812,
+                        'sha256': '5c4df52a68232eac6fb40cc4f09ed93ff92d30c8ab8bf88f245cee6b482238bd'},
+}
+
+
+def _exact_fields(value: dict, expected: dict, label: str) -> None:
+    if not isinstance(value, dict) or any(value.get(k) != v or type(value.get(k)) is not type(v)
+                                          for k, v in expected.items()):
+        raise RuntimeError(f'Fixed preserved input {label} identity mismatch')
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def validate_preserved_metadata(metadata: dict) -> None:
+    sha = PRESERVED_RUN.get('head_sha')
+    if (not isinstance(sha, str) or re.fullmatch(r'[0-9a-f]{40}', sha) is None
+            or type(PRESERVED_RUN.get('id')) is not int or PRESERVED_RUN['id'] <= 0
+            or type(PRESERVED_ATTEMPT) is not int or PRESERVED_ATTEMPT <= 0
+            or PRESERVED_ARTIFACT['name'] != f'qt-overlay-resources-{sha}-{PRESERVED_RUN["id"]}-{PRESERVED_ATTEMPT}'):
+        raise RuntimeError('Preserved source pin must be a complete matching 40-hex SHA/run/attempt')
+    _exact_fields(metadata, PRESERVED_ARTIFACT, 'artifact')
+    _exact_fields(metadata.get('workflow_run'), PRESERVED_RUN, 'workflow')
+    try:
+        expires = datetime.fromisoformat(metadata['expires_at'].replace('Z', '+00:00'))
+    except (KeyError, AttributeError, TypeError, ValueError) as error:
+        raise RuntimeError('Preserved artifact expiry is missing or invalid') from error
+    if expires.tzinfo is None or expires <= utc_now():
+        raise RuntimeError('Preserved artifact is expired or has no timezone')
+
+
+def validate_preserved_origin(run: dict, job: dict) -> None:
+    _exact_fields(run, {'id': PRESERVED_RUN['id'], 'head_sha': PRESERVED_RUN['head_sha'],
+                       'head_branch': PRESERVED_RUN['head_branch'], 'run_attempt': PRESERVED_ATTEMPT,
+                       'status': 'completed', 'conclusion': 'success'}, 'attempt')
+    _exact_fields(job, {'id': PRESERVED_JOB, 'run_id': PRESERVED_RUN['id'],
+                       'run_attempt': PRESERVED_ATTEMPT, 'head_sha': PRESERVED_RUN['head_sha'],
+                       'status': 'completed', 'conclusion': 'success',
+                       'name': 'qt-overlay-resources / resources'}, 'producer job')
+
+
+def current_ci_identity() -> dict:
+    sha, run, attempt = (os.environ.get(k, '') for k in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT'))
+    if (re.fullmatch(r'[0-9a-f]{40}', sha) is None or re.fullmatch(r'[1-9][0-9]*', run) is None
+            or re.fullmatch(r'[1-9][0-9]*', attempt) is None
+            or os.environ.get('GITHUB_REPOSITORY') != 'eritpchy/video-subtitle-extractor'):
+        raise RuntimeError('Actual consumer SHA/run/attempt/repository is required')
+    return {'repository': os.environ['GITHUB_REPOSITORY'], 'commit': sha,
+            'run_id': int(run), 'run_attempt': int(attempt)}
 
 
 def require_hosted_ci() -> None:
@@ -60,7 +136,8 @@ def validate_metadata(metadata: dict) -> None:
 
 def github_to_file(endpoint: str, destination: Path, error_log: Path) -> None:
     """Binary stdout goes straight to a fresh file, never captured into memory."""
-    if endpoint not in (ENDPOINT, ENDPOINT + '/zip'):
+    if endpoint not in (ENDPOINT, ENDPOINT + '/zip', PRESERVED_ENDPOINT, PRESERVED_ENDPOINT + '/zip',
+                        PRESERVED_RUN_ENDPOINT, PRESERVED_JOB_ENDPOINT):
         raise RuntimeError('No alternate artifact endpoint is accepted')
     env = os.environ.copy()
     env.pop('GH_DEBUG', None)
@@ -76,7 +153,7 @@ def github_to_file(endpoint: str, destination: Path, error_log: Path) -> None:
         raise RuntimeError(f'Pinned artifact request failed (exit {result.returncode}); original evidence retained')
 
 
-def prepare(output: Path) -> dict:
+def prepare_original(output: Path) -> dict:
     require_hosted_ci()
     if output.exists() or output.is_symlink():
         raise RuntimeError('Resource output directory must be new')
@@ -151,11 +228,98 @@ def prepare(output: Path) -> dict:
         raise
 
 
+def prepare_preserved(output: Path) -> dict:
+    require_hosted_ci()
+    consumer = current_ci_identity()
+    if output.exists() or output.is_symlink():
+        raise RuntimeError('Resource output directory must be new')
+    output.mkdir(parents=True)
+    reports, inputs = output / 'reports', output / 'inputs'
+    reports.mkdir(); inputs.mkdir()
+    try:
+        policy = overlay.load_policy()
+        for key, expected in PRESERVED_ASSETS.items():
+            _exact_fields(policy.get(key), expected, 'frozen asset policy')
+        if policy.get('production_integration_allowed') is not False:
+            raise RuntimeError('Preserved resource cannot promote production admission')
+        metadata_path = reports / 'artifact-metadata.json'
+        github_to_file(PRESERVED_ENDPOINT, metadata_path, reports / 'metadata.stderr.log')
+        metadata = overlay.read_json(metadata_path)
+        validate_preserved_metadata(metadata)
+        github_to_file(PRESERVED_RUN_ENDPOINT, reports / 'source-attempt.json', reports / 'attempt.stderr.log')
+        github_to_file(PRESERVED_JOB_ENDPOINT, reports / 'source-job.json', reports / 'job.stderr.log')
+        source_run = overlay.read_json(reports / 'source-attempt.json')
+        source_job = overlay.read_json(reports / 'source-job.json')
+        validate_preserved_origin(source_run, source_job)
+        archive = inputs / 'preserved-assets-artifact.zip'
+        github_to_file(PRESERVED_ENDPOINT + '/zip', archive, reports / 'download.stderr.log')
+        digest = PRESERVED_ARTIFACT['digest'].split(':', 1)[1]
+        overlay.check_file(archive, digest, PRESERVED_ARTIFACT['size_in_bytes'])
+        overlay._atomic_json(reports / 'verified-input.json', {
+            'input_contract': PRESERVED_CONTRACT, 'artifact': metadata, 'sha256': digest,
+            'bytes': archive.stat().st_size, 'source_run_attempt': PRESERVED_ATTEMPT,
+            'source_job': PRESERVED_JOB, 'consumer_workflow': consumer,
+            'metadata_sha256': overlay.sha256(metadata_path)})
+        extracted = inputs / 'artifact'
+        archives.extract_archive(archive, extracted, require_single_root=False,
+                                 max_entries=2, max_uncompressed_bytes=64 * 1024 * 1024)
+        snapshot = archives.inventory(extracted)
+        if set(snapshot) != {row['name'] for row in PRESERVED_ASSETS.values()}:
+            raise RuntimeError('Preserved container must have exactly the two fixed assets')
+        overlay._atomic_json(reports / 'extracted-input-inventory.json', snapshot)
+        assets = output / 'assets'; assets.mkdir()
+        for expected in PRESERVED_ASSETS.values():
+            path = extracted / expected['name']
+            overlay.check_file(path, expected['sha256'], expected['bytes'])
+            shutil.copyfile(path, assets / expected['name'])
+            overlay.check_file(assets / expected['name'], expected['sha256'], expected['bytes'])
+        resource = overlay.prepare_resource(assets / policy['resource']['name'],
+                                            output / 'verified-resource', policy=policy)
+        overlay._validate_resource(resource)
+        if archives.inventory(extracted) != snapshot:
+            raise RuntimeError('Preserved input changed during resource verification')
+        overlay.check_file(archive, digest, PRESERVED_ARTIFACT['size_in_bytes'])
+        for expected in PRESERVED_ASSETS.values():
+            overlay.check_file(assets / expected['name'], expected['sha256'], expected['bytes'])
+        receipt = {'schema': 1, 'input_contract': PRESERVED_CONTRACT,
+                   'status': 'exact-prepublication-resources-verified',
+                   'resource_asset': PRESERVED_ASSETS['resource'],
+                   'source_asset': PRESERVED_ASSETS['source_resource'],
+                   'resource_manifest_sha256': policy['resource_manifest_sha256'],
+                   'source_artifact': metadata, 'source_workflow_run': PRESERVED_RUN,
+                   'source_run_attempt': PRESERVED_ATTEMPT, 'source_producer_job': PRESERVED_JOB,
+                   'consumer_workflow': consumer,
+                   'historical_original_contract': {
+                       'artifact': {k: v for k, v in ARTIFACT.items() if k != 'expired'},
+                       'workflow_run': RUN, 'container_supplied_or_requeried': False},
+                   'production_integration_allowed': False,
+                   'scope': 'Preserved exact asset verification only; not original-container recovery, Mac execution, GUI or release approval'}
+        overlay._atomic_json(reports / 'resource-preparation.json', receipt)
+        return receipt
+    except Exception as exc:
+        overlay._atomic_json(reports / 'resource-preparation-failed.json', {
+            'status': 'failed', 'input_contract': PRESERVED_CONTRACT,
+            'exception': type(exc).__name__, 'error': str(exc), 'consumer_workflow': consumer,
+            'production_integration_allowed': False,
+            'scope': 'Input evidence retained; no retry or automatic fallback'})
+        raise
+
+
+def prepare(output: Path, *, input_contract: str = 'original-candidate') -> dict:
+    if input_contract == 'original-candidate':
+        return prepare_original(output)
+    if input_contract == PRESERVED_CONTRACT:
+        return prepare_preserved(output)
+    raise RuntimeError('Unknown explicit Qt resource input contract')
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--input-contract', choices=('original-candidate', PRESERVED_CONTRACT),
+                        default='original-candidate')
     args = parser.parse_args()
-    print(json.dumps(prepare(args.output), indent=2))
+    print(json.dumps(prepare(args.output, input_contract=args.input_contract), indent=2))
 
 
 if __name__ == '__main__':

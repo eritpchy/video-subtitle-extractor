@@ -21,10 +21,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Repackage the exact already-built plugin and complete corresponding source
+      - name: Verify the preserved exact plugin resources and complete corresponding source
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python -I -S scripts/qt_overlay_resources_ci.py --output build/qt-overlay-input
+        run: python -I -S scripts/qt_overlay_resources_ci.py --output build/qt-overlay-input --input-contract preserved-8f-attempt2
       - name: Share only the two fixed public-resource candidate bytes with this run
         uses: actions/upload-artifact@v4
         with:

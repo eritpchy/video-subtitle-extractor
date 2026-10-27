@@ -10,7 +10,7 @@ internals or installing a global accessibility factory.
 import sys
 
 from PySide6 import QtCore, QtGui, QtWidgets
-from qfluentwidgets import isDarkTheme, qconfig, themeColor
+from qfluentwidgets import FluentIcon, Theme, isDarkTheme, qconfig, themeColor
 
 
 class MacSettingComboBox(QtWidgets.QComboBox):
@@ -43,6 +43,35 @@ class MacSettingComboBox(QtWidgets.QComboBox):
         palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, QtGui.QColor("#ffffff"))
         self.setPalette(palette)
         self.view().setPalette(palette)
+        # The Cocoa native bezel need not honor QPalette.
+        # An explicit non-native border makes QStyleSheetStyle paint the full
+        # control. Keep QComboBox event/AX/model semantics and local scope.
+        # Declare selection/disabled colors in QSS too: repolishing must not
+        # restore stale selection colors or overwrite disabled view text.
+        border = "#707070" if dark else "#888888"
+        disabled = "#999999" if dark else "#777777"
+        arrow = FluentIcon.ARROW_DOWN.path(Theme.DARK if dark else Theme.LIGHT)
+        self.setStyleSheet(f"""
+            QComboBox {{
+                color: {foreground.name()}; background-color: {background.name()};
+                selection-color: #ffffff; selection-background-color: {themeColor().name()};
+                border: 1px solid {border}; border-radius: 4px;
+                padding: 5px 28px 5px 10px;
+            }}
+            QComboBox:focus {{ border-color: {themeColor().name()}; }}
+            QComboBox:disabled {{ color: {disabled}; }}
+            QComboBox::drop-down {{
+                subcontrol-origin: padding; subcontrol-position: top right;
+                width: 24px; border: none;
+            }}
+            QComboBox::down-arrow {{ image: url({arrow}); width: 10px; height: 10px; }}
+            QComboBox QAbstractItemView:disabled {{ color: {disabled}; }}
+            QComboBox QAbstractItemView {{
+                color: {foreground.name()}; background-color: {background.name()};
+                selection-color: #ffffff; selection-background-color: {themeColor().name()};
+                border: 1px solid {border};
+            }}
+        """)
 
     def wheelEvent(self, event):
         # Scrolling the settings page must not silently change a preference.
