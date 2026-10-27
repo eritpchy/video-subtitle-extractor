@@ -1,4 +1,5 @@
 import argparse
+import ast
 import errno
 from pathlib import Path
 import subprocess
@@ -12,9 +13,20 @@ from backend.cli import build_parser, extract, parse_area, publish_output
 
 class CliTests(unittest.TestCase):
     def test_version_without_optional_dependencies(self):
-        result = subprocess.run([sys.executable, "-m", "backend.cli", "--version"], capture_output=True, text=True)
+        root = Path(__file__).resolve().parents[1]
+        declarations = ast.parse((root / "backend/config.py").read_text(encoding="utf-8"))
+        version = next(
+            ast.literal_eval(node.value)
+            for node in declarations.body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "VERSION" for target in node.targets)
+        )
+        result = subprocess.run(
+            [sys.executable, "-B", "-S", "-m", "backend.cli", "--version"],
+            cwd=root, capture_output=True, text=True,
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Video Subtitle Extractor 2.3.0", result.stdout)
+        self.assertEqual(f"Video Subtitle Extractor {version}\n", result.stdout)
 
     def test_help_without_optional_dependencies(self):
         result = subprocess.run([sys.executable, "-m", "backend.cli", "--help"], capture_output=True, text=True)
