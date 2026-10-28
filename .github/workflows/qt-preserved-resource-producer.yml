@@ -39,8 +39,11 @@ jobs:
       evidence_artifact_id: ${{ steps.evidence.outputs.artifact-id }}
     env:
       PYTHONDONTWRITEBYTECODE: '1'
-      VSE_QT_PRESERVED_OUTPUT: ${{ runner.temp }}/qt-preserved-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
+      - name: Set private output path after runner allocation
+        shell: bash
+        run: |
+          printf 'VSE_QT_PRESERVED_OUTPUT=%s/qt-preserved-%s-%s\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Exact producer driver checkout
         uses: actions/checkout@v4
         with:

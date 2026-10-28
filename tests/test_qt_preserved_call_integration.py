@@ -35,3 +35,13 @@ def test_main_and_all_model_and_publication_policies_stay_original():
     assert 'acknowledge' not in producer and 'workflow_dispatch:' in producer and 'workflow_call:' in producer
     assert 'preserved-inputs' in producer and 'persist-credentials: false' in producer
     assert 'actions: write' not in producer and 'contents: write' not in producer
+
+def test_runner_path_is_resolved_in_a_step_not_the_server_evaluated_job_env():
+    producer=load('qt-preserved-resource-producer.yml')
+    job_env=producer.split('    env:\n',1)[1].split('    steps:\n',1)[0]
+    assert 'runner.' not in job_env and 'VSE_QT_PRESERVED_OUTPUT' not in job_env
+    initialization=producer.split('      - name: Set private output path after runner allocation\n',1)[1].split('      - name:',1)[0]
+    assert 'shell: bash' in initialization
+    assert '"$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"' in initialization
+    assert 'VSE_QT_PRESERVED_OUTPUT=%s/qt-preserved-%s-%s\\n' in initialization
+    assert 'mkdir' not in initialization  # prepare() must still require a NEW output directory.
