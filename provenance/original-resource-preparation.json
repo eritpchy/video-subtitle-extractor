@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "resource_asset": {
+    "name": "vse-qt6.12.0-macos-arm64-ax772484-ps6.zip",
+    "sha256": "9ffa26a3ecf5296d9d9eb9841789307e75aa352eafc9539f31ae80e382135441",
+    "bytes": 2547078
+  },
+  "source_asset": {
+    "name": "vse-qtbase6.12.0-ax772484-ps6-source.tar.xz",
+    "sha256": "5c4df52a68232eac6fb40cc4f09ed93ff92d30c8ab8bf88f245cee6b482238bd",
+    "bytes": 51103812
+  },
+  "resource_manifest_sha256": "3fe81ba24769e3a2c9a793956ea641995e1dade79d42f45b8809ab47a6180c0d",
+  "production_integration_allowed": false,
+  "status": "exact-prepublication-resources-verified",
+  "source_artifact": {
+    "id": 12624219589,
+    "name": "macos-qt-ax-diagnostic-not-for-release-561de09ed45180362732725d24640862d3fa1ceb",
+    "size_in_bytes": 53736255,
+    "digest": "sha256:25bbdcc961ece4f05bed906df085a66bbab86c1007e086013d17b0a21ab40747",
+    "expired": false
+  },
+  "source_workflow_run": {
+    "id": 40260642504,
+    "head_sha": "561de09ed45180362732725d24640862d3fa1ceb",
+    "head_branch": "fix/macos-accessibility",
+    "repository_id": 342871390,
+    "head_repository_id": 342871390
+  },
+  "scope": "Resource packaging only; no Mac code execution, final GUI or release approval"
+}

@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "kind": "fixed-original-Qt-assets-independent-Git-input",
+  "files": {
+    "assets/vse-qt6.12.0-macos-arm64-ax772484-ps6.zip": {
+      "bytes": 2547078,
+      "sha256": "9ffa26a3ecf5296d9d9eb9841789307e75aa352eafc9539f31ae80e382135441"
+    },
+    "assets/vse-qtbase6.12.0-ax772484-ps6-source.tar.xz": {
+      "bytes": 51103812,
+      "sha256": "5c4df52a68232eac6fb40cc4f09ed93ff92d30c8ab8bf88f245cee6b482238bd"
+    },
+    "provenance/original-resource-build-receipt.json": {
+      "bytes": 534,
+      "sha256": "7d70e40b38ffd6e7de188953ddc9c3b15cdb4d54075189097ec7271c3c3fa19f"
+    },
+    "provenance/original-resource-preparation.json": {
+      "bytes": 1197,
+      "sha256": "34d00698d7824b0cd2daef1b4804ef81b5d78265476f0ac9c46f69063333db46"
+    },
+    "provenance/original8f-attempt2.json": {
+      "bytes": 14655,
+      "sha256": "06c1fbfe42e684f3dea3a723e04a5629af0c308c6a1d3ab604b756a1d0dc4656"
+    },
+    "provenance/original8f-qt-job.json": {
+      "bytes": 2630,
+      "sha256": "0ea6716ed9830d29e445e3cfbb74627cbef28529d0288870573e2b47c034e0c3"
+    }
+  },
+  "historical_origin": {
+    "repository": "eritpchy/video-subtitle-extractor",
+    "run_id": 40391756697,
+    "run_attempt": 2,
+    "job_id": 121842501324,
+    "commit": "8f08e7f6887a950f75cb7967f1f80e344935ecaa",
+    "artifact_id": 12688107623,
+    "outer_sha256": "f1e47e5ee2e765dc0661d5ae5288435ec5da181d49f998bdd6e2f263580fef65",
+    "outer_revalidated_by_new_producer": false,
+    "historical_expiry": "2026-10-27T20:55:03Z"
+  },
+  "scope": "Preserved exact resource/source bytes and historical origin; not a live old artifact, publication, or Mac/GPU acceptance",
+  "production_integration_allowed": false
+}

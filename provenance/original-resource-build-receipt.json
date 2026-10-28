@@ -1,0 +1,15 @@
+{
+  "production_integration_allowed": false,
+  "resource_asset": {
+    "bytes": 2547078,
+    "name": "vse-qt6.12.0-macos-arm64-ax772484-ps6.zip",
+    "sha256": "9ffa26a3ecf5296d9d9eb9841789307e75aa352eafc9539f31ae80e382135441"
+  },
+  "resource_manifest_sha256": "3fe81ba24769e3a2c9a793956ea641995e1dade79d42f45b8809ab47a6180c0d",
+  "schema": 1,
+  "source_asset": {
+    "bytes": 51103812,
+    "name": "vse-qtbase6.12.0-ax772484-ps6-source.tar.xz",
+    "sha256": "5c4df52a68232eac6fb40cc4f09ed93ff92d30c8ab8bf88f245cee6b482238bd"
+  }
+}
