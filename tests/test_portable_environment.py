@@ -572,7 +572,7 @@ def test_opencv_search_selectors_removed_without_erasing_cache_or_data(tmp_path)
     ('linux', 'native', False), ('macos', 'native', False),
 ])
 def test_final_archive_smoke_requires_worker_evidence_only_for_windows_native(tmp_path, monkeypatch, target, profile, required):
-    from scripts import package_release, portable_python, standalone_runtime_probe
+    from scripts import package_release, portable_python, standalone_runtime_probe, windows_os_evidence
     root = tmp_path / 'app'
     (root / 'scripts').mkdir(parents=True)
     shutil.copy2(standalone_runtime_probe.__file__, root / 'scripts/standalone_runtime_probe.py')
@@ -587,6 +587,16 @@ def test_final_archive_smoke_requires_worker_evidence_only_for_windows_native(tm
     monkeypatch.setattr(portable_python, 'launcher_command', lambda *args: ['fixture-launcher'])
     monkeypatch.setattr(standalone_runtime_probe, 'audit_windows_executables', lambda *args: None)
     monkeypatch.setattr(standalone_runtime_probe, 'audit_macos_executables', lambda *args: None)
+    # Exercise Windows routing on every test host. This is an inert archive and
+    # launcher fixture; it must not start the real OS evidence subprocess.
+    monkeypatch.setattr(standalone_runtime_probe.platform, 'system',
+                        lambda: {'windows': 'Windows', 'linux': 'Linux', 'macos': 'Darwin'}[target])
+    baselines = []
+    def baseline(paths=()):
+        assert not paths
+        baselines.append(True)
+        return {'schema': 1, 'registry_modified': False, 'files': [], 'errors': ['unit routing fixture only']}
+    monkeypatch.setattr(windows_os_evidence, 'collect_windows_security_snapshot', baseline)
     deployment_calls = []
     # This fixture has no real executable/ZIP. Actual Mach-O/plist consistency
     # is exercised separately by test_native_package and the parser tests.
@@ -599,11 +609,12 @@ def test_final_archive_smoke_requires_worker_evidence_only_for_windows_native(tm
     assert len(calls) == 1
     assert calls[0]['require_native_workers'] is required
     assert calls[0]['require_isolated'] is (target == 'windows')
+    assert len(baselines) == int(target == 'windows')
 
 
 @pytest.mark.parametrize('profile,required', [('native', True), ('paddle', False)])
 def test_every_windows_launcher_scenario_requires_native_worker_records(tmp_path, monkeypatch, profile, required):
-    from scripts import verify_portable_environment as verifier, standalone_runtime_probe
+    from scripts import verify_portable_environment as verifier, standalone_runtime_probe, windows_os_evidence
     root = tmp_path / 'app'
     (root / 'scripts').mkdir(parents=True)
     shutil.copy2(standalone_runtime_probe.__file__, root / 'scripts/standalone_runtime_probe.py')
@@ -619,6 +630,13 @@ def test_every_windows_launcher_scenario_requires_native_worker_records(tmp_path
     monkeypatch.setattr(verifier, 'audit_windows_executables', lambda *args: None)
     monkeypatch.setattr(verifier, 'check_environment_evidence', lambda *args: None)
     monkeypatch.setattr(verifier.subprocess, 'run', lambda *args, **kwargs: None)
+    monkeypatch.setattr(standalone_runtime_probe.platform, 'system', lambda: 'Windows')
+    baselines = []
+    def baseline(paths=()):
+        assert not paths
+        baselines.append(True)
+        return {'schema': 1, 'registry_modified': False, 'files': [], 'errors': ['unit routing fixture only']}
+    monkeypatch.setattr(windows_os_evidence, 'collect_windows_security_snapshot', baseline)
     calls = []
     def summarize(*args, **kwargs):
         calls.append(kwargs)
@@ -628,6 +646,7 @@ def test_every_windows_launcher_scenario_requires_native_worker_records(tmp_path
     assert report['result'] == 'passed'
     assert len(calls) == len(verifier.SCENARIOS)
     assert all(call['require_native_workers'] is required and call['require_isolated'] for call in calls)
+    assert len(baselines) == len(verifier.SCENARIOS)
 
 
 @pytest.mark.parametrize('foreign', [False, True])
