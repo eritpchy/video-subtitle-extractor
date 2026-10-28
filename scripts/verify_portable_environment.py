@@ -304,7 +304,10 @@ def verify_archive(archive: Path, output: Path) -> dict:
                     audit = evidence / 'dependency-isolation'
                     # Prepare exact trusted hooks, but deliberately do NOT add their
                     # PYTHONPATH to the launch env: real contamination must hit -I.
-                    audit_environment(root, audit)
+                    if manifest['platform'] == 'windows':
+                        audit_environment(root, audit, capture_windows_security=True)
+                    else:
+                        audit_environment(root, audit)
                     if manifest['platform'] == 'windows':
                         audit_windows_executables(root, root / manifest['runtime_python'], audit)
                     elif manifest['platform'] == 'macos':

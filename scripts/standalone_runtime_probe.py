@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import atexit
 import ctypes
+import hashlib
 import json
 import ntpath
 import os
@@ -19,6 +20,7 @@ import re
 import sys
 import struct
 import threading
+import time
 
 
 def _normal(path: str, system: str) -> str:
@@ -196,6 +198,7 @@ def loaded_images() -> list[str]:
 
 HOOK_STARTUP = b'from standalone_runtime_probe import install_probe\ninstall_probe()\n'
 _NATIVE_WORKER_AUDIT = None
+_WINDOWS_SECURITY_BASELINES = {}
 
 
 def record_native_worker(pid: int, executable: Path, phase: str) -> None:
@@ -298,7 +301,7 @@ def _trusted_hooks(bundle_root: Path, report_dir: Path) -> dict[str, tuple[Path,
     }
 
 
-def audit_environment(bundle_root: Path, report_dir: Path) -> dict[str, str]:
+def audit_environment(bundle_root: Path, report_dir: Path, *, capture_windows_security: bool = False) -> dict[str, str]:
     """Return overrides for a sanitized subprocess environment, not host PATH."""
     bundle_root, report_dir = bundle_root.resolve(), report_dir.resolve()
     trusted = _trusted_hooks(bundle_root, report_dir)
@@ -309,6 +312,22 @@ def audit_environment(bundle_root: Path, report_dir: Path) -> dict[str, str]:
     hooks.mkdir(mode=0o700)  # Never reuse potentially stale/symlinked hook files.
     for path, contents in trusted.values():
         path.write_bytes(contents)
+    if capture_windows_security and platform.system() == 'Windows':
+        try:
+            from .windows_os_evidence import collect_windows_security_snapshot
+        except ImportError:
+            from windows_os_evidence import collect_windows_security_snapshot
+        started = time.monotonic_ns()
+        snapshot = collect_windows_security_snapshot()
+        record = {'schema': 1, 'phase': 'before_workloads', 'bundle_root': str(bundle_root),
+                  'report_dir': str(report_dir), 'started_ns': started,
+                  'finished_ns': time.monotonic_ns(), 'snapshot': snapshot}
+        raw = (json.dumps(record, indent=2) + '\n').encode('utf-8')
+        with (report_dir / 'windows-defender-before.json').open('xb') as stream:
+            stream.write(raw)
+        # The verifier retains the binding; children cannot supply another
+        # baseline merely by placing a plausible JSON file in the report dir.
+        _WINDOWS_SECURITY_BASELINES[str(report_dir)] = (str(bundle_root), hashlib.sha256(raw).hexdigest(), record['finished_ns'])
     return {'PYTHONPATH': str(hooks), 'PYTHONNOUSERSITE': '1', 'PYTHONDONTWRITEBYTECODE': '1',
             'VSE_RUNTIME_AUDIT_ROOT': str(bundle_root), 'VSE_RUNTIME_AUDIT_REPORTS': str(report_dir)}
 
@@ -396,14 +415,31 @@ def summarize_reports(bundle_root: Path, report_dir: Path, required_modules: tup
     seen_modules: set[str] = set()
     component_proofs = {}
     observed_components = []
+    baseline = None
+    binding = _WINDOWS_SECURITY_BASELINES.get(str(report_dir.resolve()))
+    if binding is not None:
+        try:
+            baseline_path = report_dir / 'windows-defender-before.json'
+            if baseline_path.is_symlink():
+                raise ValueError('Before-workload snapshot is a symlink')
+            raw = baseline_path.read_bytes()
+            data = json.loads(raw)
+            if (binding[0] != root or hashlib.sha256(raw).hexdigest() != binding[1]
+                    or data.get('schema') != 1 or data.get('phase') != 'before_workloads'
+                    or data.get('bundle_root') != root or data.get('report_dir') != str(report_dir.resolve())
+                    or not 0 < data['started_ns'] <= data['finished_ns'] == binding[2] <= time.monotonic_ns()):
+                raise ValueError('Before-workload snapshot does not match this verifier audit')
+            baseline = data['snapshot']
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            errors.append('Invalid before-workload Windows security evidence: ' + str(error))
     # Defender injection is not an application dependency. Likewise, two
     # undocumented exact OS names require actual signed-OS evidence, not a
     # filename-only exemption. Collect once after workloads (never per poll),
     # retain raw proof, and keep the static PE allowlist unchanged.
     try:
-        from .windows_os_evidence import CANDIDATE_NAMES, collect_windows_os_evidence, classify_loaded_windows_component
+        from .windows_os_evidence import CANDIDATE_NAMES, collect_windows_os_evidence, collect_windows_security_snapshot, classify_loaded_windows_component, classify_defender_registration_transition
     except ImportError:
-        from windows_os_evidence import CANDIDATE_NAMES, collect_windows_os_evidence, classify_loaded_windows_component
+        from windows_os_evidence import CANDIDATE_NAMES, collect_windows_os_evidence, collect_windows_security_snapshot, classify_loaded_windows_component, classify_defender_registration_transition
     candidates = {}
     for report in reports:
         if report['system'] != 'Windows':
@@ -415,11 +451,20 @@ def summarize_reports(bundle_root: Path, report_dir: Path, required_modules: tup
                 candidates.setdefault(key, path)
     if candidates:
         try:
-            proof = collect_windows_os_evidence(list(candidates.values()))
+            proof = (collect_windows_security_snapshot(list(candidates.values())) if binding is not None
+                     else collect_windows_os_evidence(list(candidates.values())))
         except (OSError, ValueError, RuntimeError) as error:
             proof = {'schema': 1, 'errors': [f'{type(error).__name__}: {error}'], 'files': []}
         (report_dir / 'windows-os-security-evidence.json').write_text(json.dumps(proof, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         component_proofs = {key: classify_loaded_windows_component(path, proof) for key, path in candidates.items()}
+        if baseline is not None:
+            for key, path in candidates.items():
+                if not component_proofs[key]['allowed'] and ntpath.basename(key) == 'mpoav.dll':
+                    transition = classify_defender_registration_transition(path, baseline, proof)
+                    if transition['allowed']:
+                        component_proofs[key] = transition
+                    else:
+                        component_proofs[key]['transition_rejection'] = transition['reason']
     app_local_expected = None
     if require_isolated and (bundle_root / 'runtime/windows-app-local-runtime.json').is_file():
         try:
@@ -491,6 +536,7 @@ def summarize_reports(bundle_root: Path, report_dir: Path, required_modules: tup
                'observed_os_security_components': observed_components,
                'unverified_os_security_components': [entry for entry in component_proofs.values() if not entry.get('allowed')],
                'os_security_evidence_file': 'windows-os-security-evidence.json' if candidates else None,
+               'defender_before_workload_evidence_file': 'windows-defender-before.json' if binding is not None else None,
                'scope': ('Loaded Python process libraries plus Windows native OCR worker first-inference/pre-close snapshots and on-disk hashes; not process-memory or lifetime certification'
                          if native_workers else 'Loaded Python process libraries; non-Python executables require separate native audit')}
     (report_dir / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')

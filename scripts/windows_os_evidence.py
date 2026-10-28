@@ -93,7 +93,7 @@ try {
         if (-not $value -or $value -notmatch '^[A-Za-z]:\\') { throw 'Missing/nonlocal OS KnownFolder root' }
     }
 } catch { $result.errors += $_.Exception.Message }
-if (@($request.paths | Where-Object { [IO.Path]::GetFileName($_) -ieq 'MpOav.dll' }).Count) {
+if ($request.include_registered_defender -eq $true -or @($request.paths | Where-Object { [IO.Path]::GetFileName($_) -ieq 'MpOav.dll' }).Count) {
     $hive = $null; $providers = $null
     try {
         $hive = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
@@ -127,7 +127,21 @@ if (@($request.paths | Where-Object { [IO.Path]::GetFileName($_) -ieq 'MpOav.dll
         if ($null -ne $hive) { $hive.Dispose() }
     }
 }
-foreach ($requested in $request.paths) {
+$paths = @($request.paths)
+if ($request.include_registered_defender -eq $true) {
+    # Only the exact native Defender CLSID, never arbitrary provider files.
+    try {
+        $defender = @($result.amsi_providers | Where-Object { $_.clsid -ieq '{2781761E-28E0-4109-99FE-B9D127C57AFE}' })
+        if ($result.amsi_errors.Count -or $defender.Count -ne 1 -or $defender[0].errors.Count) { throw 'No unique readable native Defender provider' }
+        $registered = $defender[0].inproc_path
+        if ([IO.Path]::GetFileName($registered) -ine 'MpOav.dll' -or -not (Allowed-Layout $registered)) { throw 'Registered Defender file is outside its exact layout' }
+        $paths += $registered
+    } catch { $result.amsi_errors += $_.Exception.Message }
+}
+$seenPaths = @{}
+foreach ($requested in $paths) {
+    if ($seenPaths.ContainsKey($requested)) { continue }
+    $seenPaths[$requested] = $true
     $record = [ordered]@{requested_path=$requested; canonical_path=$null; errors=@()}
     try {
         if ($result.errors.Count) { throw 'OS root evidence is unavailable' }
@@ -180,12 +194,15 @@ def _canonical_path(path: str) -> str:
     return resolved
 
 
-def _collect(paths: list[str], timeout: float) -> dict:
+def _collect(paths: list[str], timeout: float, *, include_registered_defender: bool = False) -> dict:
     windows = _windows_directory()
     executable = ntpath.join(windows, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
     command = [executable, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', POWERSHELL_COLLECTOR]
     # No shell, credential access, execution-policy override or path lookup.
-    result = subprocess.run(command, input=json.dumps({'paths': paths}), text=True,
+    request = {'paths': paths}
+    if include_registered_defender:
+        request['include_registered_defender'] = True
+    result = subprocess.run(command, input=json.dumps(request), text=True,
                             encoding='utf-8', errors='strict', capture_output=True,
                             timeout=timeout, check=False)
     if result.returncode:
@@ -203,6 +220,14 @@ def _collect(paths: list[str], timeout: float) -> dict:
     except (OSError, ValueError) as error:
         evidence.setdefault('errors', []).append('OS root canonicalization failed: ' + str(error))
     requested = {_identity(path) for path in paths}
+    if include_registered_defender:
+        providers = [p for p in evidence.get('amsi_providers', [])
+                     if p.get('clsid', '').upper() == DEFENDER_PROVIDER_CLSID]
+        if len(providers) == 1 and not providers[0].get('errors'):
+            requested.add(_identity(providers[0]['inproc_path']))
+        observed = [_identity(row['requested_path']) for row in evidence['files']]
+        if len(set(observed)) != len(observed) or set(observed) - requested:
+            raise RuntimeError('Unexpected or duplicate security snapshot file row')
     for row in evidence['files']:
         if row.get('canonical_path') and not row.get('errors'):
             try:
@@ -272,43 +297,74 @@ def collect_windows_os_evidence(paths, *, timeout: float = 60) -> dict:
     return WindowsOSEvidenceCollector(timeout=timeout).collect(paths)
 
 
+def collect_windows_security_snapshot(paths=(), *, timeout: float = 60) -> dict:
+    """Fresh native HKLM Defender registration plus its authenticated file.
+
+    Called before workloads and once after them, never by a process poll. The
+    exact registered Defender file is the only additional inspection target.
+    """
+    if not 0 < timeout <= 120:
+        raise ValueError('OS evidence timeout must be in (0, 120] seconds')
+    requested = {}
+    for path in paths:
+        key = _identity(str(path))
+        if ntpath.basename(key) not in CANDIDATE_NAMES:
+            raise ValueError('Not a supported OS evidence candidate')
+        requested.setdefault(key, str(path))
+    if len(requested) > 32:
+        raise ValueError('Too many Windows OS evidence paths')
+    try:
+        return _collect(list(requested.values()), timeout, include_registered_defender=True)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        return {'schema': 1, 'files': [], 'errors': [f'{type(error).__name__}: {error}'],
+                'registry_modified': False}
+
+
+def _checked_file_evidence(path: str, evidence: dict):
+    """Shared unchanged file, layout-root, hash and publisher checks."""
+    target = _identity(path)
+    name = ntpath.basename(target)
+    if name not in CANDIDATE_NAMES:
+        raise ValueError('Not an exact supported OS evidence name')
+    if evidence.get('schema') != 1 or evidence.get('errors') or evidence.get('registry_modified') is not False:
+        raise ValueError('Missing/failed read-only collector evidence')
+    roots = evidence.get('roots', {})
+    windows = _identity(roots.get('windows', ''))
+    if windows != _identity(evidence.get('windows_directory_api', '')):
+        raise ValueError('OS root evidence mismatch')
+    if _identity(roots.get('system32', '')) != ntpath.join(windows, 'system32'):
+        raise ValueError('Invalid native System32 evidence')
+    rows = [row for row in evidence.get('files', []) if _identity(row.get('requested_path', '')) == target]
+    if len(rows) != 1 or rows[0].get('errors'):
+        raise ValueError('Missing/ambiguous/failed file evidence')
+    row = rows[0]
+    if row.get('reparse_verified') is not True:
+        raise ValueError('Missing file/ancestor reparse-point verification')
+    if _identity(row.get('canonical_path', '')) != target:
+        raise ValueError('Loaded file and canonical evidence path differ')
+    digest = row.get('sha256_before', '')
+    if not _SHA256.fullmatch(digest) or digest.lower() != str(row.get('sha256_after', '')).lower():
+        raise ValueError('Missing or unstable file hash')
+    signature = row.get('signature', {})
+    signer = signature.get('signer') or {}
+    if (signature.get('status') != 'Valid' or signature.get('signature_type') not in ('Authenticode', 'Catalog')
+            or signer.get('simple_name') not in MICROSOFT_SIGNERS
+            or not re.search(r'(?:^|,\s*)O=Microsoft Corporation(?:,|$)', signer.get('subject', ''))
+            or not signer.get('issuer') or not signer.get('thumbprint')):
+        raise ValueError('No valid authenticated Microsoft publisher evidence')
+    original = row.get('version_info', {}).get('original_filename', '')
+    if not isinstance(original, str) or ntpath.basename(original).lower() != name:
+        raise ValueError('Signed original filename does not match the exact observed component')
+    return target, name, roots, row
+
+
 def classify_loaded_windows_component(path: str, evidence: dict) -> dict:
     """Pure fail-closed classification, NEVER permission for a static PE import."""
     denied = {'allowed': False, 'category': None, 'path': path}
     try:
-        target = _identity(path)
-        name = ntpath.basename(target)
-        if name not in CANDIDATE_NAMES:
-            raise ValueError('Not an exact supported OS evidence name')
-        if evidence.get('schema') != 1 or evidence.get('errors') or evidence.get('registry_modified') is not False:
-            raise ValueError('Missing/failed read-only collector evidence')
-        roots = evidence.get('roots', {})
-        windows = _identity(roots.get('windows', ''))
-        if windows != _identity(evidence.get('windows_directory_api', '')):
-            raise ValueError('OS root evidence mismatch')
-        if _identity(roots.get('system32', '')) != ntpath.join(windows, 'system32'):
-            raise ValueError('Invalid native System32 evidence')
-        rows = [row for row in evidence.get('files', []) if _identity(row.get('requested_path', '')) == target]
-        if len(rows) != 1 or rows[0].get('errors'):
-            raise ValueError('Missing/ambiguous/failed file evidence')
-        row = rows[0]
-        if row.get('reparse_verified') is not True:
-            raise ValueError('Missing file/ancestor reparse-point verification')
-        if _identity(row.get('canonical_path', '')) != target:
-            raise ValueError('Loaded file and canonical evidence path differ')
-        digest = row.get('sha256_before', '')
-        if not _SHA256.fullmatch(digest) or digest.lower() != str(row.get('sha256_after', '')).lower():
-            raise ValueError('Missing or unstable file hash')
-        signature = row.get('signature', {})
-        signer = signature.get('signer') or {}
-        if (signature.get('status') != 'Valid' or signature.get('signature_type') not in ('Authenticode', 'Catalog')
-                or signer.get('simple_name') not in MICROSOFT_SIGNERS
-                or not re.search(r'(?:^|,\s*)O=Microsoft Corporation(?:,|$)', signer.get('subject', ''))
-                or not signer.get('issuer') or not signer.get('thumbprint')):
-            raise ValueError('No valid authenticated Microsoft publisher evidence')
-        original = row.get('version_info', {}).get('original_filename', '')
-        if not isinstance(original, str) or ntpath.basename(original).lower() != name:
-            raise ValueError('Signed original filename does not match the exact observed component')
+        target, name, roots, row = _checked_file_evidence(path, evidence)
+        signature = row["signature"]
+        digest = row["sha256_before"]
         if name in SIGNED_OS_NAMES:
             if ntpath.dirname(target) != _identity(roots['system32']) or signature.get('is_os_binary') is not True:
                 raise ValueError('Not an OS-signed exact System32 component')
@@ -332,5 +388,58 @@ def classify_loaded_windows_component(path: str, evidence: dict) -> dict:
             category = 'registered_microsoft_defender_amsi_provider'
         return {'allowed': True, 'category': category, 'path': path, 'sha256': digest.lower(),
                 'scope': 'Loaded-process OS/security component only; not a bundled application dependency'}
+    except (ValueError, KeyError, TypeError, AttributeError) as error:
+        return dict(denied, reason=str(error))
+
+
+def classify_defender_registration_transition(path: str, before: dict, after: dict) -> dict:
+    """Only a proven forward registration change during this audit can qualify.
+
+    The caller must authenticate the before-workload snapshot against its own
+    in-memory audit record. A signed old DLL and a new registry value alone are
+    insufficient. Both original snapshots remain intact in the raw evidence.
+    """
+    denied = {'allowed': False, 'category': None, 'path': path}
+    try:
+        target, name, roots, row = _checked_file_evidence(path, after)
+        if name != 'mpoav.dll' or after.get('amsi_errors'):
+            raise ValueError('Not a readable Defender registration transition')
+        if not classify_loaded_windows_component(path, before)['allowed']:
+            raise ValueError('Loaded file was not authenticated and exactly registered before workloads')
+        _, _, before_roots, old = _checked_file_evidence(path, before)
+        for key in ('windows', 'system32', 'program_data', 'program_files'):
+            if _identity(roots[key]) != _identity(before_roots[key]):
+                raise ValueError('OS roots changed between snapshots')
+        if old['sha256_before'].lower() != row['sha256_before'].lower():
+            raise ValueError('Previously registered loaded file changed during workloads')
+        providers = [p for p in after.get('amsi_providers', [])
+                     if p.get('clsid', '').upper() == DEFENDER_PROVIDER_CLSID]
+        before_providers = [p for p in before.get('amsi_providers', [])
+                            if p.get('clsid', '').upper() == DEFENDER_PROVIDER_CLSID]
+        if len(providers) != 1 or len(before_providers) != 1:
+            raise ValueError('Ambiguous Defender provider registration')
+        registered = providers[0]['inproc_path']
+        current = classify_loaded_windows_component(registered, after)
+        if not current['allowed'] or _identity(registered) == target:
+            raise ValueError('No authenticated distinct current Defender registration')
+        _, _, _, new = _checked_file_evidence(registered, after)
+        platform = ntpath.join(_identity(roots['program_data']), 'microsoft', 'windows defender', 'platform')
+        versions = []
+        for filename, entry in ((path, old), (path, row), (registered, new)):
+            parent = ntpath.dirname(_identity(filename))
+            directory = ntpath.basename(parent)
+            if ntpath.dirname(parent) != platform or not _VERSION_DIRECTORY.fullmatch(directory):
+                raise ValueError('Transition requires exact versioned Defender platform siblings')
+            product_version = directory.rsplit('-', 1)[0]
+            if entry.get('version_info', {}).get('product_version') != product_version:
+                raise ValueError('Authenticated file product version differs from its platform directory')
+            versions.append(tuple(int(part) for part in re.split(r'[.-]', directory)))
+        if not versions[0] == versions[1] < versions[2]:
+            raise ValueError('Not a strict forward Defender platform registration transition')
+        return {'allowed': True, 'category': 'observed_defender_amsi_registration_transition',
+                'path': path, 'sha256': row['sha256_before'].lower(),
+                'registered_before': before_providers[0]['inproc_path'],
+                'registered_after': registered, 'registered_after_sha256': current['sha256'],
+                'scope': 'This audit only: exact before registration, stable loaded-file bytes, authenticated forward registration change; not a static dependency exemption'}
     except (ValueError, KeyError, TypeError, AttributeError) as error:
         return dict(denied, reason=str(error))

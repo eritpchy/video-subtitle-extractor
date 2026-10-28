@@ -453,7 +453,10 @@ def verify_bundle(archive_path: Path, smoke: bool) -> None:
                 except ImportError:
                     from standalone_runtime_probe import audit_environment, summarize_reports, audit_windows_executables, audit_macos_executables
                 isolation_reports = evidence / 'dependency-isolation'
-                env.update(audit_environment(root, isolation_reports))
+                if manifest['platform'] == 'windows':
+                    env.update(audit_environment(root, isolation_reports, capture_windows_security=True))
+                else:
+                    env.update(audit_environment(root, isolation_reports))
                 if manifest['platform'] == 'windows':
                     audit_windows_executables(root, python, isolation_reports)
                 elif manifest['platform'] == 'macos':

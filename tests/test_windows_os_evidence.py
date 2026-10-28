@@ -2,7 +2,9 @@
 import copy
 import json
 import ntpath
+from pathlib import Path
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -207,3 +209,186 @@ def test_malformed_collector_output_fails_closed(monkeypatch):
     result = evidence.collect_windows_os_evidence([SYSTEM_DLL])
     assert result['files'][0]['errors']
     assert not evidence.classify_loaded_windows_component(SYSTEM_DLL, result)['allowed']
+
+
+NEW_DEFENDER = DEFENDER.replace('4.18.25090.11-0', '4.18.25100.4-0')
+
+
+def transition_pair():
+    before = proof()
+    before['files'][0]['version_info']['product_version'] = '4.18.25090.11'
+    after = proof(NEW_DEFENDER)
+    after['amsi_providers'][0]['inproc_path'] = NEW_DEFENDER
+    after['files'][0]['version_info']['product_version'] = '4.18.25100.4'
+    after['files'][0]['sha256_before'] = after['files'][0]['sha256_after'] = 'b' * 64
+    after['files'].append(copy.deepcopy(before['files'][0]))
+    return before, after
+
+
+def test_proven_registration_transition_does_not_rewrite_either_original_snapshot():
+    before, after = transition_pair()
+    originals = copy.deepcopy((before, after))
+    # Reproduce the original post-workload-only failure first.
+    assert not evidence.classify_loaded_windows_component(DEFENDER, after)['allowed']
+    result = evidence.classify_defender_registration_transition(DEFENDER, before, after)
+    assert result['allowed'] and result['category'] == 'observed_defender_amsi_registration_transition'
+    assert result['sha256'] == 'a' * 64 and result['registered_after_sha256'] == 'b' * 64
+    assert result['registered_before'] == DEFENDER and result['registered_after'] == NEW_DEFENDER
+    assert (before, after) == originals
+
+
+@pytest.mark.parametrize('change', [
+    'before-already-new', 'no-before-provider', 'invalid-before-signature', 'before-registry-error',
+    'old-file-changed', 'old-file-unstable', 'old-file-unsigned', 'old-file-reparse',
+    'no-current-file', 'current-unsigned', 'current-hash-unstable', 'current-provider-error',
+    'current-registry-error', 'duplicate-current-provider', 'duplicate-before-provider',
+    'duplicate-old-file', 'wrong-roots', 'missing-before-version', 'wrong-old-version',
+    'wrong-new-version', 'backward-version', 'unchanged-registration', 'wrong-name',
+])
+def test_transition_requires_exact_before_registration_and_both_authenticated_stable_files(change):
+    before, after = transition_pair()
+    old, new = after['files'][1], after['files'][0]
+    path = DEFENDER
+    if change == 'before-already-new': before = copy.deepcopy(after)
+    elif change == 'no-before-provider': before['amsi_providers'] = []
+    elif change == 'invalid-before-signature': before['files'][0]['signature']['status'] = 'UnknownError'
+    elif change == 'before-registry-error': before['amsi_errors'] = ['unreadable']
+    elif change == 'old-file-changed': old['sha256_before'] = old['sha256_after'] = 'c' * 64
+    elif change == 'old-file-unstable': old['sha256_after'] = 'c' * 64
+    elif change == 'old-file-unsigned': old['signature']['status'] = 'NotSigned'
+    elif change == 'old-file-reparse': old['reparse_verified'] = False
+    elif change == 'no-current-file': after['files'].remove(new)
+    elif change == 'current-unsigned': new['signature']['status'] = 'NotSigned'
+    elif change == 'current-hash-unstable': new['sha256_after'] = 'c' * 64
+    elif change == 'current-provider-error': after['amsi_providers'][0]['errors'] = ['unreadable']
+    elif change == 'current-registry-error': after['amsi_errors'] = ['unreadable']
+    elif change == 'duplicate-current-provider': after['amsi_providers'].append(copy.deepcopy(after['amsi_providers'][0]))
+    elif change == 'duplicate-before-provider': before['amsi_providers'].append(copy.deepcopy(before['amsi_providers'][0]))
+    elif change == 'duplicate-old-file': after['files'].append(copy.deepcopy(old))
+    elif change == 'wrong-roots': before['roots']['program_files'] = r'D:\Program Files'
+    elif change == 'missing-before-version': before['files'][0]['version_info'].pop('product_version')
+    elif change == 'wrong-old-version': old['version_info']['product_version'] = '4.18.25100.4'
+    elif change == 'wrong-new-version': new['version_info']['product_version'] = '4.18.25090.11'
+    elif change == 'backward-version':
+        before, after = transition_pair()
+        path = NEW_DEFENDER
+        before = copy.deepcopy(after)
+        before['amsi_providers'][0]['inproc_path'] = NEW_DEFENDER
+        after['amsi_providers'][0]['inproc_path'] = DEFENDER
+    elif change == 'unchanged-registration': after['amsi_providers'][0]['inproc_path'] = DEFENDER
+    elif change == 'wrong-name': path = SYSTEM_DLL
+    assert not evidence.classify_defender_registration_transition(path, before, after)['allowed'], change
+
+
+def test_registered_snapshot_is_bounded_and_uses_the_same_native_read_only_collector(monkeypatch):
+    calls = []
+    monkeypatch.setattr(evidence, '_windows_directory', lambda: r'C:\Windows')
+    monkeypatch.setattr(evidence, '_canonical_path', lambda path: path)
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout=json.dumps(proof()), stderr='')
+    monkeypatch.setattr(evidence.subprocess, 'run', run)
+    result = evidence.collect_windows_security_snapshot(timeout=7)
+    assert evidence.classify_loaded_windows_component(DEFENDER, result)['allowed']
+    command, kwargs = calls[0]
+    assert command[0] == r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+    assert json.loads(kwargs['input']) == {'paths': [], 'include_registered_defender': True}
+    assert kwargs['timeout'] == 7 and not kwargs.get('shell', False)
+    assert 'Only the exact native Defender CLSID' in command[-1]
+
+
+@pytest.mark.parametrize('change', ['extra-row', 'duplicate-row', 'timeout', 'unsupported-name', 'too-many'])
+def test_registered_snapshot_rejects_unexpected_rows_and_unbounded_inputs(monkeypatch, change):
+    monkeypatch.setattr(evidence, '_windows_directory', lambda: r'C:\Windows')
+    monkeypatch.setattr(evidence, '_canonical_path', lambda path: path)
+    data = proof()
+    if change == 'extra-row': data['files'].append(proof(SYSTEM_DLL)['files'][0])
+    if change == 'duplicate-row': data['files'].append(copy.deepcopy(data['files'][0]))
+    monkeypatch.setattr(evidence.subprocess, 'run', lambda *a, **k: SimpleNamespace(returncode=0, stdout=json.dumps(data), stderr=''))
+    if change in ('extra-row', 'duplicate-row'):
+        assert evidence.collect_windows_security_snapshot()['errors']
+    else:
+        with pytest.raises(ValueError):
+            if change == 'timeout': evidence.collect_windows_security_snapshot(timeout=121)
+            elif change == 'unsupported-name': evidence.collect_windows_security_snapshot([r'C:\Windows\System32\vcruntime140.dll'])
+            else: evidence.collect_windows_security_snapshot([fr'C:\folder{i}\MpOav.dll' for i in range(33)])
+
+
+def audit_fixture(tmp_path):
+    from scripts import standalone_runtime_probe as probe
+    bundle, directory = tmp_path / 'bundle', tmp_path / 'reports'
+    (bundle / 'scripts').mkdir(parents=True)
+    (bundle / 'scripts/standalone_runtime_probe.py').write_bytes(Path(probe.__file__).read_bytes())
+    return probe, bundle, directory
+
+
+def write_audit_process(bundle, directory):
+    record = {'pid': 1, 'system': 'Windows', 'executable': str(bundle / 'runtime/python.exe'),
+              'prefix': str(bundle / 'runtime'), 'images': [DEFENDER], 'snapshots': 1,
+              'probe_errors': [], 'windows_root': r'C:\Windows', 'modules': {}, 'argv': ['gui.py']}
+    (directory / 'process-1.json').write_text(json.dumps(record))
+
+
+def test_verifier_binds_before_snapshot_prior_to_workloads_and_preserves_both_raw_snapshots(tmp_path, monkeypatch):
+    probe, bundle, directory = audit_fixture(tmp_path)
+    before, after = transition_pair()
+    calls = []
+    def snapshot(paths=()):
+        calls.append(list(paths))
+        assert (directory / 'process-1.json').exists() == bool(paths)
+        return copy.deepcopy(after if paths else before)
+    monkeypatch.setattr(probe.platform, 'system', lambda: 'Windows')
+    monkeypatch.setattr(evidence, 'collect_windows_security_snapshot', snapshot)
+    probe.audit_environment(bundle, directory, capture_windows_security=True)
+    baseline_raw = (directory / 'windows-defender-before.json').read_bytes()
+    write_audit_process(bundle, directory)
+    result = probe.summarize_reports(bundle, directory)
+    assert result['passed']
+    assert calls == [[], [DEFENDER]]
+    assert result['observed_os_security_components'][0]['category'] == 'observed_defender_amsi_registration_transition'
+    assert (directory / 'windows-defender-before.json').read_bytes() == baseline_raw
+    assert json.loads((directory / 'windows-os-security-evidence.json').read_text()) == after
+
+
+@pytest.mark.parametrize('change', ['unbound-file', 'tampered-file', 'missing-file', 'already-new-before', 'before-failed'])
+def test_verifier_cannot_accept_a_fabricated_stale_or_insufficient_baseline(tmp_path, monkeypatch, change):
+    probe, bundle, directory = audit_fixture(tmp_path)
+    before, after = transition_pair()
+    if change == 'already-new-before': before = copy.deepcopy(after)
+    if change == 'before-failed': before = {'schema': 1, 'errors': ['collector timeout'], 'files': []}
+    monkeypatch.setattr(probe.platform, 'system', lambda: 'Windows')
+    monkeypatch.setattr(evidence, 'collect_windows_security_snapshot', lambda paths=(): copy.deepcopy(after if paths else before))
+    monkeypatch.setattr(evidence, 'collect_windows_os_evidence', lambda paths: copy.deepcopy(after))
+    probe.audit_environment(bundle, directory, capture_windows_security=change != 'unbound-file')
+    if change == 'unbound-file':
+        (directory / 'windows-defender-before.json').write_text(json.dumps({'snapshot': before}))
+    elif change == 'tampered-file':
+        with (directory / 'windows-defender-before.json').open('a') as stream: stream.write(' ')
+    elif change == 'missing-file':
+        (directory / 'windows-defender-before.json').unlink()
+    write_audit_process(bundle, directory)
+    with pytest.raises(RuntimeError, match='Standalone runtime audit failed'):
+        probe.summarize_reports(bundle, directory)
+    result = json.loads((directory / 'summary.json').read_text())
+    assert not result['passed'] and not result['observed_os_security_components']
+
+
+@pytest.mark.parametrize('system,enabled', [('Darwin', True), ('Linux', True), ('Windows', False)])
+def test_baseline_collection_only_runs_for_explicit_windows_archive_verification(tmp_path, monkeypatch, system, enabled):
+    probe, bundle, directory = audit_fixture(tmp_path)
+    monkeypatch.setattr(probe.platform, 'system', lambda: system)
+    monkeypatch.setattr(evidence, 'collect_windows_security_snapshot', lambda *a: pytest.fail('must not run native collector'))
+    probe.audit_environment(bundle, directory, capture_windows_security=enabled)
+    assert not (directory / 'windows-defender-before.json').exists()
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Native Server PowerShell parser; never run on another OS')
+def test_native_server_powershell_parser_accepts_the_complete_read_only_collector():
+    executable = ntpath.join(evidence._windows_directory(), 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    parser = r'''$ErrorActionPreference='Stop'; $tokens=$null; $parseErrors=$null
+[void][System.Management.Automation.Language.Parser]::ParseInput([Console]::In.ReadToEnd(), [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count) { $parseErrors | ForEach-Object { [Console]::Error.WriteLine($_.Message) }; exit 1 }
+'''
+    result = subprocess.run([executable, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', parser],
+                            input=evidence.POWERSHELL_COLLECTOR, text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
