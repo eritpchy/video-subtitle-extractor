@@ -184,7 +184,13 @@ gate.local_helper('source_bundle')._safe_member('safe/file.py')
             root = Path(temp)
             for index, name in enumerate(('../outside', '/absolute', 'a\\b', 'CON.txt', 'a/../b')):
                 archive = root / f'{index}.zip'
-                with zipfile.ZipFile(archive, 'w') as stream: stream.writestr(name, b'bad')
+                entry = zipfile.ZipInfo(name)
+                # Malicious fixtures must retain the raw archive spelling;
+                # ZipInfo otherwise rewrites backslashes on Windows writers.
+                entry.orig_filename = entry.filename = name
+                with zipfile.ZipFile(archive, 'w') as stream: stream.writestr(entry, b'bad')
+                with zipfile.ZipFile(archive) as stream:
+                    self.assertEqual(stream.infolist()[0].orig_filename, name)
                 with self.subTest(name=name), self.assertRaises((RuntimeError, ValueError)):
                     gate.extract_source(archive, root / f'out-{index}')
                 self.assertFalse((root / f'out-{index}').exists())
@@ -192,6 +198,19 @@ gate.local_helper('source_bundle')._safe_member('safe/file.py')
             with zipfile.ZipFile(archive, 'w') as stream:
                 info = zipfile.ZipInfo('link'); info.external_attr = 0o120777 << 16; stream.writestr(info, b'target')
             with self.assertRaises(RuntimeError): gate.extract_source(archive, root / 'link-out')
+
+    def test_unsafe_source_zip_fixture_preserves_windows_raw_names(self):
+        original_init = zipfile.ZipInfo.__init__
+
+        def windows_init(info, *args, **kwargs):
+            # Exercise ZipInfo's Windows separator normalization on every host.
+            # Only the constructor sees the simulated separator; filesystem
+            # operations continue to use the actual host implementation.
+            with patch.object(zipfile.os, 'sep', '\\'):
+                original_init(info, *args, **kwargs)
+
+        with patch.object(zipfile.ZipInfo, '__init__', windows_init):
+            self.test_source_extractor_rejects_unsafe_paths_links_and_duplicates()
 
     def test_json_duplicates_and_existing_output_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
