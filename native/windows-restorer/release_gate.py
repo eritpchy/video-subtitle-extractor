@@ -250,8 +250,10 @@ def prepare(args):
         document = verify_transport(manifest)
         validate_identity(document['archive']['identity'], args.commit, args.version, args.profile)
         command = [sys.executable, '-B', str(HERE / 'build.py'), '--manifest', str(manifest),
-                   '--output', str(work / 'build'), '--notices-directory', str(args.notices.absolute()),
+                   '--output', str(work / 'build'),
                    '--acknowledge-redistribution-license']
+        if args.notices is not None:
+            command += ['--notices-directory', str(args.notices.absolute())]
         report['command'] = command
         write_json(work / 'producer-command.json', {'command': command, 'budget': report['budget']})
         with (work / 'producer.log').open('xb') as log:
@@ -487,7 +489,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
     producer = sub.add_parser('prepare', help='Accepted final ZIP → one production distribution; no restore/publication')
-    for name in ('archive', 'notices', 'work'): producer.add_argument('--' + name, type=Path, required=True)
+    for name in ('archive', 'work'): producer.add_argument('--' + name, type=Path, required=True)
+    producer.add_argument('--notices', type=Path, help='Optional exact project-attribution input, never a license download')
     for name in ('archive-sha256', 'receipt-sha256', 'checksum-sha256', 'commit', 'version', 'profile'):
         producer.add_argument('--' + name, required=True)
     producer.add_argument('--runner', choices=tuple(RUNNERS), required=True)

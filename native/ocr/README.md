@@ -260,26 +260,19 @@ The helper statically extracts the reviewed **14.51.36247.0** official package; 
 never executes the installer or copies ordinary System32 DLLs. This pin covers
 the actual **14.44.35220.0** CRT headers observed in Server 2022/2025 CI; neither
 the 14.44 compiler-family restriction nor the header/runtime comparison is relaxed.
-Five x64 DLLs and two independently hash-pinned official license documents are
-verified. The current package links to the 2026 terms instead of embedding an RTF;
-the original 2015–2022 notice is also preserved, without replacing the current
-terms. Downloads are content-addressed and verified even on cache hits.
-`--vc-runtime-dir` + `--vc-license` can instead supply those same pinned bytes
-explicitly (`license.docx` plus the historical notice and five DLLs). Merely finding Visual Studio on a runner does
-not establish the repository owner's licensing qualification.
+Five x64 DLLs and the exact local project attribution/provenance notice are
+verified. Downloads of the unchanged official runtime installer are content-
+addressed and verified on cache hits. Historical DOCX pins remain metadata only;
+the build does not fetch or read them. `--vc-runtime-dir` + `--vc-notice` can
+supply those same exact DLLs and the local attribution note. `--vc-license` is
+a legacy alias for that notice input, not an instruction to acquire terms.
 
 Microsoft's [redistribution guidance](https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files?view=msvc-170)
-limits redistribution to licensed Visual Studio users under applicable terms;
-[the current runtime terms](https://visualstudio.microsoft.com/license-terms/vs2026-ga-visualcpp-v14-redist-runtime/),
-[the previous runtime notice](https://visualstudio.microsoft.com/license-terms/vs2022-cruntime/)
-and the applicable VS REDIST list must be retained/observed. Source hashes prove
-origin, not entitlement. No CI command should automatically assert unverified rights.
-The current [VS 2022 REDIST list](https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution)
-also references the latest downloadable runtime for licensed Visual Studio users;
-this is not a determination of any particular distributor's contractual rights.
-The 2026 terms have changed, including use/updated-terms, feedback and trade-law
-provisions. Reviewing/downloading these documents is not an explicit acceptance;
-the applicable qualification must be established before activating distribution.
+and [VS 2022 REDIST list](https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution)
+condition distribution on applicable rights and terms. Source hashes prove
+origin, not entitlement. Applicable terms and any further notice/flow-down
+obligations have not been independently verified. Final publication must review
+those remaining obligations; technical build-only CI is not legal clearance.
 Python's existing Shiboken/PySide CRT source is separate and is not changed here.
 The native manifest includes `concrt140.dll` from that same approved installer:
 the actual Server 2022 worker imports it in addition to the ORT SDK's four CRT
@@ -304,3 +297,33 @@ to those staged MSVCP/VCRUNTIME files and base Windows/UCRT, not host VC runtime
   as verified GPU dispatch or a measured GPU speedup.
 
 No push, tag, release or change to the default backend is performed by these helpers.
+
+
+### Runtime staging and pending licensing review
+
+The five release x64 DLLs, original installer/CAB identities, runtime version
+and app-local PE/loaded-module checks remain mandatory. Customer packaging
+still requires the distributor's explicit rights acknowledgment. The builder
+does not infer entitlement from an installed toolchain.
+
+Schema 2 separates that obligation from fetching two particular historical
+DOCX documents. Their pins remain historical metadata and are never fetched or
+read from cache. The only runtime network input is the unchanged pinned
+official VC installer; it is extracted, never executed. The pinned local
+`vc-runtime-NOTICE.txt` attribution/provenance note is copied instead. The
+legacy `--vc-license` argument is an alias of `--vc-notice` and accepts only
+this project notice, not an old DOCX or purported substitute agreement.
+
+**Applicable Microsoft terms and further notice/flow-down obligations have not
+been independently verified.** This notice and successful technical CI do not
+establish compliance or permit final publication. Review remaining obligations
+before publishing. Original Apache, zlib, ONNX Runtime, OpenCV and all other
+dependency notices remain required.
+
+Independent official deployment references:
+https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files
+https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution
+
+App-local libraries are not independently serviced by Windows Update. Track
+security updates, review new exact pins and rebuild/retest/redeploy the app;
+do not silently accept a newer DLL or use System32 instead.

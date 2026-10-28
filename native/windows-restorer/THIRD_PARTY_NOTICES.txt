@@ -5,14 +5,17 @@ A copy of the existing repository LICENSE is included in the build notices.
 
 The executable is built with Microsoft Visual C++ and statically links the
 Microsoft C/C++ runtime (/MT). Microsoft components remain subject to their
-applicable Microsoft license terms, not the Apache license. The build preserves
-both original, byte-pinned Microsoft runtime license documents already reviewed
-by this repository (native/ocr/vc-runtime-manifest.json). No runtime DLL,
+applicable Microsoft license terms, not the Apache license. The build preserves a byte-pinned project-authored Microsoft attribution and
+provenance notice (native/ocr/vc-runtime-NOTICE.txt). This is not a Microsoft
+license agreement. Applicable terms and any additional notice/flow-down
+obligations remain unverified and require review before final publication. No runtime DLL,
 installer, or separately installed customer-side VC runtime is required.
 
 The distributor remains responsible for applicable Visual Studio toolchain and
 runtime redistribution rights. Preserving notices and using /MT do not establish
-license entitlement. The build does not download or accept a new license.
+license entitlement. The build does not download, read cached copies of, or accept a new Microsoft
+license. Historical DOCX pins are metadata only; technical CI does not establish
+legal compliance or authorize final publication.
 
 This diagnostic candidate includes a restricted static raw-inflate subset of
 official zlib 1.3.2, Copyright (C) 1995-2026 Jean-loup Gailly and Mark Adler,

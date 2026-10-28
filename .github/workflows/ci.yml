@@ -89,6 +89,16 @@ jobs:
         id: source-tests
         timeout-minutes: 12
         run: python -m pytest tests -vv --capture=tee-sys -o faulthandler_timeout=120 --durations=20 --junitxml=test-results/native.xml
+      - name: Restorer source and build-gate contracts on native Server
+        if: runner.os == 'Windows'
+        run: >-
+          python -m pytest
+          native/windows-restorer/tests/test_source_bundle.py
+          native/windows-restorer/tests/test_release_gate.py
+          native/windows-restorer/tests/test_metadata.py
+          native/windows-restorer/tests/test_zip_layout.py
+          native/windows-restorer/tests/test_space_preflight_isolation.py
+          -vv --junitxml=test-results/restorer-contracts.xml
       - name: Launch actual GUI with platform-safe Qt backend
         env:
           VSE_SMOKE_SCREENSHOT_DIR: test-results/gui

@@ -22,7 +22,7 @@ customer EXE. Use existing licensed x64 MSVC/SDK tools, Python 3.12 and the exis
 1. **`release_gate.py prepare`** accepts `--archive`, its independently obtained
    `--archive-sha256`, `--receipt-sha256`, `--checksum-sha256`,
    `--commit`, `--version`, `--profile`, `--runner`,
-   `--notices`, a fresh `--work`, and the distributor's explicit
+   optional `--notices` (defaults to committed project attribution), a fresh `--work`, and the distributor's explicit
    `--acknowledge-redistribution-license`. Keep `--work` outside the clean source
    checkout. The adjacent exact `.zip.sha256` and successful `.zip.acceptance.json`
    are mandatory. Obtain all three SHA anchors independently from the same
@@ -100,7 +100,7 @@ arbitrary `%` paths; no replacement launcher is invented to hide that boundary.
 
 `source_bundle.py` preserves exact C++/zlib/generator/build/rebuild/gate/test
 sources, fixed generated header, transport metadata, build provenance and all
-five original notices. Actual header-generation imports are hashed and must be
+four required attribution/third-party notices (not the old network DOCX documents). Actual header-generation imports are hashed and must be
 within the snapshot. The current authoritative reachable script closure is
 `release_volume_transport`, `release_guard`, `package_release`, `bundle_bootstrap`,
 `runtime_dependencies`, `release_profiles`; unused lazy platform-packaging paths
@@ -140,3 +140,11 @@ source-ZIP independent rebuild and final-SHA rebinding have **offline tests only
 until separately authorized future Server jobs run. The native C++ security
 boundaries and remaining gates in README are not waived. No version, security
 policy, GPU proof or publication status is advanced by this source integration.
+
+
+Build-only attribution revision: optional `--notices` supplies the pinned
+project notice; default uses committed source, without external DOCX requests.
+The complete companion contains that notice and its manifest. Applicable
+Microsoft terms/notice/flow-down obligations remain unverified; technical
+acceptance is not publication authority. No DLL, /MT, PE, zlib, inventory,
+same-EXE or launcher gate is relaxed.

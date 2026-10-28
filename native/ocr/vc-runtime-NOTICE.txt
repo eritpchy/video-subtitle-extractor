@@ -1,0 +1,33 @@
+Microsoft Visual C++ runtime components
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+These Microsoft components are not licensed under this project's Apache-2.0
+license. Applicable Microsoft license terms and redistribution rights remain
+the distributor's responsibility. An explicit distributor acknowledgment is
+required by the build; it is not independent proof of entitlement.
+
+LICENSING REVIEW STATUS: applicable terms and any additional notice or flow-down
+obligations have NOT been independently verified. Successful technical builds
+or CI checks do not authorize final publication. Review remaining obligations
+before publishing. This project-authored attribution/provenance notice is not
+the Microsoft license agreement and does not replace any applicable obligation.
+
+Official independent deployment and redistribution references:
+https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files
+https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution
+https://learn.microsoft.com/en-us/cpp/windows/deployment-in-visual-cpp
+
+App-local DLL deployment is supported; client installation of the VC runtime
+is not required when the complete required DLL closure is supplied. Preserve
+Microsoft DLL bytes unchanged. Only the release x64 files pinned in
+vc-runtime-manifest.json may be staged, with their original installer/CAB
+provenance, file-version and PE/loaded-module checks. No System32 substitution.
+
+App-local components are not serviced independently by Windows Update. The
+distributor must track Microsoft runtime security updates, review updated pins,
+rebuild, rerun the full acceptance suite and redistribute updated application
+bytes. Static CRT builds also need rebuilding to incorporate runtime updates.
+
+Earlier project builds unnecessarily coupled DLL staging to downloads of two
+specific historical DOCX files. Their identities are retained as historical
+metadata only. This build does not fetch, read or substitute those documents.

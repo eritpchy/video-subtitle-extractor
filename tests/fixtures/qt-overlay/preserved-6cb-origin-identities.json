@@ -1,0 +1,22 @@
+{
+  "source": "Read-only GitHub API capture; full original responses retained in task prepush evidence",
+  "run_response_sha256": "5e6ecbdafafb8b00e45d55ae602ec65f90db62bd002d5f89a2c8a15e84e8d4a0",
+  "job_response_sha256": "e7d46f86595a8f2324dd5fced4105fe51d4f619bd9d4a6ded7f7484759709aa4",
+  "run": {
+    "id": 40507823242,
+    "head_sha": "6cbcc17efad9b2f6d2f95197ff171eb947cae2e4",
+    "head_branch": "fix/restore-release-matrix",
+    "run_attempt": 1,
+    "status": "completed",
+    "conclusion": "success"
+  },
+  "job": {
+    "id": 122201778670,
+    "name": "qt-overlay-resources / resources",
+    "run_id": 40507823242,
+    "run_attempt": 1,
+    "head_sha": "6cbcc17efad9b2f6d2f95197ff171eb947cae2e4",
+    "status": "completed",
+    "conclusion": "success"
+  }
+}

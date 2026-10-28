@@ -35,7 +35,8 @@ def main():
     result.update({'toolchain_binaries_match_original': original_tools == actual_tools, 'schema': 1, 'scope': 'fixed-header-source-rebuild-not-client-certification',
                    'original_exe_sha256': manifest['original_exe_sha256'],
                    'bit_identical_to_original': result['exe_sha256'] == manifest['original_exe_sha256'],
-                   'client_restore_verified': False, 'gpu_inference_verified': False})
+                   'client_restore_verified': False, 'gpu_inference_verified': False,
+                   'licensing_review': json.loads((root / 'native/ocr/vc-runtime-manifest.json').read_bytes())['licensing_review']})
     (output / 'rebuild-record.json').write_text(json.dumps(result, indent=2) + '\n')
     print(f'Rebuilt; bit-identical to original: {result["bit_identical_to_original"]}. This does not establish client/GPU acceptance.')
 

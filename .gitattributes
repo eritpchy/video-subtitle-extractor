@@ -67,3 +67,8 @@ tests/fixtures/qt-overlay/preserved-8f-origin-identities.json -text
 /ui/home_interface.py -text
 /backend/tools/subtitle_extractor_remote_call.py -text
 /backend/tools/process_manager.py -text
+
+# Fixed local attribution bytes must not be changed by Windows checkout.
+native/ocr/vc-runtime-NOTICE.txt -text
+/tests/fixtures/qt-overlay/artifact-12735996442.json -text
+/tests/fixtures/qt-overlay/preserved-6cb-origin-identities.json -text

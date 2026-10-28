@@ -35,25 +35,32 @@ RUN = {'id': 40260642504, 'head_sha': '561de09ed45180362732725d24640862d3fa1ceb'
        'head_repository_id': 342871390}
 ENDPOINT = 'repos/eritpchy/video-subtitle-extractor/actions/artifacts/12624219589'
 
-# The original endpoint returned 404 after expiry on 2026-10-27. Its identity
-# above remains unchanged; the following is a DIFFERENT container of the exact
-# final assets, produced and verified by the successful 8f attempt 2 job.
-PRESERVED_CONTRACT = 'preserved-8f-attempt2'
-PRESERVED_ARTIFACT = {
-    'id': 12688107623,
-    'name': 'qt-overlay-resources-8f08e7f6887a950f75cb7967f1f80e344935ecaa-40391756697-2',
+# Both historical containers expired and their identities remain evidence. This
+# explicitly pinned DIFFERENT container comes from the fully successful 6cb run.
+# Original resource/source bytes and all inner hashes below remain unchanged.
+HISTORICAL_PRESERVED_8F = {
+    'id': 12688107623, 'run_id': 40391756697, 'attempt': 2,
+    'head_sha': '8f08e7f6887a950f75cb7967f1f80e344935ecaa',
     'size_in_bytes': 53651264,
     'digest': 'sha256:f1e47e5ee2e765dc0661d5ae5288435ec5da181d49f998bdd6e2f263580fef65',
+    'container_supplied_or_requeried': False,
+}
+PRESERVED_CONTRACT = 'preserved-6cb-attempt1'
+PRESERVED_ARTIFACT = {
+    'id': 12735996442,
+    'name': 'qt-overlay-resources-6cbcc17efad9b2f6d2f95197ff171eb947cae2e4-40507823242-1',
+    'size_in_bytes': 53651264,
+    'digest': 'sha256:f0ccc2108bed8bb7a555c55f54d923e09febdbd34a57b82e2a698e176c30ac6e',
     'expired': False,
 }
-PRESERVED_RUN = {'id': 40391756697, 'head_sha': '8f08e7f6887a950f75cb7967f1f80e344935ecaa',
+PRESERVED_RUN = {'id': 40507823242, 'head_sha': '6cbcc17efad9b2f6d2f95197ff171eb947cae2e4',
                  'head_branch': 'fix/restore-release-matrix', 'repository_id': 342871390,
                  'head_repository_id': 342871390}
-PRESERVED_ATTEMPT = 2
-PRESERVED_JOB = 121842501324
-PRESERVED_ENDPOINT = 'repos/eritpchy/video-subtitle-extractor/actions/artifacts/12688107623'
-PRESERVED_RUN_ENDPOINT = 'repos/eritpchy/video-subtitle-extractor/actions/runs/40391756697/attempts/2'
-PRESERVED_JOB_ENDPOINT = 'repos/eritpchy/video-subtitle-extractor/actions/jobs/121842501324'
+PRESERVED_ATTEMPT = 1
+PRESERVED_JOB = 122201778670
+PRESERVED_ENDPOINT = 'repos/eritpchy/video-subtitle-extractor/actions/artifacts/12735996442'
+PRESERVED_RUN_ENDPOINT = 'repos/eritpchy/video-subtitle-extractor/actions/runs/40507823242/attempts/1'
+PRESERVED_JOB_ENDPOINT = 'repos/eritpchy/video-subtitle-extractor/actions/jobs/122201778670'
 PRESERVED_ASSETS = {
     'resource': {'name': 'vse-qt6.12.0-macos-arm64-ax772484-ps6.zip', 'bytes': 2547078,
                  'sha256': '9ffa26a3ecf5296d9d9eb9841789307e75aa352eafc9539f31ae80e382135441'},
@@ -292,6 +299,7 @@ def prepare_preserved(output: Path) -> dict:
                    'historical_original_contract': {
                        'artifact': {k: v for k, v in ARTIFACT.items() if k != 'expired'},
                        'workflow_run': RUN, 'container_supplied_or_requeried': False},
+                   'historical_expired_8f_contract': HISTORICAL_PRESERVED_8F,
                    'production_integration_allowed': False,
                    'scope': 'Preserved exact asset verification only; not original-container recovery, Mac execution, GUI or release approval'}
         overlay._atomic_json(reports / 'resource-preparation.json', receipt)

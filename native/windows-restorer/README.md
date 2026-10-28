@@ -125,16 +125,18 @@ weakened to work around a platform failure.
 ## Rebuild offline on Server CI
 
 Use the repository's x64 MSVC build environment (Server 2022 **and** 2025), and
-existing, verified Microsoft notice files from the repository's pinned VC source
-cache. Build tools remain on CI, never in the customer's transport.
+the committed project attribution/provenance notice. Applicable Microsoft terms
+remain unverified and must be reviewed before publication. Build tools remain
+on CI, never in the customer's transport.
 
 ```text
-python native/windows-restorer/build.py --manifest D:\transport\NAME.zip.transport.json --output D:\restorer-build --notices-directory D:\verified-vc-source --acknowledge-redistribution-license
+python native/windows-restorer/build.py --manifest D:\transport\NAME.zip.transport.json --output D:\restorer-build --acknowledge-redistribution-license
 ```
 
-`--output` must be new. The notice flag is the distributor's assertion of
-applicable existing rights, **not** automated license acceptance. Both existing
-pinned Microsoft notices, existing Apache LICENSE and upstream zlib LICENSE are copied unchanged;
+`--output` must be new. The acknowledgment flag is the distributor's assertion
+of applicable existing rights, **not** automated acceptance or independent legal
+verification. The pinned project attribution, existing Apache LICENSE and
+upstream zlib LICENSE are copied unchanged;
 see `THIRD_PARTY_NOTICES.txt`. No dependency or license download is performed.
 The compiler uses `/MT /O1 /Os /GS /guard:cf /W4 /WX /bigobj`; the linker embeds
 `asInvoker`, ASLR, DEP, x64 and `/DEPENDENTLOADFLAG:0x800` (System32-only
@@ -148,7 +150,7 @@ raw-inflate entry points and exclude gzip/deflate/crc/archive API symbols. A
 successful build explicitly says **not client-certified**.
 
 Only `OUTPUT/distribution/` is the reviewable distribution set: `restore.exe`,
-`restorer-source.zip`, `build-record.json` and the original `notices/`. The outer
+`restorer-source.zip`, `build-record.json` and the verified `notices/`. The outer
 build directory's `.obj`, logs, intermediate files, SDK or Python environment
 are **not** customer assets. Do not distribute the EXE alone: its exact source
 and notices are required companions.
@@ -159,7 +161,7 @@ contains the exact C++ sources, generator/build/rebuild tools, their local
 transport/guard/profile/bootstrap/runtime-dependency source closure, tests,
 Apache LICENSE, exact restricted zlib sources/license/pin and notice pins. The source ZIP adds the **fixed generated
 header**, original transport metadata, original build record and unchanged
-Microsoft notices. Every member has a size/SHA256 manifest. Missing, changed,
+project Microsoft attribution and third-party notices. Every member has a size/SHA256 manifest. Missing, changed,
 extra or symlinked source files fail before rebuilding; no `.obj`, DLL, compiler,
 SDK source or Python runtime is included.
 
@@ -492,3 +494,20 @@ API contracts: [CreateFile sharing and reparse flags](https://learn.microsoft.co
 [Microsoft argv parsing](https://learn.microsoft.com/en-us/cpp/c-language/parsing-c-command-line-arguments).
 The historical [documented cwd length limitation](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-setcurrentdirectory)
 is not confused with extended file-I/O support or the separate rename gate.
+
+
+### Build-only attribution contract (licensing review pending)
+
+`--notices-directory` and release-gate `--notices` are optional: defaults use the
+exact committed project attribution in `native/ocr`. Explicit inputs must match
+the new manifest's exact bytes; legacy DOCX files are not substitutes and are
+not fetched/read from cache. Original Apache and zlib notices remain. The
+source-only rebuild stays offline, verifies its complete inventory and records
+pending licensing review. All /MT, PE, restricted-zlib object/map, same-EXE,
+full restored-tree and original launcher acceptance checks remain mandatory.
+
+This removes a project-imposed document download, not an actual Microsoft
+obligation. Entitlement acknowledgment stays required. Applicable terms and
+any further notice/flow-down obligations are unverified and must be reviewed
+before publication. Static runtime security fixes require rebuilding and
+redistributing. Earlier DOCX examples describe the previous contract.

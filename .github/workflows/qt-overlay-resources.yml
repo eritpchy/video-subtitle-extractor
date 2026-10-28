@@ -24,7 +24,7 @@ jobs:
       - name: Verify the preserved exact plugin resources and complete corresponding source
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python -I -S scripts/qt_overlay_resources_ci.py --output build/qt-overlay-input --input-contract preserved-8f-attempt2
+        run: python -I -S scripts/qt_overlay_resources_ci.py --output build/qt-overlay-input --input-contract preserved-6cb-attempt1
       - name: Share only the two fixed public-resource candidate bytes with this run
         uses: actions/upload-artifact@v4
         with:

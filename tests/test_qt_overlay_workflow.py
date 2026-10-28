@@ -13,7 +13,7 @@ def test_resource_builder_is_read_only_explicit_and_has_no_publication_trigger()
         assert forbidden not in text
     assert 'GH_TOKEN: ${{ github.token }}' in text
     assert 'python -I -S scripts/qt_overlay_resources_ci.py --output build/qt-overlay-input' in text
-    assert '--input-contract preserved-8f-attempt2' in text
+    assert '--input-contract preserved-6cb-attempt1' in text
     assert 'path: build/qt-overlay-input/assets/' in text
     assert 'if: always()' in text and 'path: build/qt-overlay-input/reports/' in text
 

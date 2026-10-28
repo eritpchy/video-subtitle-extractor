@@ -19,7 +19,7 @@ bundle = importlib.util.module_from_spec(spec); spec.loader.exec_module(bundle)
 class SourceBundleTests(unittest.TestCase):
     def test_full_source_snapshot_fixed_header_notices_no_obj_or_runtime(self):
         sources = bundle.snapshot_sources(ROOT)
-        notices = {name: b'unit test notice, not for distribution' for name in ('license.docx', 'license-2015-2022.docx', 'Apache-2.0.txt', 'THIRD_PARTY_NOTICES.txt', 'zlib-LICENSE.txt')}
+        notices = {name: b'unit test notice, not for distribution' for name in ('Microsoft-Visual-Cpp-runtime-NOTICE.txt', 'Apache-2.0.txt', 'THIRD_PARTY_NOTICES.txt', 'zlib-LICENSE.txt')}
         record = {'git': {'commit': 'a' * 40, 'dirty': True, 'status_porcelain_v1': '?? new.cpp\n'}, 'exe_sha256': 'b' * 64}
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); archive = root / 'source.zip'
@@ -73,3 +73,26 @@ class SourceBundleTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+class AttributionContractTests(unittest.TestCase):
+    def test_default_notice_is_local_and_documents_legal_review(self):
+        spec = importlib.util.spec_from_file_location('restorer_attribution_build', HERE / 'build.py')
+        build = importlib.util.module_from_spec(spec); spec.loader.exec_module(build)
+        with tempfile.TemporaryDirectory() as temp:
+            dest = Path(temp) / 'notices'
+            build.copy_notices(None, dest)
+            notice = dest / 'Microsoft-Visual-Cpp-runtime-NOTICE.txt'
+            self.assertEqual(notice.read_bytes(), (ROOT / 'native/ocr/vc-runtime-NOTICE.txt').read_bytes())
+            self.assertIn(b'NOT been independently verified', notice.read_bytes())
+            self.assertEqual({p.name for p in dest.iterdir()}, {'Microsoft-Visual-Cpp-runtime-NOTICE.txt', 'Apache-2.0.txt', 'THIRD_PARTY_NOTICES.txt', 'zlib-LICENSE.txt'})
+
+    def test_explicit_notice_cannot_substitute_old_documents_or_changed_bytes(self):
+        spec = importlib.util.spec_from_file_location('restorer_attribution_build', HERE / 'build.py')
+        build = importlib.util.module_from_spec(spec); spec.loader.exec_module(build)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); inputs = root / 'inputs'; inputs.mkdir()
+            (inputs / 'license.docx').write_bytes(b'synthetic old document, never a license')
+            with self.assertRaises(RuntimeError): build.copy_notices(inputs, root / 'out1')
+            (inputs / 'Microsoft-Visual-Cpp-runtime-NOTICE.txt').write_bytes(b'changed')
+            with self.assertRaises(RuntimeError): build.copy_notices(inputs, root / 'out2')

@@ -105,10 +105,11 @@ def vc_runtime(directory, license_file, stage, required, acknowledged=False):
             continue
         source = license_file if row['name'] == manifest['license_file'] else directory / row['name']
         target = stage / 'licenses' / ('Visual-Cpp-redistributable-' + row['name'])
-        shutil.copy2(source, target)  # Keep original document bytes/format, including the previous notice.
-        notices.append({'file': target.relative_to(stage).as_posix(), 'sha256': sha256(source), 'source': row['url']})
+        shutil.copy2(source, target)  # Exact local attribution; does not establish Microsoft license compliance.
+        notices.append({'file': target.relative_to(stage).as_posix(), 'sha256': sha256(source), 'source': row['source_file']})
     return {'complete': True, 'files': records, 'sdk_required_dlls': required, 'runtime_version': manifest['version'],
             'license_sha256': sha256(license_file), 'notices': notices, 'official_source': manifest['installer'],
+            'licensing_review': manifest['licensing_review'],
             'scope': 'Caller-supplied licensed redistributable source; final PE/ownership audit remains required.'}
 
 
@@ -320,7 +321,7 @@ def main():
     p.add_argument('--offline', action='store_true')
     p.add_argument('--runner-test-only', action='store_true', help='Windows runner-local testing only; no VC redistribution files and never a customer package')
     p.add_argument('--vc-runtime-dir', type=Path)
-    p.add_argument('--vc-license', type=Path)
+    p.add_argument('--vc-notice', '--vc-license', dest='vc_license', type=Path, help='Exact project attribution notice; does not establish applicable Microsoft license compliance')
     p.add_argument('--acknowledge-vc-redistribution-license', action='store_true', help='Distributor explicitly confirms applicable Microsoft redistribution rights; never inferred from runner installation')
     a = p.parse_args()
     if not 1 <= a.jobs <= 64:

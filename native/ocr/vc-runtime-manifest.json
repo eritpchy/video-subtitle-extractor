@@ -1,7 +1,7 @@
 {
   "version": "14.51.36247.0",
   "architecture": "x64",
-  "license_file": "license.docx",
+  "license_file": "Microsoft-Visual-Cpp-runtime-NOTICE.txt",
   "installer": {
     "url": "https://download.visualstudio.microsoft.com/download/pr/ebdab8e5-1d7b-4d9f-a11b-cbb1720c3b12/843068991DAAA1F73AD9F6239BCE4D0F6A07A51F18C37EA2A867E9BECA71295C/VC_redist.x64.exe",
     "bytes": 18731856,
@@ -23,18 +23,6 @@
     "sha256": "6e8ee73933678c55973e83366e48e948b394c7a36743a36b7224c95de979b13f"
   },
   "files": [
-    {
-      "name": "license.docx",
-      "url": "https://visualstudio.microsoft.com/wp-content/uploads/2025/10/Visual-C-V14-License-Redistributable_and_Runtime_ENU.docx",
-      "bytes": 39553,
-      "sha256": "08651651a7602fc7c0e2763de0fde1ff9f868df2780597cd1775ee9d6441c783"
-    },
-    {
-      "name": "license-2015-2022.docx",
-      "url": "https://visualstudio.microsoft.com/wp-content/uploads/2021/09/Visual-C-Runtime-2015-2022-License-1.docx",
-      "bytes": 39644,
-      "sha256": "f1e3d56ceb2ad68aae0711b910375009e651ac5530fa0760f0dea6e81e54fae1"
-    },
     {
       "name": "msvcp140.dll",
       "cab_member": "msvcp140.dll_amd64",
@@ -118,6 +106,13 @@
         "api-ms-win-crt-stdio-l1-1-0.dll",
         "KERNEL32.dll"
       ]
+    },
+    {
+      "name": "Microsoft-Visual-Cpp-runtime-NOTICE.txt",
+      "source_file": "vc-runtime-NOTICE.txt",
+      "bytes": 2001,
+      "sha256": "08f9ea68589360f62df35b6232e4fe6307b11d46e4f0fbb327e160bfb6f0e50f",
+      "role": "project-attribution-and-provenance-not-a-license-agreement"
     }
   ],
   "licensing_sources": [
@@ -130,5 +125,27 @@
   "compatibility_sources": [
     "https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist",
     "https://learn.microsoft.com/en-us/cpp/porting/binary-compat-2015-2017"
-  ]
+  ],
+  "schema": 2,
+  "historical_document_pins": [
+    {
+      "name": "license.docx",
+      "url": "https://visualstudio.microsoft.com/wp-content/uploads/2025/10/Visual-C-V14-License-Redistributable_and_Runtime_ENU.docx",
+      "bytes": 39553,
+      "sha256": "08651651a7602fc7c0e2763de0fde1ff9f868df2780597cd1775ee9d6441c783"
+    },
+    {
+      "name": "license-2015-2022.docx",
+      "url": "https://visualstudio.microsoft.com/wp-content/uploads/2021/09/Visual-C-Runtime-2015-2022-License-1.docx",
+      "bytes": 39644,
+      "sha256": "f1e3d56ceb2ad68aae0711b910375009e651ac5530fa0760f0dea6e81e54fae1"
+    }
+  ],
+  "licensing_review": {
+    "status": "applicable-terms-not-independently-verified",
+    "distributor_acknowledgment_required": true,
+    "final_publication_authorized": false,
+    "fixed_historical_DOCX_download_required": false,
+    "scope": "Technical self-contained-build evidence only; applicable entitlement, notice and flow-down obligations remain with the distributor and require review before publication."
+  }
 }

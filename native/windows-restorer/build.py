@@ -24,13 +24,17 @@ def digest(path: Path) -> str:
 
 def copy_notices(source: Path, output: Path):
     manifest = json.loads((ROOT / 'native/ocr/vc-runtime-manifest.json').read_text(encoding='utf-8'))
-    rows = [row for row in manifest['files'] if row['name'] in ('license.docx', 'license-2015-2022.docx')]
-    if len(rows) != 2: raise RuntimeError('Missing reviewed Microsoft runtime notice pins')
+    rows = [row for row in manifest['files'] if row['name'] == manifest['license_file']]
+    if (len(rows) != 1 or rows[0]['name'] != 'Microsoft-Visual-Cpp-runtime-NOTICE.txt'
+            or rows[0].get('source_file') != 'vc-runtime-NOTICE.txt'
+            or manifest['licensing_review']['status'] != 'applicable-terms-not-independently-verified'
+            or manifest['licensing_review']['final_publication_authorized'] is not False):
+        raise RuntimeError('Missing separate runtime attribution/licensing-review contract')
     output.mkdir()
     for row in rows:
-        path = source / row['name']
+        path = (ROOT / 'native/ocr' / row['source_file']) if source is None else source / row['name']
         if path.is_symlink() or not path.is_file() or path.stat().st_size != row['bytes'] or digest(path) != row['sha256']:
-            raise RuntimeError(f'Missing/changed official runtime notice: {row["name"]}')
+            raise RuntimeError(f'Missing/changed project runtime attribution: {row["name"]}')
         shutil.copyfile(path, output / row['name'])
     shutil.copyfile(ROOT / 'LICENSE', output / 'Apache-2.0.txt')
     shutil.copyfile(HERE / 'THIRD_PARTY_NOTICES.txt', output / 'THIRD_PARTY_NOTICES.txt')
@@ -288,7 +292,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--manifest', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
-    parser.add_argument('--notices-directory', required=True, type=Path)
+    parser.add_argument('--notices-directory', type=Path, help='Optional exact project-attribution input; defaults to committed source, with no license download')
     parser.add_argument('--acknowledge-redistribution-license', action='store_true')
     args = parser.parse_args()
     if os.name != 'nt' or platform.machine().lower() not in ('amd64', 'x86_64'): raise RuntimeError('Build on native Windows x64 Server CI')
@@ -310,6 +314,7 @@ def main() -> int:
                    'git_after_build': source_bundle.git_identity(ROOT), 'generator_dependencies': generator_dependencies,
                    'archive_transport_manifest_sha256': hashlib.sha256(manifest_bytes).hexdigest(), 'embedded_header_sha256': digest(output / 'bundle_metadata.hpp'),
                    'client_restore_verified': False, 'gpu_inference_verified': False,
+                   'licensing_review': json.loads((ROOT / 'native/ocr/vc-runtime-manifest.json').read_bytes())['licensing_review'],
                    'sources': {name: hashlib.sha256(data).hexdigest() for name, data in snapshot.items()},
                    'notices': {p.name: digest(p) for p in (output / 'notices').iterdir()}})
     # Distribution is deliberately separate from obj, compiler logs and the host

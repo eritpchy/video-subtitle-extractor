@@ -381,7 +381,7 @@ class SourceClosureTests(unittest.TestCase):
     def companion(self):
         sources = source_bundle.snapshot_sources(ROOT)
         notices = {name: b'SYNTHETIC UNIT NOTICE, NOT FOR DISTRIBUTION' for name in (
-            'license.docx', 'license-2015-2022.docx', 'Apache-2.0.txt', 'THIRD_PARTY_NOTICES.txt', 'zlib-LICENSE.txt')}
+            'Microsoft-Visual-Cpp-runtime-NOTICE.txt', 'Apache-2.0.txt', 'THIRD_PARTY_NOTICES.txt', 'zlib-LICENSE.txt')}
         archive = self.root / 'source.zip'
         source_bundle.create_source_bundle(archive, sources=sources, generated_header=b'// SYNTHETIC\n',
             notices=notices, build_record={'git': {'commit': '0' * 40, 'dirty': True}, 'exe_sha256': '0' * 64}, transport_manifest=b'{}')

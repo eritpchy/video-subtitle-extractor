@@ -19,28 +19,28 @@ FIXTURES = Path(__file__).parent / 'fixtures/qt-overlay'
 
 
 def metadata():
-    return json.loads((FIXTURES / 'artifact-12688107623.json').read_bytes())
+    return json.loads((FIXTURES / 'artifact-12735996442.json').read_bytes())
 
 
 def origin():
-    return json.loads((FIXTURES / 'preserved-8f-origin-identities.json').read_bytes())
+    return json.loads((FIXTURES / 'preserved-6cb-origin-identities.json').read_bytes())
 
 
 @pytest.fixture(autouse=True)
 def fixed_clock(monkeypatch):
-    monkeypatch.setattr(module, 'utc_now', lambda: datetime(2026, 10, 27, 12, tzinfo=timezone.utc))
+    monkeypatch.setattr(module, 'utc_now', lambda: datetime(2026, 10, 28, 0, tzinfo=timezone.utc))
 
 
 def test_independent_actual_origin_matches_separate_full_metadata_contract():
-    assert hashlib.sha256((FIXTURES/'artifact-12688107623.json').read_bytes()).hexdigest() == '9325352b1ecfc118522b1577e8be952db7b3cfa423e39a115997104926fbf4ae'
-    assert hashlib.sha256((FIXTURES/'preserved-8f-origin-identities.json').read_bytes()).hexdigest() == '7d563f1dd282d505aee8eaba7085f29dc082daf672b1ff76f5451556681ad132'
+    assert hashlib.sha256((FIXTURES/'artifact-12735996442.json').read_bytes()).hexdigest() == 'a287d68be3ea33962da6f20b0b7b66983c333bf832f03141371a0c012abd684a'
+    assert hashlib.sha256((FIXTURES/'preserved-6cb-origin-identities.json').read_bytes()).hexdigest() == 'daf917328952c41299033290e6e030d6f39174d3c102af083d4f7f00d87049de'
     module.validate_preserved_metadata(metadata())
     module.validate_preserved_origin(origin()['run'], origin()['job'])
-    assert module.PRESERVED_ARTIFACT['id'] == 12688107623
+    assert module.PRESERVED_ARTIFACT['id'] == 12735996442
     assert module.PRESERVED_ARTIFACT['size_in_bytes'] == 53651264
-    assert module.PRESERVED_ARTIFACT['digest'] == 'sha256:f1e47e5ee2e765dc0661d5ae5288435ec5da181d49f998bdd6e2f263580fef65'
-    assert module.PRESERVED_RUN['head_sha'] == '8f08e7f6887a950f75cb7967f1f80e344935ecaa'
-    assert module.PRESERVED_ATTEMPT == 2 and module.PRESERVED_JOB == 121842501324
+    assert module.PRESERVED_ARTIFACT['digest'] == 'sha256:f0ccc2108bed8bb7a555c55f54d923e09febdbd34a57b82e2a698e176c30ac6e'
+    assert module.PRESERVED_RUN['head_sha'] == '6cbcc17efad9b2f6d2f95197ff171eb947cae2e4'
+    assert module.PRESERVED_ATTEMPT == 1 and module.PRESERVED_JOB == 122201778670
     assert module.ARTIFACT['id'] == 12624219589 and module.ARTIFACT['size_in_bytes'] == 53736255
     assert module.ARTIFACT['digest'] == 'sha256:25bbdcc961ece4f05bed906df085a66bbab86c1007e086013d17b0a21ab40747'
     assert module.PRESERVED_ARTIFACT != module.ARTIFACT
@@ -149,7 +149,7 @@ def test_explicit_preserved_pipeline_retains_input_bytes_and_distinguishes_curre
     out=tmp_path/'verified';result=module.prepare(out,input_contract=module.PRESERVED_CONTRACT)
     assert result['input_contract']==module.PRESERVED_CONTRACT
     assert result['consumer_workflow']=={'repository':'eritpchy/video-subtitle-extractor','commit':'a'*40,'run_id':999001,'run_attempt':3}
-    assert result['source_run_attempt']==2 and result['source_producer_job']==121842501324
+    assert result['source_run_attempt']==1 and result['source_producer_job']==122201778670
     assert result['historical_original_contract']['artifact']['digest']==module.ARTIFACT['digest']
     assert result['historical_original_contract']['container_supplied_or_requeried'] is False
     assert result['production_integration_allowed'] is False
@@ -214,3 +214,10 @@ def test_failed_preserved_download_never_selects_the_legacy_contract(inputs,tmp_
     assert calls==[module.PRESERVED_ENDPOINT]
     assert (out/'reports/artifact-metadata.json').read_bytes()==b'partial'
     assert (out/'reports/resource-preparation-failed.json').is_file()
+
+
+def test_expired_8f_container_remains_distinct_and_cannot_replace_current_input():
+    old = json.loads((FIXTURES / 'artifact-12688107623.json').read_bytes())
+    assert module.HISTORICAL_PRESERVED_8F['id'] == old['id']
+    assert module.HISTORICAL_PRESERVED_8F['container_supplied_or_requeried'] is False
+    with pytest.raises(RuntimeError): module.validate_preserved_metadata(old)

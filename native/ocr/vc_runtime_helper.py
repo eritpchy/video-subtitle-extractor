@@ -4,10 +4,11 @@
 License eligibility is a distributor obligation; this helper verifies provenance,
 not entitlement. Only supports the exact reviewed, SHA256-pinned MSZIP cabinets.
 """
-import argparse,hashlib,json,os,pathlib,shutil,struct,tempfile,urllib.request,zlib,subprocess
+import argparse,hashlib,json,os,pathlib,shutil,struct,tempfile,urllib.request,urllib.parse,zlib,subprocess
 
 DLL_NAMES={'msvcp140.dll','msvcp140_1.dll','vcruntime140.dll','vcruntime140_1.dll','concrt140.dll'}
-LICENSE_NAMES={'license.docx','license-2015-2022.docx'}
+NOTICE_FILE='Microsoft-Visual-Cpp-runtime-NOTICE.txt'
+LICENSE_NAMES={NOTICE_FILE}  # Compatibility name: project notice, not Microsoft license text.
 
 def digest(b):return hashlib.sha256(b).hexdigest()
 def checked(b,rec):
@@ -63,17 +64,21 @@ def load_manifest(path=None):
     m=json.loads(pathlib.Path(path or pathlib.Path(__file__).with_name('vc-runtime-manifest.json')).read_text())
     expected=DLL_NAMES|LICENSE_NAMES
     if {f['name'] for f in m['files']}!=expected or len(m['files'])!=len(expected):raise ValueError('unexpected VC allowlist')
-    if m.get('license_file')!='license.docx':raise ValueError('unexpected VC license')
+    if m.get('schema')!=2 or m.get('license_file')!=NOTICE_FILE:raise ValueError('unexpected VC notice contract')
+    if m.get('licensing_review',{}).get('status')!='applicable-terms-not-independently-verified' or m['licensing_review'].get('final_publication_authorized') is not False:raise ValueError('Unreviewed licensing status')
     for f in m['files']:
         if f['name'] in DLL_NAMES:
             if f.get('cab_member')!=f['name']+'_amd64' or 'url' in f:raise ValueError('unsafe CAB member')
             if f.get('file_version')!=m['version']:raise ValueError('inconsistent VC runtime version')
         else:
-            if 'cab_member' in f or not f.get('url','').startswith('https://visualstudio.microsoft.com/wp-content/uploads/'):
-                raise ValueError('unexpected official VC license source')
+            if 'cab_member' in f or 'url' in f or f.get('source_file')!='vc-runtime-NOTICE.txt':
+                raise ValueError('unexpected local VC attribution source')
+    url=urllib.parse.urlsplit(m['installer']['url'])
+    if url.scheme!='https' or url.hostname!='download.visualstudio.microsoft.com' or not url.path.endswith('/VC_redist.x64.exe'):
+        raise ValueError('Unexpected runtime installer source')
     return m
 def verify_source(runtime_dir,license_path,manifest=None):
-    """Validate explicitly supplied official pinned DLLs/license before copying."""
+    """Validate exact DLLs and the separately pinned project attribution notice."""
     m=load_manifest(manifest);root=pathlib.Path(runtime_dir);lic=pathlib.Path(license_path)
     if root.is_symlink():raise ValueError('linked runtime directory rejected')
     values={}
@@ -88,10 +93,18 @@ def verify_source(runtime_dir,license_path,manifest=None):
         values[rec['name']]=b
     return m,values
 
+def local_notice(rec):
+    path=pathlib.Path(__file__).with_name(rec['source_file'])
+    if path.is_symlink() or not path.is_file():raise ValueError('Missing/linked local runtime attribution')
+    return checked(path.read_bytes(),rec)
+
 def cached_source(rec,cache,name,offline=False):
     """Content-addressed cache: a reviewed pin update never reuses an older EXE."""
     if len(rec['sha256'])!=64 or any(c not in '0123456789abcdef' for c in rec['sha256']):raise ValueError('invalid VC source digest')
-    if name not in LICENSE_NAMES|{'VC_redist.x64.exe'}:raise ValueError('unsafe cache filename')
+    if name!='VC_redist.x64.exe':raise ValueError('Only the pinned runtime installer may be downloaded')
+    url=urllib.parse.urlsplit(rec['url'])
+    if url.scheme!='https' or url.hostname!='download.visualstudio.microsoft.com' or not url.path.endswith('/VC_redist.x64.exe'):
+        raise ValueError('Only the official runtime installer URL may be downloaded')
     if pathlib.Path(cache).is_symlink():raise ValueError('linked cache rejected')
     archive=pathlib.Path(cache)/rec['sha256']/name
     if archive.parent.is_symlink() or archive.is_symlink():raise ValueError('linked archive rejected')
@@ -104,7 +117,9 @@ def cached_source(rec,cache,name,offline=False):
 
 def fetch(output,cache,manifest=None,offline=False,acknowledge_license=False):
     if not acknowledge_license:raise PermissionError('Distributor must explicitly confirm applicable Microsoft redistribution license rights')
-    m=load_manifest(manifest);output=pathlib.Path(output);cache=pathlib.Path(cache);cache.mkdir(parents=True,exist_ok=True)
+    m=load_manifest(manifest);output=pathlib.Path(output);cache=pathlib.Path(cache)
+    notices={f['name']:local_notice(f) for f in m['files'] if f['name'] in LICENSE_NAMES}
+    cache.mkdir(parents=True,exist_ok=True)
     if output.exists():verify_source(output,output/m['license_file'],manifest);return output
     data=cached_source(m['installer'],cache,'VC_redist.x64.exe',offline);parts={}
     for cab in m['cabinets']:
@@ -112,10 +127,8 @@ def fetch(output,cache,manifest=None,offline=False,acknowledge_license=False):
         parts.update(extract_cab(blob,cab['members']))
     inner=checked(parts[m['runtime_cab']['member']],m['runtime_cab'])
     dlls=extract_cab(inner,[f['cab_member'] for f in m['files'] if f['name'].endswith('.dll')])
-    # Recent packages link to the official terms rather than embedding an RTF.
-    # Preserve exact documents, including the previous notice; no acceptance or
-    # installer execution occurs here. Entitlement remains the caller's duty.
-    notices={f['name']:cached_source(f,cache,f['name'],offline) for f in m['files'] if f['name'] in LICENSE_NAMES}
+    # This local project notice is independent of Microsoft license documents.
+    # No historical DOCX is fetched/read, including from an existing cache.
     output.parent.mkdir(parents=True,exist_ok=True);stage=pathlib.Path(tempfile.mkdtemp(prefix='.vc-runtime-',dir=output.parent))
     try:
         for f in m['files']:
