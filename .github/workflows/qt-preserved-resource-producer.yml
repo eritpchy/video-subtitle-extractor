@@ -1,0 +1,98 @@
+name: Fixed Qt preserved-input producer (not publication)
+
+# Explicit immutable Git source. No automatic push/PR event or license assertion.
+on:
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      artifact_id:
+        value: ${{ jobs.resources.outputs.artifact_id }}
+      artifact_digest:
+        value: ${{ jobs.resources.outputs.artifact_digest }}
+      artifact_bytes:
+        value: ${{ jobs.resources.outputs.artifact_bytes }}
+      producer_job_id:
+        value: ${{ jobs.resources.outputs.producer_job_id }}
+      evidence_artifact_digest:
+        value: ${{ jobs.resources.outputs.evidence_artifact_digest }}
+      artifact_name:
+        value: ${{ jobs.resources.outputs.artifact_name }}
+      evidence_artifact_id:
+        value: ${{ jobs.resources.outputs.evidence_artifact_id }}
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  resources:
+    name: Preserve exact Qt Git inputs (not publication)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      artifact_id: ${{ steps.assets.outputs.artifact-id }}
+      artifact_digest: ${{ steps.assets.outputs.artifact-digest }}
+      artifact_bytes: ${{ steps.capture.outputs.artifact_bytes }}
+      producer_job_id: ${{ steps.capture.outputs.producer_job_id }}
+      evidence_artifact_digest: ${{ steps.evidence.outputs.artifact-digest }}
+      artifact_name: qt-overlay-resources-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+      evidence_artifact_id: ${{ steps.evidence.outputs.artifact-id }}
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      VSE_QT_PRESERVED_OUTPUT: ${{ runner.temp }}/qt-preserved-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Exact producer driver checkout
+        uses: actions/checkout@v4
+        with:
+          path: driver
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Read the explicit fixed Git input contract
+        id: contract
+        run: python -I -S -B driver/scripts/qt_preserved_resources.py contract
+      - name: Fetch only the separately reviewed immutable input commit
+        uses: actions/checkout@v4
+        with:
+          repository: eritpchy/video-subtitle-extractor
+          ref: ${{ steps.contract.outputs.input_commit }}
+          path: preserved-inputs
+          persist-credentials: false
+      - name: Verify original bytes and deterministically reproduce the resource ZIP
+        shell: python
+        run: |
+          import os, subprocess, sys
+          subprocess.run([sys.executable, '-I', '-S', '-B', 'driver/scripts/qt_preserved_resources.py', 'prepare',
+                          '--input', 'preserved-inputs', '--output', os.environ['VSE_QT_PRESERVED_OUTPUT']], check=True)
+      - name: Upload the two exact original asset bytes as a NEW container
+        id: assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: qt-overlay-resources-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.VSE_QT_PRESERVED_OUTPUT }}/assets/*
+          compression-level: 0
+          retention-days: 90
+          if-no-files-found: error
+      - name: Record actual new artifact, run, attempt and producer job
+        id: capture
+        shell: python
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VSE_NEW_QT_ARTIFACT_ID: ${{ steps.assets.outputs.artifact-id }}
+          VSE_NEW_QT_ARTIFACT_DIGEST: ${{ steps.assets.outputs.artifact-digest }}
+        run: |
+          import os, subprocess, sys
+          subprocess.run([sys.executable, '-I', '-S', '-B', 'driver/scripts/qt_preserved_resources.py', 'capture',
+                          '--input', 'preserved-inputs', '--output', os.environ['VSE_QT_PRESERVED_OUTPUT'],
+                          '--artifact-id', os.environ['VSE_NEW_QT_ARTIFACT_ID'],
+                          '--artifact-digest', os.environ['VSE_NEW_QT_ARTIFACT_DIGEST']], check=True)
+      - name: Preserve producer evidence and original failures
+        if: always()
+        id: evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: qt-overlay-resource-evidence-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.VSE_QT_PRESERVED_OUTPUT }}/reports/
+          if-no-files-found: warn
+          retention-days: 90

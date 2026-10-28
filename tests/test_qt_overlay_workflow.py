@@ -11,11 +11,24 @@ def test_resource_builder_is_read_only_explicit_and_has_no_publication_trigger()
     assert '  push:' not in text
     for forbidden in ('contents: write', 'secrets: inherit', 'continue-on-error', 'curl ', 'gh release', 'git push'):
         assert forbidden not in text
-    assert 'GH_TOKEN: ${{ github.token }}' in text
-    assert 'python -I -S scripts/qt_overlay_resources_ci.py --output build/qt-overlay-input' in text
-    assert '--input-contract preserved-6cb-attempt1' in text
-    assert 'path: build/qt-overlay-input/assets/' in text
-    assert 'if: always()' in text and 'path: build/qt-overlay-input/reports/' in text
+    assert 'uses: ./.github/workflows/qt-preserved-resource-producer.yml' in text
+    producer = (ROOT / '.github/workflows/qt-preserved-resource-producer.yml').read_text()
+    for forbidden in ('contents: write', 'secrets: inherit', 'continue-on-error', 'curl ', 'gh release', 'git push'):
+        assert forbidden not in producer
+    assert '  push:' not in producer
+    assert 'GH_TOKEN: ${{ github.token }}' in producer
+    assert 'driver/scripts/qt_preserved_resources.py' in producer
+    assert 'ref: ${{ steps.contract.outputs.input_commit }}' in producer
+    assert 'persist-credentials: false' in producer
+    assert '/assets/*' in producer
+    assert 'if: always()' in producer and '/reports/' in producer
+    assert 'steps.assets.outputs.artifact-id' in producer and 'steps.assets.outputs.artifact-digest' in producer
+    for workflow in (text, producer):
+        assert '--input-contract preserved-6cb-attempt1' not in workflow
+    contract = json.loads((ROOT / 'native/qt/preserved-input-contract.json').read_text())
+    assert contract['input_commit'] == '27bde5fe111058fb9d0db9c45decabfe1160b1dc'
+    assert contract['input_tree'] == 'f81dcbaeb05b40d2aa4401e089ffd082654d6416'
+    assert contract['production_integration_allowed'] is False
 
 
 def test_same_run_resource_reuse_is_internal_and_does_not_adopt_failed_producer():
