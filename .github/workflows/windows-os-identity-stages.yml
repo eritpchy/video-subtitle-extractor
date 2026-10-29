@@ -1,0 +1,68 @@
+name: C45 Windows OS identity phase controls
+on:
+  push:
+    branches: [fix/windows-restorer]
+    paths: ['.github/workflows/windows-os-identity-stages.yml', 'diagnostics/windows-os-identity-stages/**']
+permissions:
+  contents: read
+concurrency:
+  group: c45-os-identity-phases-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  phases:
+    name: OS capture phases / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: core.autocrlf
+      GIT_CONFIG_VALUE_0: 'false'
+      VSE_REVIEW_SOURCE: identity-source
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: diagnostic-driver
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /diagnostics/windows-os-identity-stages/
+            /.github/workflows/windows-os-identity-stages.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: c45c0b03d3eef548caa69b8453e2aa80376098e9
+          path: identity-source
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.gitattributes
+            /scripts/windows_verification.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Offline phase/partial-stream contracts
+        shell: python
+        run: |
+          import subprocess, sys
+          subprocess.run([sys.executable, '-I', '-S', '-B', '-m', 'unittest', 'discover', '-s', 'diagnostic-driver/diagnostics/windows-os-identity-stages/tests', '-v'], check=True)
+      - name: Once original 60-second control then once stderr-marked control
+        shell: python
+        timeout-minutes: 5
+        env:
+          VSE_DIAGNOSTIC_RUNNER: ${{ matrix.os }}
+        run: |
+          import os, subprocess, sys
+          subprocess.run([sys.executable, '-I', '-S', '-B', 'diagnostic-driver/diagnostics/windows-os-identity-stages/probe.py', '--source', 'identity-source', '--output', 'os-phase-results', '--runner', os.environ['VSE_DIAGNOSTIC_RUNNER']], check=True)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c45-os-identity-phases-${{ matrix.os }}
+          path: os-phase-results
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1

@@ -111,3 +111,29 @@ a zero-network workflow claim: even with acknowledgment false, the always collec
 checkout/setup actions before rejecting skipped producers. Such actions may use network. No
 acknowledgment=false workflow was dispatched here. A successful source rebuild still does not
 guarantee a bit-identical EXE; compiler/SDK/path/linker differences are recorded, never waived.
+
+
+## Literal Git source-byte gate
+
+The original `40819426925` diagnostic run compiled the exact clean C45 checkout,
+but its source companions contained 39 normal Windows CRLF conversions among 55 files.
+Those original reports and ZIPs remain evidence; normalized equality is not literal
+Git-blob equality. The application candidate ZIPs and their pins are unchanged.
+
+Both producer jobs now disable automatic checkout conversion through job-scoped Git
+command environment only, before checkout. No global or repository Git settings are
+written. A read-only preflight rehashes the selected commit, tree and blob objects,
+requires all 55 checkout files to be literal authenticated Git bytes, and records an
+audit outside the application checkout. The producer independently revalidates the
+complete audit before network/workload. The reviewed command-scoped conversion setting
+is explicitly propagated through the clean MSVC environment into the unchanged build's
+own Git provenance checks; no arbitrary parent Git configuration is forwarded.
+Producer and collector also compare every delivered sourceZIP member directly against
+that authenticated Git tree. No source repair or newline-normalization fallback exists.
+
+Real small Git fixtures reproduce a clean CRLF checkout that the new gate rejects,
+and a job-scoped LF checkout that passes. Empty/duplicate audit lists, wrong tree/blob/
+SHA, materially changed source, CRLF ZIP members, missing members, foreign HEAD and
+corrupted raw objects fail. These offline contracts are not Windows compilation proof.
+New native execution is required for the new diagnostic commit; original C45 application
+CI and old diagnostic evidence remain separate. Rebuilt EXEs need not be bit-identical.

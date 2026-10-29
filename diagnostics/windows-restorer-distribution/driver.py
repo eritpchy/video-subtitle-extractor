@@ -3,11 +3,14 @@
 """Explicit final-input distribution driver: local preparation, never publication."""
 from __future__ import annotations
 import argparse
+import ast
 import datetime
+import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -121,6 +124,125 @@ def checked_source(root):
     return root
 
 
+def source_git_bytes(root, *args):
+    """Read local Git objects without replacements, filters, hooks or lazy fetch."""
+    env = {key:value for key,value in os.environ.items() if not key.startswith('GIT_')}
+    env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull, GIT_NO_REPLACE_OBJECTS='1',
+               GIT_TERMINAL_PROMPT='0', GIT_OPTIONAL_LOCKS='0', GIT_NO_LAZY_FETCH='1', GIT_ALLOW_PROTOCOL='')
+    return subprocess.check_output(['git','--no-replace-objects','-c','core.fsmonitor=false',
+        '-c','protocol.allow=never','-C',str(root),*args], env=env, stderr=subprocess.PIPE)
+
+
+def source_closure_paths(raw):
+    tree = ast.parse(raw)
+    values = [node.value for node in tree.body if isinstance(node,ast.Assign)
+              and any(isinstance(target,ast.Name) and target.id=='SOURCE_PATHS' for target in node.targets)]
+    s.need(len(values)==1, 'One authenticated source closure required')
+    def literal(node, names=None):
+        names = names or {}
+        if isinstance(node,ast.Constant) and isinstance(node.value,str): return node.value
+        if isinstance(node,ast.Tuple): return tuple(literal(item,names) for item in node.elts)
+        if isinstance(node,ast.Name) and node.id in names: return names[node.id]
+        if isinstance(node,ast.BinOp) and isinstance(node.op,ast.Add): return literal(node.left,names)+literal(node.right,names)
+        if (isinstance(node,ast.Call) and isinstance(node.func,ast.Name) and node.func.id=='tuple'
+            and len(node.args)==1 and not node.keywords and isinstance(node.args[0],ast.GeneratorExp)):
+            expr=node.args[0]; s.need(len(expr.generators)==1,'One literal closure generator required')
+            loop=expr.generators[0]
+            s.need(isinstance(loop.target,ast.Name) and not loop.ifs and not loop.is_async,'Unsafe closure generator')
+            return tuple(literal(expr.elt,{**names,loop.target.id:value}) for value in literal(loop.iter,names))
+        raise RuntimeError('Nonliteral authenticated source closure')
+    paths=literal(values[0])
+    s.need(isinstance(paths,tuple) and len(paths)==len(set(paths))==55,'Exact 55-file source closure required')
+    for path in paths:
+        s.need(isinstance(path,str) and re.fullmatch(r'[A-Za-z0-9_./-]+',path)
+               and not path.startswith('/') and not any(part in ('','.','..') for part in path.split('/')),
+               'Unsafe authenticated source path')
+    return paths
+
+
+def authenticated_source_snapshot(root):
+    pin=load_pins(); root=checked_source(root); objects={}; trees={}
+    def obj(kind, identifier):
+        s.need(re.fullmatch('[0-9a-f]{40}',identifier) is not None,'Invalid Git object identity')
+        key=(kind,identifier)
+        if key not in objects:
+            raw=source_git_bytes(root,'cat-file',kind,identifier)
+            s.need(len(raw)<=8*1024**2,'Oversize source Git object')
+            actual=hashlib.sha1(kind.encode()+b' '+str(len(raw)).encode()+b'\0'+raw).hexdigest()
+            s.need(actual==identifier,'Source Git object bytes do not match authenticated ID')
+            objects[key]=raw
+        return objects[key]
+    commit=obj('commit',pin['commit']); first=commit.split(b'\n',1)[0]
+    s.need(re.fullmatch(rb'tree [0-9a-f]{40}',first) is not None,'Authenticated commit tree missing')
+    tree_id=first[5:].decode()
+    def entries(identifier):
+        if identifier not in trees:
+            raw=obj('tree',identifier); rows={}; position=0
+            while position<len(raw):
+                space=raw.index(b' ',position); end=raw.index(b'\0',space+1)
+                mode=raw[position:space].decode('ascii'); name=raw[space+1:end].decode('utf-8')
+                s.need(name not in rows and name not in ('','.','..') and '/' not in name and end+21<=len(raw),
+                       'Invalid authenticated Git tree')
+                rows[name]=(mode,raw[end+1:end+21].hex()); position=end+21
+            trees[identifier]=rows
+        return trees[identifier]
+    def blob(path):
+        parent=tree_id; parts=path.split('/')
+        for index,name in enumerate(parts):
+            rows=entries(parent); s.need(name in rows,'Missing authenticated source member')
+            mode,identifier=rows[name]
+            if index<len(parts)-1:
+                s.need(mode=='40000','Non-tree source ancestor'); parent=identifier
+            else:
+                s.need(mode in ('100644','100755'),'Nonregular source Git blob')
+                return obj('blob',identifier),identifier
+    paths=source_closure_paths(blob('native/windows-restorer/source_bundle.py')[0])
+    result={path:blob(path) for path in paths}
+    return root,tree_id,result,len(objects)
+
+
+def canonicalize_source_checkout(root):
+    """Read-only pre-workload gate: checkout must already contain literal Git bytes."""
+    root,tree,snapshot,count=authenticated_source_snapshot(root); rows=[]
+    for name,(expected,identifier) in snapshot.items():
+        path=root/name; s.plain(path)
+        for parent in path.parents:
+            if parent==root: break
+            s.plain(parent,True)
+        actual=path.read_bytes()
+        s.need(actual==expected,'Source checkout differs from authenticated Git blob: '+name)
+        rows.append({'path':name,'git_blob':identifier,'after':{'bytes':len(expected),'sha256':s.digest(expected)}})
+    return {'scope':'pre-workload-canonical-Git-source-bytes','commit':load_pins()['commit'],'tree':tree,
+            'files':rows,'file_count':len(rows),'raw_Git_objects_rehashed':count,
+            'source_files_written':False,'global_or_persistent_Git_config_changed':False,
+            'original_application_archives_or_parts_changed':False}
+
+
+def verify_canonical_source_audit(root, audit):
+    root,tree,snapshot,count=authenticated_source_snapshot(root)
+    rows=audit.get('files')
+    s.need(audit.get('commit')==load_pins()['commit'] and audit.get('tree')==tree
+           and audit.get('file_count')==55 and isinstance(rows,list) and len(rows)==55
+           and {row.get('path') for row in rows}==set(snapshot), 'Incomplete canonical source audit')
+    for row in rows:
+        expected,identifier=snapshot[row['path']]
+        exact={'bytes':len(expected),'sha256':s.digest(expected)}
+        s.need(row.get('git_blob')==identifier and row.get('after')==exact
+               and s.file_record(root/row['path'])==exact, 'Canonical source audit or checkout differs from Git blob')
+    return {'commit':load_pins()['commit'],'tree':tree,'file_count':55,'raw_Git_objects_rehashed':count}
+
+
+def verify_source_zip_git_membership(root, archive):
+    _,tree,snapshot,count=authenticated_source_snapshot(root); rows=[]
+    with zipfile.ZipFile(s.plain(archive)) as stream:
+        for name,(expected,identifier) in snapshot.items():
+            actual=stream.read(name)
+            s.need(actual==expected,'Delivered source ZIP differs from authenticated Git blob: '+name)
+            rows.append({'path':name,'git_blob':identifier,'bytes':len(actual),'sha256':s.digest(actual)})
+    return {'scope':'literal-source-ZIP-to-authenticated-Git-tree','commit':load_pins()['commit'],'tree':tree,
+            'file_count':len(rows),'raw_Git_objects_rehashed':count,'files':rows,'source_zip':s.file_record(archive)}
+
+
 def gate_at(source): return s.load_exact(source / 'native/windows-restorer/release_gate.py', 'gate')
 
 
@@ -213,6 +335,16 @@ def context_from_distribution(distribution, handoff, profile):
     return context
 
 
+
+def canonical_build_environment(record):
+    env=s.initialize_msvc(record)
+    # The allowlisted toolchain environment discards parent Git configuration.
+    # Reintroduce only this reviewed command-scoped checkout conversion setting.
+    env.update(GIT_CONFIG_COUNT='1',GIT_CONFIG_KEY_0='core.autocrlf',GIT_CONFIG_VALUE_0='false')
+    record['build_git_command_configuration']={'core.autocrlf':False,'persistent_config_written':False}
+    return env
+
+
 def producer(args):
     s.need(args.acknowledge_license, 'Explicit distributor rights acknowledgment required')
     pin = load_pins()  # Incomplete future bindings fail before platform/I/O/network.
@@ -224,6 +356,9 @@ def producer(args):
     record = {'schema': 1, 'scope': 'one-production-build-not-release', 'result': 'failed', 'profile': args.profile}
     failure = None
     try:
+        checkout_audit = s.read_json(source.parent/'source-checkout-git-audit.json')
+        record['canonical_source_pre_workload'] = verify_canonical_source_audit(source,checkout_audit)
+        s.write_json(work/'source-checkout-git-audit.json',checkout_audit)
         origin = verify_origin(pin, args.profile, token)
         metadata = artifact_metadata(row['canonical_artifact_id'], token, name=row['canonical_artifact_name'], run_id=pin['run_id'],
             commit=pin['commit'], expected={'bytes':row['outer_container_bytes'],'sha256':row['outer_api_sha256'],'expiry':row['expiry_utc']})
@@ -239,7 +374,7 @@ def producer(args):
         s.unpack(outer, original, limit=row['inner_zip_bytes'] + 2 * 1024 ** 2, expected=expected)
         record['original_members'] = expected
         record['project_notice'] = notice
-        env = s.initialize_msvc(record)
+        env = canonical_build_environment(record)
         command = [sys.executable,'-B',str(source/'native/windows-restorer/release_gate.py'),'prepare',
             '--archive',str(original/row['inner_zip']),'--archive-sha256',row['inner_zip_sha256'],
             '--receipt-sha256',row['receipt_sha256'],'--checksum-sha256',row['checksum_sha256'],
@@ -250,6 +385,7 @@ def producer(args):
             subprocess.run(command, cwd=work, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=3600, check=True)
         prepared = work/'prepared'; handoff = s.read_json(prepared/'handoff.json'); distribution = prepared/'build/distribution'
         context = context_from_distribution(distribution, handoff, args.profile)
+        record['source_zip_git_membership'] = verify_source_zip_git_membership(source,distribution/'restorer-source.zip')
         gate = gate_at(source); manifest = prepared/'volumes'/(row['inner_zip']+'.transport.json')
         _, document = gate.load_handoff(prepared/'handoff.json',context['handoff_sha256'],distribution,manifest)
         s.need(document['archive']['uncompressed_bytes'] == row['expanded_bytes'], 'Expanded bytes differ from original size evidence')
@@ -421,6 +557,7 @@ def collector(args):
             delivery/'volumes'/(pin['profiles'][profile]['inner_zip']+'.transport.json'))
         gate.validate_build(s.read_json(delivery/'build/distribution/build-record.json'))
         s.validate_compile(s.read_json(delivery/'build/distribution/build-record.json'),expected_exe=context['original_exe_sha256'])
+        source_git_membership=verify_source_zip_git_membership(source,delivery/'build/distribution/restorer-source.zip')
         consumers=[];anchors=[]
         for runner in s.RUNNERS:
             path=args.reports/(profile+'-'+runner)/'consumer-report.json'
@@ -431,6 +568,7 @@ def collector(args):
         verify_rebuilt_map(source,path.parent/'rebuilt/link-map.txt',rebuild['rebuild_record']['restricted_zlib']['final_link_map'])
         result=validate_join(gate,handoff,consumers,rebuild,context)
         result.update(original_consumer_reports=anchors,original_source_report=rebuild_pin,original_archive=document['archive'])
+        result['source_zip_git_membership']=source_git_membership
         # Original reports/inputs stay on disk; collector really rechecks volumes.
         gate.load_handoff(delivery/'handoff.json',context['handoff_sha256'],delivery/'build/distribution',
             delivery/'volumes'/(pin['profiles'][profile]['inner_zip']+'.transport.json'))
@@ -498,6 +636,8 @@ def collect_from_environment(source):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);sub=parser.add_subparsers(dest='action',required=True)
+    canonical=sub.add_parser('canonical-source')
+    canonical.add_argument('--source',type=Path,required=True);canonical.add_argument('--audit',type=Path,required=True)
     for action in ('produce','consume','collect'):
         p=sub.add_parser(action);p.add_argument('--source',type=Path,required=True);p.add_argument('--work',type=Path,required=True)
         if action!='collect':p.add_argument('--profile',choices=s.PROFILES,required=True)
@@ -509,6 +649,11 @@ def main():
         if action=='collect':
             p.add_argument('--collection',type=Path,required=True);p.add_argument('--reports',type=Path,required=True)
     args=parser.parse_args()
+    if args.action=='canonical-source':
+        result=canonicalize_source_checkout(args.source);s.write_json(args.audit,result)
+        print(json.dumps({'commit':result['commit'],'tree':result['tree'],'file_count':result['file_count'],
+                          'source_files_written':result['source_files_written'],'network_build_or_dispatch':False}))
+        return
     {'produce':producer,'consume':consumer,'collect':collector}[args.action](args)
 
 
