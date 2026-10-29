@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Isolated 8f distribution experiment: no publication or application changes."""
+"""Explicit final-input distribution driver: local preparation, never publication."""
 from __future__ import annotations
 import argparse
 import datetime
@@ -22,8 +22,38 @@ sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('_vse_source_only_driver', HERE / 'source_only.py')
 s = importlib.util.module_from_spec(spec); spec.loader.exec_module(s)
-PINS = s.read_json(HERE / 'pins.json')
+PINS_PATH = HERE / 'pins.json'
 REPO = 'eritpchy/video-subtitle-extractor'
+
+
+def load_pins():
+    # The checked-in JSON and both no-checkout bootstraps share one exact anchor.
+    raw = s.plain(PINS_PATH).read_bytes()
+    s.need(raw == s.configured_pin_bytes(), 'Checked-in/embedded input pins differ')
+    return s.expected_pins()
+
+
+def verify_origin(pin, profile, token):
+    s.validate_input_pins(pin)
+    row = pin['profiles'][profile]
+    run = api(f'/repos/{REPO}/actions/runs/{pin["run_id"]}/attempts/{pin["run_attempt"]}', token)
+    job = api(f'/repos/{REPO}/actions/jobs/{row["job"]}', token)
+    candidate = api(f'/repos/{REPO}/actions/jobs/{pin["candidate_set_job"]}', token)
+    s.need(type(run.get('id')) is int and type(run.get('run_attempt')) is int
+           and run.get('id') == pin['run_id'] and run.get('head_sha') == pin['commit']
+           and run.get('run_attempt') == pin['run_attempt'] and run.get('status') == 'completed'
+           and run.get('conclusion') == 'success' and run.get('path') == '.github/workflows/release.yml'
+           and run.get('head_branch') == 'fix/restore-release-matrix'
+           and run.get('repository', {}).get('full_name') == REPO, 'Final main run/attempt/source did not pass')
+    for value, name in ((job, profile + ' / windows-2022 (GPU hardware not tested)'),
+                        (candidate, 'Verify approved candidate matrix (not publication)')):
+        s.need(type(value.get('id')) is int and type(value.get('run_id')) is int and type(value.get('run_attempt')) is int
+               and value.get('run_id') == pin['run_id'] and value.get('run_attempt') == pin['run_attempt']
+               and value.get('head_sha') == pin['commit'] and value.get('status') == 'completed'
+               and value.get('conclusion') == 'success' and value.get('name') == name,
+               'Final canonical producer/candidate-set job did not pass')
+    s.need(job.get('id') == row['job'] and candidate.get('id') == pin['candidate_set_job'], 'Wrong original job identity')
+    return {'run':run, 'job':job, 'candidate_set':candidate}
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -83,10 +113,11 @@ def download_artifact(metadata, destination, token):
 
 
 def checked_source(root):
+    pin = load_pins()
     root = root.resolve(strict=True)
     sha = subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'], text=True).strip()
     status = subprocess.check_output(['git','-C',str(root),'status','--porcelain','--untracked-files=all'], text=True)
-    s.need(sha == s.SOURCE_COMMIT and not status, 'Exact clean8f application/build checkout required')
+    s.need(sha == pin['commit'] and not status, 'Exact clean final application/build checkout required')
     return root
 
 
@@ -169,7 +200,9 @@ def context_from_distribution(distribution, handoff, profile):
     with zipfile.ZipFile(archive) as zipped:
         source_manifest = zipped.read('source-manifest.json')
         original_build = zipped.read('evidence/original-build-record.json')
-    context = {'schema': 1, 'source_commit': s.SOURCE_COMMIT, 'profile': profile,
+    pin = load_pins()
+    context = {'schema': 1, 'source_commit': pin['commit'], 'source_version': pin['version'],
+        'application_identity':s.binding_identity(pin, profile), 'profile': profile,
         'source_zip_bytes': archive.stat().st_size, 'source_zip_sha256': s.sha(archive),
         'original_exe_sha256': handoff['exe_sha256'], 'handoff_sha256': s.sha(distribution.parent.parent / 'handoff.json'),
         'embedded_header_sha256': build['embedded_header_sha256'],
@@ -180,58 +213,38 @@ def context_from_distribution(distribution, handoff, profile):
     return context
 
 
-def acquire_notices(source, target):
-    pin = s.read_json(source / 'native/ocr/vc-runtime-manifest.json')
-    target.mkdir()
-    rows = [row for row in pin['files'] if row['name'] in ('license.docx','license-2015-2022.docx')]
-    s.need(len(rows) == 2, 'Reviewed notices missing')
-    expected_notices = {'license.docx':(39553,'08651651a7602fc7c0e2763de0fde1ff9f868df2780597cd1775ee9d6441c783'),
-        'license-2015-2022.docx':(39644,'f1e3d56ceb2ad68aae0711b910375009e651ac5530fa0760f0dea6e81e54fae1')}
-    s.need({row['name']:(row['bytes'],row['sha256']) for row in rows} == expected_notices, 'Unapproved/new notice terms; stop for review')
-    for row in rows:
-        url = urllib.parse.urlsplit(row['url'])
-        s.need(url.scheme == 'https' and url.hostname == 'visualstudio.microsoft.com', 'Only pinned original Microsoft notices')
-        with urllib.request.urlopen(row['url'], timeout=60) as reply:
-            data = reply.read(row['bytes'] + 1)
-        s.need(len(data) == row['bytes'] and s.digest(data) == row['sha256'], 'Official notice bytes mismatch')
-        with (target / row['name']).open('xb') as stream: stream.write(data)
-    return rows
-
-
 def producer(args):
-    s.native_server('windows-2022'); source = checked_source(args.source)
     s.need(args.acknowledge_license, 'Explicit distributor rights acknowledgment required')
+    pin = load_pins()  # Incomplete future bindings fail before platform/I/O/network.
+    s.native_server('windows-2022'); source = checked_source(args.source)
+    notice = s.verify_project_notice(source, pin)
     work = fresh_work(args.work)
-    row = PINS['profiles'][args.profile]; token = os.environ.pop('GITHUB_TOKEN', '')
+    row = pin['profiles'][args.profile]; token = os.environ.pop('GITHUB_TOKEN', '')
     s.need(token, 'Read-only artifact token required')
-    record = {'schema': 1, 'scope': 'fixed8f-one-production-build-not-release', 'result': 'failed', 'profile': args.profile}
+    record = {'schema': 1, 'scope': 'one-production-build-not-release', 'result': 'failed', 'profile': args.profile}
     failure = None
     try:
-        run = api(f'/repos/{REPO}/actions/runs/{PINS["run_id"]}/attempts/{PINS["run_attempt"]}', token)
-        job = api(f'/repos/{REPO}/actions/jobs/{row["job"]}', token)
-        s.need(run.get('head_sha') == PINS['commit'] and run.get('run_attempt') == 2 and run.get('conclusion') == 'success'
-               and job.get('run_id') == PINS['run_id'] and job.get('run_attempt') == 2
-               and job.get('head_sha') == PINS['commit'] and job.get('conclusion') == 'success', 'Original production job/attempt did not pass')
-        metadata = artifact_metadata(row['canonical_artifact_id'], token, name=row['canonical_artifact_name'], run_id=PINS['run_id'],
-            commit=PINS['commit'], expected={'bytes':row['outer_container_bytes'],'sha256':row['outer_api_sha256'],'expiry':row['expiry_utc']})
+        origin = verify_origin(pin, args.profile, token)
+        metadata = artifact_metadata(row['canonical_artifact_id'], token, name=row['canonical_artifact_name'], run_id=pin['run_id'],
+            commit=pin['commit'], expected={'bytes':row['outer_container_bytes'],'sha256':row['outer_api_sha256'],'expiry':row['expiry_utc']})
         record['source_checkout_bytes'] = sum(p.stat().st_size for p in source.rglob('*') if p.is_file() and '.git' not in p.parts)
         record['budget_before_original_download'] = s.space(work, metadata['size_in_bytes'] + 2 * row['inner_zip_bytes'] + s.RESERVE)
         outer = work / 'original-canonical-outer.zip'
         record['original_download'] = download_artifact(metadata, outer, token)
-        s.write_json(work / 'original-api-and-download.json', {'run':run,'job':job,'download':record['original_download']})
+        s.write_json(work / 'original-api-and-download.json', {**origin,'input_binding_sha256':s.APPLICATION_PINS_SHA256,'download':record['original_download']})
         original = work / 'original'
         expected = {row['inner_zip']: {'bytes':row['inner_zip_bytes'],'sha256':row['inner_zip_sha256']},
             row['inner_zip']+'.sha256': {'bytes':row['checksum_bytes'],'sha256':row['checksum_sha256']},
             row['inner_zip']+'.acceptance.json': {'bytes':row['receipt_bytes'],'sha256':row['receipt_sha256']}}
         s.unpack(outer, original, limit=row['inner_zip_bytes'] + 2 * 1024 ** 2, expected=expected)
         record['original_members'] = expected
-        record['notices'] = acquire_notices(source, work / 'notices')
+        record['project_notice'] = notice
         env = s.initialize_msvc(record)
         command = [sys.executable,'-B',str(source/'native/windows-restorer/release_gate.py'),'prepare',
             '--archive',str(original/row['inner_zip']),'--archive-sha256',row['inner_zip_sha256'],
             '--receipt-sha256',row['receipt_sha256'],'--checksum-sha256',row['checksum_sha256'],
-            '--commit',PINS['commit'],'--version',PINS['version'],'--profile',args.profile,'--runner','windows-2022',
-            '--notices',str(work/'notices'),'--work',str(work/'prepared'),'--acknowledge-redistribution-license']
+            '--commit',pin['commit'],'--version',pin['version'],'--profile',args.profile,'--runner','windows-2022',
+            '--work',str(work/'prepared'),'--acknowledge-redistribution-license']
         record['prepare_command'] = command
         with (work/'prepare.log').open('xb') as log:
             subprocess.run(command, cwd=work, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=3600, check=True)
@@ -246,7 +259,7 @@ def producer(args):
         # No second parts copy: upload ONLY these allowlisted original prepared paths.
         delivery = prepared
         s.write_json(delivery/'producer-context.json', context)
-        index = {'schema':1,'scope':'exact8f-native-restorer-delivery','profile':args.profile,'files':delivery_files(delivery)}
+        index = {'schema':1,'scope':'explicit-final-native-restorer-delivery','profile':args.profile,'files':delivery_files(delivery)}
         s.write_json(delivery/'delivery-index.json', index)
         record['context'] = context; record['delivery_index_sha256'] = s.sha(delivery/'delivery-index.json')
         record['delivery_expanded_bytes'] = sum(item['bytes'] for item in index['files'].values()) + (delivery/'delivery-index.json').stat().st_size
@@ -259,6 +272,7 @@ def producer(args):
     finally:
         errors = []
         for name, check in (('source-after', lambda: checked_source(source)),
+            ('project-notice-after', lambda: s.need(s.verify_project_notice(source, pin) == notice, 'Project notice changed')),
             ('original-outer-after', lambda: s.need(s.file_record(work/'original-canonical-outer.zip') == record['original_download']['outer'], 'Original outer changed')),
             ('original-members-after', lambda: s.need(files(work/'original') == record['original_members'], 'Original members changed'))):
             if name.startswith('original') and ('original_download' if name=='original-outer-after' else 'original_members') not in record: continue
@@ -304,14 +318,15 @@ def safe_remove_verified_transport_outer(path, *, temp_root, evidence_path, extr
 
 
 def acquire_delivery(args, token, work):
+    pin = load_pins()
     context = s.json_bytes(args.context.encode()); s.validate_context(context)
     s.need(context['profile'] == args.profile, 'Wrong delivery profile')
-    metadata = artifact_metadata(args.artifact_id,token,name='restorer8f-delivery-'+args.profile,
+    metadata = artifact_metadata(args.artifact_id,token,name='restorer-final-delivery-'+args.profile,
         run_id=int(os.environ['GITHUB_RUN_ID']),commit=os.environ['GITHUB_SHA'])
     for name in ('archive_bytes','expanded_bytes','inventory_entries'):
         s.need(type(context.get(name)) is int and 0 < context[name] <= 1024**4, 'Missing/bad producer size bound')
-    pin = PINS['profiles'][args.profile]
-    s.need(context['archive_bytes'] == pin['inner_zip_bytes'] and context['expanded_bytes'] == pin['expanded_bytes']
+    row = pin['profiles'][args.profile]
+    s.need(context['archive_bytes'] == row['inner_zip_bytes'] and context['expanded_bytes'] == row['expanded_bytes']
            and context['inventory_entries'] <= 1000000, 'Producer size differs from fixed archive')
     expected_bytes = args.delivery_bytes
     s.need(0 < expected_bytes < 16 * 1024 ** 3, 'Delivery expansion bound')
@@ -323,7 +338,7 @@ def acquire_delivery(args, token, work):
         raw=archive.read(row)
     s.need(s.digest(raw)==args.index_sha256,'Independent producer delivery-index SHA mismatch')
     index=s.json_bytes(raw)
-    s.need(index.get('schema')==1 and index.get('scope')=='exact8f-native-restorer-delivery' and index.get('profile')==args.profile,'Wrong delivery index')
+    s.need(index.get('schema')==1 and index.get('scope')=='explicit-final-native-restorer-delivery' and index.get('profile')==args.profile,'Wrong delivery index')
     expected={**index['files'],'delivery-index.json':{'bytes':len(raw),'sha256':s.digest(raw)}}
     s.need(sum(row['bytes'] for row in expected.values())==expected_bytes,'Delivery bytes differ from producer')
     extracted=work/'delivery'; s.unpack(outer,extracted,limit=expected_bytes,expected=expected)
@@ -339,11 +354,12 @@ def acquire_delivery(args, token, work):
 
 
 def consumer(args):
+    pin = load_pins()
     s.native_server(args.runner); source=checked_source(args.source)
     work=fresh_work(args.work)
     token=os.environ.pop('GITHUB_TOKEN',''); s.need(token,'Read-only artifact token required')
     delivery,context=acquire_delivery(args,token,work)
-    row=PINS['profiles'][args.profile]
+    row=pin['profiles'][args.profile]
     command=[sys.executable,'-B',str(source/'native/windows-restorer/release_gate.py'),'consume',
         '--handoff',str(delivery/'handoff.json'),'--handoff-sha256',context['handoff_sha256'],
         '--distribution',str(delivery/'build/distribution'),'--manifest',str(delivery/'volumes'/(row['inner_zip']+'.transport.json')),
@@ -362,29 +378,36 @@ def consumer(args):
 
 def validate_join(gate,handoff,consumers,rebuild,context):
     s.validate_source_report(rebuild,context)
+    pin = load_pins(); row = pin['profiles'][context['profile']]
+    archive = handoff.get('archive', {})
+    s.need(archive.get('sha256') == row['inner_zip_sha256']
+           and archive.get('identity', {}).get('commit') == pin['commit']
+           and archive.get('identity', {}).get('version') == pin['version']
+           and archive.get('identity', {}).get('build_profile') == context['profile'], 'Joined archive differs from explicit final input')
     s.need(len(consumers)==2 and {row.get('runner') for row in consumers}==set(s.RUNNERS),'Two distinct Server consumer reports required')
     for row in consumers:
         gate.validate_consumer(row,handoff,row['runner'])
         s.need(row.get('handoff_sha256')==context['handoff_sha256'] and row.get('exe_sha256')==context['original_exe_sha256'], 'Same-EXE/handoff binding failed')
     s.need(consumers[0]['restored_before_launcher']==consumers[1]['restored_before_launcher'],'Cross-Server payload differs')
     s.need(handoff['exe_sha256']==context['original_exe_sha256'] and handoff['source_zip_sha256']==context['source_zip_sha256'],'Producer source/EXE mismatch')
-    return {'schema':1,'scope':'8f-same-exe-two-server-and-independent-source-only-rebuild-not-release',
+    return {'schema':1,'scope':'same-exe-two-server-and-independent-source-only-rebuild-not-release',
         'result':'passed','profile':context['profile'],'producer_context':context,'collector_rehashed_all_parts':True,
         'legacy_rebuild_transport_proof_claimed':False,'rebuilt_exe_not_used_as_delivery':True,
         'gpu_inference_verified':False,'windows_10_11_verified':False}
 
 
 def collector(args):
+    pin = load_pins()
     source=checked_source(args.source);work=fresh_work(args.work)
     token=os.environ.pop('GITHUB_TOKEN','');s.need(token,'Read-only artifact token required')
     config=s.read_json(args.collection); gate=gate_at(source); results=[]
-    s.need(set(config)==set(PINS['profiles']),'Both exact8f profiles required')
+    s.need(set(config)==set(pin['profiles']),'Both explicitly bound final profiles required')
     # Conservative: reserve both profiles' retained parts/distributions plus the
     # larger temporary outer. Only each proven redundant transport outer is removed.
     required=s.RESERVE
     metadata={}
     for profile,row in config.items():
-        metadata[profile]=artifact_metadata(row['artifact_id'],token,name='restorer8f-delivery-'+profile,
+        metadata[profile]=artifact_metadata(row['artifact_id'],token,name='restorer-final-delivery-'+profile,
             run_id=int(os.environ['GITHUB_RUN_ID']),commit=os.environ['GITHUB_SHA'])
         required+=row['delivery_bytes']
     required+=max(row['size_in_bytes'] for row in metadata.values())
@@ -395,41 +418,42 @@ def collector(args):
             artifact_id=row['artifact_id'],delivery_bytes=row['delivery_bytes'],index_sha256=row['index_sha256'])
         delivery,context=acquire_delivery(delivery_args,token,child)
         handoff,document=gate.load_handoff(delivery/'handoff.json',context['handoff_sha256'],delivery/'build/distribution',
-            delivery/'volumes'/(PINS['profiles'][profile]['inner_zip']+'.transport.json'))
+            delivery/'volumes'/(pin['profiles'][profile]['inner_zip']+'.transport.json'))
         gate.validate_build(s.read_json(delivery/'build/distribution/build-record.json'))
         s.validate_compile(s.read_json(delivery/'build/distribution/build-record.json'),expected_exe=context['original_exe_sha256'])
         consumers=[];anchors=[]
         for runner in s.RUNNERS:
             path=args.reports/(profile+'-'+runner)/'consumer-report.json'
-            report,pin=gate.read_bound_report(path,row['consumer_report_sha256'][runner]);consumers.append(report);anchors.append({'runner':runner,**pin})
+            report,report_pin=gate.read_bound_report(path,row['consumer_report_sha256'][runner]);consumers.append(report);anchors.append({'runner':runner,**report_pin})
         path=args.reports/(profile+'-source')/'source-only-report.json'
-        rebuild,pin=gate.read_bound_report(path,row['source_report_sha256'])
+        rebuild,rebuild_pin=gate.read_bound_report(path,row['source_report_sha256'])
         s.validate_source_report(rebuild,context,path.parent)
         verify_rebuilt_map(source,path.parent/'rebuilt/link-map.txt',rebuild['rebuild_record']['restricted_zlib']['final_link_map'])
         result=validate_join(gate,handoff,consumers,rebuild,context)
-        result.update(original_consumer_reports=anchors,original_source_report=pin,original_archive=document['archive'])
+        result.update(original_consumer_reports=anchors,original_source_report=rebuild_pin,original_archive=document['archive'])
         # Original reports/inputs stay on disk; collector really rechecks volumes.
         gate.load_handoff(delivery/'handoff.json',context['handoff_sha256'],delivery/'build/distribution',
-            delivery/'volumes'/(PINS['profiles'][profile]['inner_zip']+'.transport.json'))
+            delivery/'volumes'/(pin['profiles'][profile]['inner_zip']+'.transport.json'))
         for runner in s.RUNNERS:
             gate.read_bound_report(args.reports/(profile+'-'+runner)/'consumer-report.json',row['consumer_report_sha256'][runner])
         gate.read_bound_report(path,row['source_report_sha256'])
         artifact_rows = {}
-        named = {'producer_raw':('restorer8f-producer-raw-'+profile,row['artifacts']['producer_raw']),
-            'source':('restorer8f-source-'+profile,row['artifacts']['source']),
-            'source_report':('restorer8f-report-'+profile+'-source',row['artifacts']['source_report']),
-            'source_raw':('restorer8f-source-raw-'+profile,row['artifacts']['source_raw'])}
+        named = {'producer_raw':('restorer-final-producer-raw-'+profile,row['artifacts']['producer_raw']),
+            'source':('restorer-final-source-'+profile,row['artifacts']['source']),
+            'source_report':('restorer-final-report-'+profile+'-source',row['artifacts']['source_report']),
+            'source_raw':('restorer-final-source-raw-'+profile,row['artifacts']['source_raw'])}
         for runner in s.RUNNERS:
-            named[runner+'-report']=('restorer8f-report-'+profile+'-'+runner,row['artifacts'][runner]['report'])
-            named[runner+'-raw']=('restorer8f-consumer-raw-'+profile+'-'+runner,row['artifacts'][runner]['raw'])
+            named[runner+'-report']=('restorer-final-report-'+profile+'-'+runner,row['artifacts'][runner]['report'])
+            named[runner+'-raw']=('restorer-final-consumer-raw-'+profile+'-'+runner,row['artifacts'][runner]['raw'])
         for label,(name,identifier) in named.items():
             artifact_rows[label]=artifact_metadata(identifier,token,name=name,run_id=int(os.environ['GITHUB_RUN_ID']),commit=os.environ['GITHUB_SHA'])
         result['upstream_job_artifacts'] = artifact_rows
         s.write_json(child/'joined-report.json',result);results.append(result)
-    s.write_json(work/'all-profiles-report.json',{'schema':1,'result':'passed','scope':'exact8f-build-only-not-2.3.1-or-release','profiles':results})
+    s.write_json(work/'all-profiles-report.json',{'schema':1,'result':'passed','scope':'explicit-final-inputs-build-only-not-release','profiles':results})
 
 
 def collection_plan(needs):
+    load_pins()
     required = {'produce-'+short for short in ('cu118','cu126')} | {'rebuild-'+short for short in ('cu118','cu126')} | {
         'consume-'+short+'-'+year for short in ('cu118','cu126') for year in ('2022','2025')}
     s.need(set(needs) == required and all(row.get('result') == 'success' for row in needs.values()),
@@ -455,14 +479,15 @@ def collection_plan(needs):
 
 
 def collect_from_environment(source):
-    root = fresh_work(Path(os.environ['RUNNER_TEMP'])/'restorer8f-collector-evidence')
+    load_pins()
+    root = fresh_work(Path(os.environ['RUNNER_TEMP'])/'restorer-final-collector-evidence')
     needs = s.json_bytes(os.environ['VSE_NEEDS'].encode())
     s.write_json(root/'original-needs-outputs.json', needs)
     report = {'scope':'eight-job-strict-collector','result':'failed'}
     try:
         config = collection_plan(needs); s.write_json(root/'collection-inputs.json',config)
         args = argparse.Namespace(source=source,work=root/'verification',collection=root/'collection-inputs.json',
-            reports=Path(os.environ['RUNNER_TEMP'])/'restorer8f-reports')
+            reports=Path(os.environ['RUNNER_TEMP'])/'restorer-final-reports')
         collector(args); report['result']='passed'
     except Exception as error:
         report['error'] = f'{type(error).__name__}: {error}'
@@ -475,7 +500,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__);sub=parser.add_subparsers(dest='action',required=True)
     for action in ('produce','consume','collect'):
         p=sub.add_parser(action);p.add_argument('--source',type=Path,required=True);p.add_argument('--work',type=Path,required=True)
-        if action!='collect':p.add_argument('--profile',choices=tuple(PINS['profiles']),required=True)
+        if action!='collect':p.add_argument('--profile',choices=s.PROFILES,required=True)
         if action=='produce':p.add_argument('--acknowledge-license',action='store_true')
         if action=='consume':
             p.add_argument('--runner',choices=tuple(s.RUNNERS),required=True)

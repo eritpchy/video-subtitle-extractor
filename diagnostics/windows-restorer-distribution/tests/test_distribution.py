@@ -13,6 +13,7 @@ import tempfile
 import unittest
 from unittest import mock
 import zipfile
+from binding_fixtures import configured, fixture_pins
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parents[1]
@@ -22,8 +23,27 @@ s = d.s
 H = 'a'*64
 
 
-def context():
-    return dict(schema=1,source_commit=s.SOURCE_COMMIT,profile='paddle-cuda11.8',source_zip_bytes=123,
+def require_stdlib_imports(source):
+    roots=set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node,ast.Import):
+            roots.update(alias.name.split('.')[0] for alias in node.names)
+        elif isinstance(node,ast.ImportFrom):
+            if node.level or not node.module:raise RuntimeError('Relative bootstrap import rejected')
+            roots.add(node.module.split('.')[0])
+    if not roots <= sys.stdlib_module_names:raise RuntimeError('Non-stdlib bootstrap import: '+repr(sorted(roots-sys.stdlib_module_names)))
+    return roots
+
+
+class ConfiguredCase(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(configured(d))
+
+
+def context(profile='paddle-cuda11.8'):
+    pin=d.load_pins()
+    return dict(schema=1,source_commit=pin['commit'],source_version=pin['version'],
+        application_identity=s.binding_identity(pin,profile),profile=profile,source_zip_bytes=123,
         **{key:H for key in ('source_zip_sha256','original_exe_sha256','handoff_sha256','embedded_header_sha256',
             'generator_identity_sha256','source_closure_sha256','source_manifest_sha256','original_build_record_sha256')})
 
@@ -63,8 +83,14 @@ def source_report(ctx=None):
         'rebuild_command':['python','-I','-S','-B','rebuild.py','--source-root','s','--output','o','--acknowledge-redistribution-license']}
 
 
-class SourceContract(unittest.TestCase):
+class SourceContract(ConfiguredCase):
     def test_valid_source_scope_is_distinct(self): s.validate_source_report(source_report(),context())
+    def test_truthful_non_bit_identical_rebuild_is_allowed(self):
+        row = source_report()
+        row['rebuilt_exe']['sha256'] = 'b' * 64
+        row['rebuild_record']['exe_sha256'] = 'b' * 64
+        row['rebuild_record']['bit_identical_to_original'] = False
+        s.validate_source_report(row, context())
     def test_rejects_legacy_transport_impersonation(self):
         row=source_report();row['inputs_after']={'result':'passed'}
         with self.assertRaises(RuntimeError):s.validate_source_report(row,context())
@@ -102,16 +128,24 @@ class SourceContract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             with self.assertRaises((RuntimeError,FileNotFoundError)):s.validate_source_report(source_report(),context(),Path(root))
     def test_source_bootstrap_no_bytecode_and_no_third_party_imports(self):
-        tree=ast.parse((HERE/'source_only.py').read_text())
-        imports={node.names[0].name.split('.')[0] for node in ast.walk(tree) if isinstance(node,ast.Import)}
-        self.assertTrue(imports <= sys.stdlib_module_names)
+        require_stdlib_imports((HERE/'source_only.py').read_text())
         self.assertIn('sys.dont_write_bytecode = True',(HERE/'source_only.py').read_text())
+    def test_stdlib_scan_checks_ImportFrom_and_all_Import_aliases(self):
+        for source in ('import os, nonstdlib_bootstrap_dependency',
+                       'from nonstdlib_bootstrap_dependency.submodule import value',
+                       'def nested():\n    import os, nonstdlib_bootstrap_dependency as alias'):
+            with self.subTest(source=source),self.assertRaises(RuntimeError):require_stdlib_imports(source)
+    def test_stdlib_scan_rejects_relative_imports(self):
+        for source in ('from . import unknown','from ..pathlib import Path'):
+            with self.subTest(source=source),self.assertRaises(RuntimeError):require_stdlib_imports(source)
+    def test_stdlib_scan_accepts_all_supported_stdlib_import_forms(self):
+        self.assertEqual(require_stdlib_imports('import os, sys as system\nfrom pathlib import Path, PurePath\nfrom importlib.util import spec_from_file_location'),{'os','sys','pathlib','importlib'})
     def test_safe_child_environment_drops_tokens_and_compiler_injection(self):
         with mock.patch.dict(os.environ,{'TOKEN':'hidden','GITHUB_TOKEN':'hidden','SECRET':'hidden','CL':'/evil','PATH':'safe'},clear=True):
             self.assertEqual(s.clean_environment(),{'PATH':'safe','PYTHONUTF8':'1','PYTHONDONTWRITEBYTECODE':'1'})
 
 
-class ExtractionContract(unittest.TestCase):
+class ExtractionContract(ConfiguredCase):
     def archive(self,root,entries):
         path=root/'input.zip'
         with zipfile.ZipFile(path,'w') as archive:
@@ -149,8 +183,9 @@ class ExtractionContract(unittest.TestCase):
             self.assertTrue(archive.exists());self.assertFalse((root/'out').exists())
 
 
-class CleanupContract(unittest.TestCase):
+class CleanupContract(ConfiguredCase):
     def setUp(self):
+        super().setUp()
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.runner=Path(self.temp.name)
         env=mock.patch.dict(os.environ,{'RUNNER_TEMP':str(self.runner),'GITHUB_RUN_ID':'123','GITHUB_RUN_ATTEMPT':'1','GITHUB_JOB':'consume-test'});env.start();self.addCleanup(env.stop)
         self.work=d.fresh_work(self.runner/'work');self.outer=self.work/'transport-outer.zip';self.outer.write_bytes(b'outer')
@@ -236,23 +271,22 @@ class CleanupContract(unittest.TestCase):
         self.assertTrue(self.outer.exists())
 
 
-class ArtifactAndPlanContract(unittest.TestCase):
+class ArtifactAndPlanContract(ConfiguredCase):
     def test_metadata_strict_identity_expiry_and_full_digest(self):
-        good={'id':1,'name':'n','expired':False,'workflow_run':{'id':2,'head_sha':s.SOURCE_COMMIT},
+        good={'id':1,'name':'n','expired':False,'workflow_run':{'id':2,'head_sha':fixture_pins()['commit']},
             'size_in_bytes':3,'digest':'sha256:'+H,'expires_at':'2099-01-01T00:00:00Z'}
         with mock.patch.object(d,'api',return_value=good):
-            self.assertEqual(d.artifact_metadata(1,'t',name='n',run_id=2,commit=s.SOURCE_COMMIT),good)
+            self.assertEqual(d.artifact_metadata(1,'t',name='n',run_id=2,commit=fixture_pins()['commit']),good)
         for field,value in [('id',2),('name','other'),('expired',True),('size_in_bytes',0),('digest','missing'),('expires_at','2000-01-01T00:00:00Z')]:
             row=copy.deepcopy(good);row[field]=value
             with self.subTest(field=field),mock.patch.object(d,'api',return_value=row):
-                with self.assertRaises((RuntimeError,ValueError)):d.artifact_metadata(1,'t',name='n',run_id=2,commit=s.SOURCE_COMMIT)
+                with self.assertRaises((RuntimeError,ValueError)):d.artifact_metadata(1,'t',name='n',run_id=2,commit=fixture_pins()['commit'])
     def test_api_rejects_nonrepository_paths(self):
         with self.assertRaises(RuntimeError):d.api('https://evil.invalid','secret')
         self.assertIsNone(d.NoRedirect().redirect_request(None,None,None,None,None,None))
-    def test_pins_are_new8f_not306(self):
-        self.assertEqual(d.PINS['commit'],s.SOURCE_COMMIT);self.assertEqual(d.PINS['run_attempt'],2)
-        self.assertEqual({x['canonical_artifact_id'] for x in d.PINS['profiles'].values()},{12691536652,12689727768})
-        self.assertEqual(d.PINS['profiles']['paddle-cuda11.8']['inner_zip_sha256'],'270ff11159d99bc4be236ad42867b9a5a59c10971af7ab1489b117d2e5accb38')
+    def test_complete_reviewed_binding_is_exact_and_not_fixed_to_attempt2(self):
+        self.assertEqual(d.load_pins(),fixture_pins())
+        self.assertEqual(d.load_pins()['run_attempt'],7)
     def test_collection_missing_failed_skipped_jobs_rejected(self):
         with self.assertRaises(RuntimeError):d.collection_plan({})
         keys={'produce-'+x for x in ('cu118','cu126')}|{'rebuild-'+x for x in ('cu118','cu126')}|{'consume-'+x+'-'+y for x in ('cu118','cu126') for y in ('2022','2025')}
@@ -273,23 +307,23 @@ class WorkflowContract(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.workflow=(HERE.parents[1]/'.github/workflows/windows-restorer-distribution.yml').read_text()
-    def test_exact_nine_explicit_jobs_and_narrow_trigger(self):
+    def test_exact_nine_explicit_jobs_manual_only(self):
         jobs=re.findall(r'^  ([a-z0-9-]+):$',self.workflow.split('jobs:\n',1)[1],re.M)
         self.assertEqual(len(jobs),9);self.assertEqual(len(set(jobs)),9)
-        self.assertIn('fix/windows-restorer',self.workflow);self.assertIn('diagnostics/windows-restorer-distribution/**',self.workflow)
+        self.assertIn('fix/windows-restorer',self.workflow);self.assertIn('workflow_dispatch:',self.workflow);self.assertFalse('  push:' in self.workflow)
         self.assertIn('cancel-in-progress: false',self.workflow);self.assertNotIn('pull_request',self.workflow)
         self.assertNotIn('contents: write',self.workflow);self.assertNotIn('actions: write',self.workflow)
     def test_source_job_has_no_checkout_and_verbatim_bootstrap(self):
         for short in ('cu118','cu126'):
             block=self.workflow.split('  rebuild-'+short+':\n',1)[1].split('\n  ',1)[0] if False else re.search(r'^  rebuild-'+short+r':\n(.*?)(?=^  [a-z0-9-]+:|\Z)',self.workflow,re.M|re.S).group(1)
-            self.assertNotIn('actions/checkout',block);self.assertNotIn('pip install',block);self.assertIn('name: restorer8f-source-',block);self.assertNotIn('artifact-ids:',block)
+            self.assertNotIn('actions/checkout',block);self.assertNotIn('pip install',block);self.assertIn('name: restorer-final-source-',block);self.assertNotIn('artifact-ids:',block)
             needle='        #!/usr/bin/env python3\n';start=block.index(needle);end=block.index('\n    - name: Preserve',start)
             embedded='\n'.join(line[8:] for line in block[start:end].splitlines())+'\n'
             self.assertEqual(embedded,(HERE/'source_only.py').read_text())
     def test_prepared_allowlist_and_actual_report_raw_retention(self):
         self.assertIn('/prepared/volumes/**',self.workflow);self.assertIn('/prepared/build/distribution/**',self.workflow)
-        self.assertNotIn('/prepared/**',self.workflow);self.assertNotIn('/restorer8f-collector-evidence/**',self.workflow)
-        self.assertEqual(self.workflow.count('ref: '+s.SOURCE_COMMIT),7)
+        self.assertNotIn('/prepared/**',self.workflow);self.assertNotIn('/restorer-final-collector-evidence/**',self.workflow)
+        self.assertEqual(self.workflow.count('ref: '+json.loads((HERE/'pins.json').read_text())['commit']),7)
         self.assertEqual(self.workflow.count('Same producer EXE /'),4)
         self.assertEqual(self.workflow.count('One production EXE /'),2)
         self.assertEqual(self.workflow.count('raw_artifact_id:'),8)
@@ -304,7 +338,7 @@ class WorkflowContract(unittest.TestCase):
 
 
 
-class AdditionalEvidenceContract(unittest.TestCase):
+class AdditionalEvidenceContract(ConfiguredCase):
     def test_raw_source_artifacts_bound_to_actual_bytes(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);(root/'rebuilt').mkdir();row=source_report();record=row['rebuild_record']

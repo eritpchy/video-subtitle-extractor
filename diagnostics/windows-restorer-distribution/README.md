@@ -1,165 +1,113 @@
-# Exact 8f restorer distribution experiment — not a release
+# Final C45 CUDA same-byte restorer validation
 
-This isolated driver is intended only for `eritpchy/video-subtitle-extractor`,
-`refs/heads/fix/windows-restorer`. It adds one narrowly triggered workflow; the
-seven existing workflows and all application/native-restorer sources remain
-unchanged. Apply only on the independently checked diagnostic base
-`6470357ce59b69fea51408cb6cfe1ab48a010619`.
+Application target: `c45c0b03d3eef548caa69b8453e2aa80376098e9`, version **2.3.1**.
+Original main run **40722779064 / attempt 2** completed with all 22 required jobs successful;
+only three duplicate producers intentionally skipped. Candidate-set job **123262269181**
+validated all seven new canonical artifacts. Standard CI **40722711009 / attempt 2** was 6/6 successful.
+Driver patch base: `5df336d5af27e09ab1bdbf89f0afe4afb294c073` on the separate diagnostic branch.
+No application source, existing published asset, tag, default branch or permission is changed.
+This driver does not supply redistribution authorization or claim that its nine Server jobs have
+passed. The actual diagnostic run, original reports and strict collector are the execution evidence.
 
-## Fixed inputs and authority
+## Immutable explicit binding; incomplete means non-executable
 
-`pins.json` binds the **2.3.0 build-only** application source
-`8f08e7f6887a950f75cb7967f1f80e344935ecaa`, successful main run `40391756697`,
-actual producing attempt **2**, and the two canonical CUDA artifacts. These are
-not the previous 306 baseline and are not final 2.3.1 artifacts.
+`pins.json` schema2 declares the repository, exact application SHA/version, successful main run,
+actual attempt, actual candidate-set job, both canonical producer jobs, artifact IDs/names,
+outer size/digest/expiry, original inner ZIP and checksum/receipt size/SHA, expansion and exact
+committed project-notice identity. The checked-in pins now bind the actual successful C45 attempt 2, canonical artifact
+**12873156512** (CUDA 11.8) and **12872860788** (CUDA 12.6), expiring **2026-10-30 03:41 UTC**.
+No old attempt 1, 8f, 306 or 2.3.0 bytes are substituted. Incomplete or changed future inputs
+remain rejected before network, platform/toolchain activity or work-directory creation.
 
-| Profile | Canonical artifact | Whole inner ZIP SHA-256 |
-|---|---:|---|
-| CUDA 11.8 | 12691536652 | `270ff11159d99bc4be236ad42867b9a5a59c10971af7ab1489b117d2e5accb38` |
-| CUDA 12.6 | 12689727768 | `c1343fa5f998ac8504eb716d5933c6cef8428b544591cfbab15e15af30e237ab` |
+The exact JSON bytes are SHA256-anchored and base64-embedded in `source_only.py` and its two
+verbatim workflow copies. The driver requires its checked-in JSON bytes to match that anchor;
+source-only jobs need no checkout, extra input download or environment-based source override.
+The producer context carries the entire selected application identity and binding hash, not
+just a source commit. A changed source/version/run/attempt/artifact/profile or sidecar is rejected.
+There is no attempt==2 assumption: the declared positive integer attempt must match the actual
+main, producer and candidate-set APIs, all completed/successful on the exact release workflow.
 
-The producer requires the exact API artifact ID/name/size/digest/source/run,
-expiry, and actual successful attempt-2 producer job. It then hashes the entire
-outer download. Its **exact three** members are the original ZIP, acceptance
-receipt, and checksum. Each member is independently size/SHA checked before
-unchanged `release_gate.py prepare` sees it. The separately preserved size.json
-is not incorrectly treated as an outer member. Its expanded-byte values in
-`pins.json` must agree with the fully verified transport.
+After any independently reviewed, qualified input update, synchronize locally with:
 
-Expiry is fixed to `2026-10-27T20:55:03Z`. Expired/missing/different artifacts
-fail; there is no fallback to another build or synthetic passed receipt.
-
-Only the two already-reviewed, fixed Microsoft license DOCX byte hashes in
-exact8f are downloaded; no installer, toolchain, model, or library is added by
-this driver. A changed notice stops the build. Push on this dedicated ref uses
-the explicitly authorized existing redistribution acknowledgment. Manual runs
-require an explicit boolean acknowledgment, default **false**. This is not a
-new license acceptance or a permanent repository setting.
-
-## Nine jobs and byte binding
-
-1. Two separate Windows Server 2022 producer jobs, one per CUDA profile. Each
-   invokes the actual production `prepare` **once**, yielding one EXE, byte
-   volumes, fixed metadata, notices, and an exact-source ZIP. Matrix outputs
-   cannot overwrite one another.
-2. Four consumers: each profile's **same producer EXE SHA** on Server 2022 and
-   Server 2025. They use the original native restorer, check every restored file
-   SHA, and run the restored **Start-VSE.bat**, not an invented replacement or a
-   separately extracted original ZIP. Unchanged exact8f acceptance checks both
-   clean and contaminated environments, 168 model CPU cases and fast/accurate/
-   auto CPU video workloads. Every original input and payload after-check stays
-   enabled. No GPU inference claim is made.
-3. Two independent Server 2025 source-only rebuild jobs. **No checkout step**;
-   no application ZIP, parts, original EXE, producer objects, or repository is
-   downloaded. The workflow embeds `source_only.py` verbatim as a Python literal
-   block. Only the source ZIP and independently anchored context are supplied.
-   The contained `rebuild.py` runs with **`-I -S -B`**, using installed Microsoft
-   14.44 and the original full `/MT`, PE, raw-inflate object/final-link-map and
-   source inventory gates. No packaging dependency or license fetch is needed
-   for this path. Rebuilt EXE bytes are recorded, **never substituted** for the
-   producer EXE used by consumers; bit identity is measured, not assumed.
-4. One `always()` collector checks all eight actual upstream conclusions and
-   independently anchored raw report SHAs. It **downloads and hashes both full
-   transports again**, invokes unchanged `load_handoff` / `validate_build` /
-   `validate_consumer`, and rechecks the actual rebuilt link-map with the
-   authoritative unchanged zlib validator. A failure/skip/missing report is a
-   failure, never a partial green summary.
-
-Source-only reports deliberately have a **new distinct scope**. They bind the
-source ZIP, manifest, actual used source closure, generator identity, header,
-original EXE, and producer handoff. They include native Server 2025 identity,
-actual toolchain records, rebuilt EXE hash, and byte-bound raw compiler/map/
-command/rebuild logs. Before/after source proofs must match that context.
-`inputs_after` is **forbidden**: a no-repository rebuild cannot claim the legacy
-rebuild CLI's local full-transport proof. The collector independently performs
-that transport proof; no old report schema is impersonated.
-
-Source/report action downloads use exact unique names in the **same run**;
-external producer/report SHA checks are mandatory. Immutable artifact IDs remain
-job outputs and are API-checked by the collector against the expected names,
-source commit, run and digest. The delivery download itself is by exact ID and
-requires the complete API-anchored outer SHA. Download credentials are used only
-for the fixed GitHub API; they are not forwarded to signed storage URLs or
-compiler/application children. Signed URL queries and full environments are not
-logged. Child environment records contain only necessary keys/hashes.
-
-## Layout, storage and narrowly authorized cleanup
-
-Producer output is outside its exact clean8f checkout. **No second copy or move
-of parts** is made. The delivery upload allowlist contains only:
-
-- `prepared/volumes/**`
-- `prepared/build/distribution/**`
-- `prepared/handoff.json`, `producer-context.json`, `delivery-index.json`
-
-The index and independently supplied index SHA bind this exact transfer set.
-Compiler objects, original candidate ZIP/outer, application checkout, and host
-Python are not included. The source-only artifact reuses the existing source
-ZIP file, not a second locally compiled binary.
-
-Let `O` be the original canonical outer bytes, `Z` the inner ZIP bytes, `D` the
-actual indexed delivery bytes, `A` the actual transport outer API size, `E` the
-actual validated expansion, `N` the actual inventory count and `R = 4 GiB`.
-Every check uses **current real free space**, after checkout where applicable:
-
-| Phase | Additional free space required before phase |
-|---|---|
-| Producer, before original download | `O + 2 Z + R` |
-| Consumer, before transport download | `max(A + D, D + Z + E + 65536 N) + R` |
-| Consumer, after verified redundant outer removal | `Z + E + 65536 N + R` (also rechecked by original gate) |
-| Collector, before both profiles | `D118 + D126 + max(A118, A126) + R` |
-| Source-only rebuild | source extraction bound `256 MiB + R`, with downloaded ZIP already present |
-
-The producer minimum is 13,252,268,051 bytes (12.342 GiB) for CUDA 11.8 and
-12,385,226,672 bytes (11.535 GiB) for CUDA 12.6, **in addition to the already
-occupied checkout**. Transfer/extraction headers, logs and build outputs consume
-the reserve; actual delivery/API sizes are not guessed.
-
-Only a **job-created redundant transport outer** named `transport-outer.zip`
-may be removed. Before that single-path operation, the driver requires:
-
-- a newly created owned work directory strictly below actual `RUNNER_TEMP`;
-- matching run/attempt/job/driver-SHA ownership marker;
-- plain non-reparse ancestors/files, no hardlinked outer/evidence;
-- full outer hash and exact extracted-member identities/content;
-- a persisted, fsynced API/hash/extraction evidence document.
-
-The exact removal and preserved upstream artifact identity are audited. The
-remote artifact and its download/hash evidence remain. **Original candidate
-outer, parts, EXE, source ZIP, original reports, unrelated directories and
-preinstalled software are never deleted.** No glob cleanup, cache clearing,
-process enumeration or security-policy change is permitted. Insufficient free
-space still fails. The operation is intentionally not represented as loss of
-upstream download provenance.
-
-## Local contracts and reproducibility limits
-
-Run from a workspace containing the small exact8f review sources (or the actual
-application-source checkout):
-
-```sh
-VSE_REVIEW_SOURCE=/path/to/exact8f PYTHONDONTWRITEBYTECODE=1 \
-  python -B -m unittest discover -s diagnostics/windows-restorer-distribution/tests -v
+```
+python -B diagnostics/windows-restorer-distribution/sync_binding.py --write
+python -B diagnostics/windows-restorer-distribution/sync_binding.py --check
 ```
 
-All source-only imports are stdlib. `source_only.py` and JSON use local `-text`
-attributes to avoid autocrlf changing pinned source bytes. The workflow Python
-bootstrap itself inherits `PYTHONDONTWRITEBYTECODE=1` and immediately sets
-`sys.dont_write_bytecode=True`; it is **not** described as an outer `-I` process.
-The actual contained rebuild is `-I -S -B`. Product helpers that spawn Python
-without `-B` inherit the suppression setting; exact8f is not modified.
+The synchronizer only updates local anchors, seven source checkout refs and two literal
+bootstraps. It never downloads, builds, dispatches or approves anything; runtime validation of
+complete inputs remains mandatory. The application commit and diagnostic driver commit/run
+remain distinct: original canonical artifacts belong to the application main; generated
+EXE/parts/source/report artifacts belong to this driver's own exact run/attempt.
 
-Offline fixtures test the real unchanged gate validators plus safe extraction,
-independent raw hashes, same-EXE/two-Server binding, source-only scope, strict
-compiler/PE/link-map evidence, ownership/cleanup negatives, budgets and workflow
-contracts. The POSIX symlink fixture is not run on Windows hosts without symlink
-privilege; a separate reparse-attribute rejection test always runs. None of
-these offline fixtures is actual Windows restoration evidence.
+## No restricted DOCX request and no implicit rights assertion
 
-This patch alone proves neither native building nor same-EXE restoration nor
-source-only MSVC rebuilding. Those remain pending the authorized actual Server
-run. It does not publish assets, change versions/tags, certify Windows 10/11, or
-claim GPU execution. **Any final 2.3.1 ZIP SHA change requires new original ZIP/
-receipt/checksum anchors, regenerated parts/header/EXE/source ZIP and this actual
-same-byte two-Server/rebuild acceptance again.** The EXE is a distribution
-helper; the Python application's normal execution does not require compiling it.
+The old `acquire_notices` HTTP function is removed. No Microsoft DOCX or equivalent cached copy
+is read. The driver validates only the **committed project attribution**, byte-for-byte against
+its explicit pin and schema2 application manifest; the production C45 gate uses its existing
+default notice input. The source companion verifier preserves exactly four required project,
+Apache and zlib notices. Project attribution is not a Microsoft license agreement. Applicable
+terms remain `applicable-terms-not-independently-verified`, publication authority false.
+
+The workflow is **manual only**, with `acknowledge_vc_redistribution_license` default false.
+Push never means acknowledgment. The user explicitly authorized the existing VC redistribution
+qualification assertion and this final Server validation. An authorized manual dispatch must
+set that input explicitly; it accepts no new terms and does not authorize publication.
+No persistent acknowledgment variable is created. A 403 propagates without retry/fallback.
+
+## Preserved nine-job and binary boundaries
+
+- Two Server2022 producers each call real production prepare once and retain original canonical
+  inputs. Full authenticated outer digest, exact three original members and hashes are required.
+- Four Server2022/2025 consumers use the same producer EXE per profile, never recompile it or
+  substitute direct ZIP extraction. Original launcher, full before/after trees, both environments,
+  model/CPU/video checks and every input after-check stay required. No GPU inference claim.
+- Two Server2025 source-only jobs have **no checkout**, no original application ZIP/parts/EXE
+  or producer objects. The included rebuild runs `-I -S -B` with installed MSVC14.44; exact
+  source/header/notice/transport identity, `/MT`, PE/import, five raw-inflate objects and link-map
+  checks remain. Rebuilt EXEs are recorded, never substituted for the selected producer EXE.
+- One always collector rejects any missing/failed/skipped upstream or independent raw hash,
+  rehashes full transports and binds the two original consumer reports and source-only result.
+  Source-only scope forbids legacy `inputs_after` impersonation. Rebuildable is not bit-identical.
+
+Artifact credentials remain confined to the exact GitHub API and are never forwarded to signed
+storage URLs or child compilers/apps. Signed URL queries and full environments are not logged.
+Real-free-space budgets, original narrow owned redundant-outer removal, no system cleanup,
+all source/parts/EXE/report retention and original failure/secondary-error preservation remain.
+
+## Reproducible local-only validation
+
+Use a real canonical task-owned temporary directory on macOS: its default `/var` alias is
+correctly rejected by unchanged plain-ancestor checks. Do not weaken the production check.
+
+```
+TMPDIR=/absolute/task-owned/real-temp VSE_REVIEW_SOURCE=/absolute/exact-C45/source \
+  PYTHONDONTWRITEBYTECODE=1 python -B -m unittest discover \
+  -s diagnostics/windows-restorer-distribution/tests -v
+python -B diagnostics/windows-restorer-distribution/sync_binding.py --check
+```
+
+Fixtures are explicitly OFFLINE MOCK identities/records. Tests use real small Git repositories
+and real source companion ZIP bytes, but do not compile or restore a native distribution,
+contact GitHub/Microsoft, launch local GUI, enumerate processes or certify Server/physical GPU.
+The original failed regression run and macOS temporary-alias run remain evidence.
+A separate source/AST audit compares retained safety functions against exact5df. YAML and
+embedded Python checks are local static review; actionlint is not installed by this patch.
+Actual execution still requires actionlint, reviewed complete pins, explicit authorization,
+and all nine native Server jobs before any distribution claim. No release is created.
+
+## Review clarification: evidence identity and network boundary
+
+Real-source tests obtain their expected commit/version from the reviewed checked-in pins,
+never from the checkout under test. A clean arbitrary HEAD is explicitly rejected. A separate
+fixed-C45 audit rehashes raw commit/tree/blob Git objects and checks all 55 delivered source
+files against membership in tree `db057bf979c2e9c64a0df3ae1131ef3c0d7f60a4`, anchored by commit
+`c45c0b03d3eef548caa69b8453e2aa80376098e9`; a self-consistent SHA256 inventory alone is not proof.
+The import contract scans every `Import` alias and every `ImportFrom`, rejects relative or
+non-stdlib imports, and includes negative fixtures for both previously omitted forms.
+
+The offline test audit records only that local test process's network attempts. It is **not**
+a zero-network workflow claim: even with acknowledgment false, the always collector can execute
+checkout/setup actions before rejecting skipped producers. Such actions may use network. No
+acknowledgment=false workflow was dispatched here. A successful source rebuild still does not
+guarantee a bit-identical EXE; compiler/SDK/path/linker differences are recorded, never waived.

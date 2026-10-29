@@ -7,6 +7,8 @@ process enumeration or security-policy modification. Reports have a distinct
 source-only scope; they do NOT claim the legacy transport inputs_after proof.
 """
 from __future__ import annotations
+import base64
+import datetime
 import ctypes
 import hashlib
 import importlib.util
@@ -24,7 +26,9 @@ import unicodedata
 sys.dont_write_bytecode = True
 import zipfile
 
-SOURCE_COMMIT = '8f08e7f6887a950f75cb7967f1f80e344935ecaa'
+APPLICATION_PINS_B64 = 'ewogICJyZXBvc2l0b3J5IjogImVyaXRwY2h5L3ZpZGVvLXN1YnRpdGxlLWV4dHJhY3RvciIsCiAgImNvbW1pdCI6ICJjNDVjMGIwM2QzZWVmNTQ4Y2FhNjliODQ1M2UyYWE4MDM3NjA5OGU5IiwKICAidmVyc2lvbiI6ICIyLjMuMSIsCiAgInJ1bl9pZCI6IDQwNzIyNzc5MDY0LAogICJydW5fYXR0ZW1wdCI6IDIsCiAgInByb2ZpbGVzIjogewogICAgInBhZGRsZS1jdWRhMTEuOCI6IHsKICAgICAgImNhbm9uaWNhbF9hcnRpZmFjdF9uYW1lIjogInJlbGVhc2UtY2FuZGlkYXRlLXdpbmRvd3MteDY0LXBhZGRsZS1jdWRhMTEuOCIsCiAgICAgICJpbm5lcl96aXAiOiAidnNlLTIuMy4xLXdpbmRvd3MteDY0LWN1ZGExMS44LnppcCIsCiAgICAgICJjYW5vbmljYWxfYXJ0aWZhY3RfaWQiOiAxMjg3MzE1NjUxMiwKICAgICAgIm91dGVyX2NvbnRhaW5lcl9ieXRlcyI6IDI5ODU3OTQ5NjMsCiAgICAgICJvdXRlcl9hcGlfc2hhMjU2IjogIjMyNmQyNDM0NDMxOWFjZjczNWE2MjJjNGNkZGZkMDk0ZTRjZDVlMjM2NzMyNTk4ZTVlNTFmMWU3YTUwMmQ5ZmIiLAogICAgICAiaW5uZXJfemlwX2J5dGVzIjogMjk4NTc4OTIzMiwKICAgICAgImlubmVyX3ppcF9zaGEyNTYiOiAiOGM1MTY0ODZlZGQ0MzI3NzRlODg0M2M0NmEzNTUzN2UwNDI3YWNlZTMwMjAzMmY3M2YzZWZlYTEwYjE3NGE3NiIsCiAgICAgICJyZWNlaXB0X2J5dGVzIjogNTA4MSwKICAgICAgInJlY2VpcHRfc2hhMjU2IjogIjIwZWRiNGVjM2Y4MTQ3NWUxMmM3OTQzY2RiYzIxMTAwMWQyNzRlMTZiYjA2ZGMwOGFmNjc5MGVlYmVjODQ2NmUiLAogICAgICAiY2hlY2tzdW1fYnl0ZXMiOiAxMDIsCiAgICAgICJjaGVja3N1bV9zaGEyNTYiOiAiOTIzNmQ4MjU2ODAyNWNlMGUxN2JhMzcxZTc1YmFhZmVlNmEwMDhmZjI3NmQ4YzJhYWFlYTA3MTgyZWZlMWY0ZCIsCiAgICAgICJleHBhbmRlZF9ieXRlcyI6IDUzMTY5MTQ4MTksCiAgICAgICJleHBpcnlfdXRjIjogIjIwMjYtMTAtMzBUMDM6NDE6MDBaIiwKICAgICAgImpvYiI6IDEyMzI0OTQzMjkwNgogICAgfSwKICAgICJwYWRkbGUtY3VkYTEyLjYiOiB7CiAgICAgICJjYW5vbmljYWxfYXJ0aWZhY3RfbmFtZSI6ICJyZWxlYXNlLWNhbmRpZGF0ZS13aW5kb3dzLXg2NC1wYWRkbGUtY3VkYTEyLjYiLAogICAgICAiaW5uZXJfemlwIjogInZzZS0yLjMuMS13aW5kb3dzLXg2NC1jdWRhMTIuNi56aXAiLAogICAgICAiY2Fub25pY2FsX2FydGlmYWN0X2lkIjogMTI4NzI4NjA3ODgsCiAgICAgICJvdXRlcl9jb250YWluZXJfYnl0ZXMiOiAyNjk2NzgxMDY3LAogICAgICAib3V0ZXJfYXBpX3NoYTI1NiI6ICJiNWFiN2NkZWQ5NmRmZTAxNzk5OWE2MjM3MTAxOTMwY2M5M2M4ZThlZGMyYjlhYWQzMzU5NjBmNTQyZDNmNWQ2IiwKICAgICAgImlubmVyX3ppcF9ieXRlcyI6IDI2OTY3NzUzMzYsCiAgICAgICJpbm5lcl96aXBfc2hhMjU2IjogIjhlZjdiMjUzNzVjOTliMTE4M2E2OGFiMDZhYTcyZjk0OTlhNjg2Y2Y3YmVhOTljMjk1OGQyOTcwNjIzYzJlOGUiLAogICAgICAicmVjZWlwdF9ieXRlcyI6IDUwODEsCiAgICAgICJyZWNlaXB0X3NoYTI1NiI6ICJhMmU1YjJjNDIyMDhhOTdmMmE1Y2JiYmQ5ZmE1MDBmNzU0MmE5MTI3OGI4NjllOTQ5NTA1ZDAxMmQyMTg2MjkxIiwKICAgICAgImNoZWNrc3VtX2J5dGVzIjogMTAyLAogICAgICAiY2hlY2tzdW1fc2hhMjU2IjogImE3YzI5MzUwMGVlMjAyMGJjNjJiNTlkNTBlNWVkMzNhNWNkNTc4ZWExMmNhNzdiOTA3Njk0YTlmMWYyMzliYzEiLAogICAgICAiZXhwYW5kZWRfYnl0ZXMiOiA0NDk5MzYyNzM3LAogICAgICAiZXhwaXJ5X3V0YyI6ICIyMDI2LTEwLTMwVDAzOjQxOjAwWiIsCiAgICAgICJqb2IiOiAxMjMyNDk0MzI4NzUKICAgIH0KICB9LAogICJzY2hlbWEiOiAyLAogICJzY29wZSI6ICJleHBsaWNpdC1maW5hbC1jdWRhLWlucHV0cy1idWlsZC1vbmx5IiwKICAiY2FuZGlkYXRlX3NldF9qb2IiOiAxMjMyNjIyNjkxODEsCiAgInByb2plY3Rfbm90aWNlIjogewogICAgInNvdXJjZSI6ICJuYXRpdmUvb2NyL3ZjLXJ1bnRpbWUtTk9USUNFLnR4dCIsCiAgICAibmFtZSI6ICJNaWNyb3NvZnQtVmlzdWFsLUNwcC1ydW50aW1lLU5PVElDRS50eHQiLAogICAgImJ5dGVzIjogMjAwMSwKICAgICJzaGEyNTYiOiAiMDhmOWVhNjg1ODkzNjBmNjJkZjM1YjYyMzJlNGZlNjMwN2IxMWQ0NmU0ZjBmYmIzMjdlMTYwYmZiNmYwZTUwZiIKICB9Cn0K'
+APPLICATION_PINS_SHA256 = '2a78c24c73b730233ced1d2cf17502740cb71c2a224240a6a8fac24d9716da4c'
+PROFILES = ('paddle-cuda11.8', 'paddle-cuda12.6')
 RUNNERS = {'windows-2022': 20348, 'windows-2025': 26100}
 RESERVE = 4 * 1024 ** 3
 SOURCE_LIMIT = 256 * 1024 ** 2
@@ -51,6 +55,93 @@ def sha(path):
 def hash_text(value):
     need(isinstance(value, str) and re.fullmatch('[0-9a-f]{64}', value), 'Invalid SHA256')
     return value
+
+
+def positive(value, label, maximum=16 * 1024 ** 3):
+    need(type(value) is int and 0 < value <= maximum, 'Missing/invalid ' + label)
+    return value
+
+
+def expiry_text(value):
+    need(isinstance(value, str) and value.endswith('Z'), 'Explicit UTC expiry required')
+    try: result = datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError as error: raise RuntimeError('Invalid canonical expiry') from error
+    need(result > datetime.datetime.now(datetime.timezone.utc), 'Canonical input expired')
+    return value
+
+
+def validate_input_pins(pin):
+    need(isinstance(pin, dict) and set(pin) == {'schema','scope','repository','commit','version','run_id',
+         'run_attempt','candidate_set_job','project_notice','profiles'}, 'Exact explicit input schema required')
+    need(pin['schema'] == 2 and pin['scope'] == 'explicit-final-cuda-inputs-build-only'
+         and pin['repository'] == 'eritpchy/video-subtitle-extractor', 'Wrong explicit input contract')
+    need(isinstance(pin['commit'], str) and re.fullmatch('[0-9a-f]{40}', pin['commit']), 'Final source SHA required')
+    need(isinstance(pin['version'], str) and re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', pin['version']), 'Final version required')
+    for key in ('run_id','run_attempt','candidate_set_job'): positive(pin[key], key, 2**63-1)
+    notice = pin['project_notice']
+    need(isinstance(notice, dict) and set(notice) == {'source','name','bytes','sha256'}
+         and notice['source'] == 'native/ocr/vc-runtime-NOTICE.txt'
+         and notice['name'] == 'Microsoft-Visual-Cpp-runtime-NOTICE.txt', 'Exact committed project notice required')
+    positive(notice['bytes'], 'project notice bytes', 1024**2); hash_text(notice['sha256'])
+    need(isinstance(pin['profiles'], dict) and set(pin['profiles']) == set(PROFILES), 'Both final CUDA profiles required')
+    artifact_ids = set(); jobs = {pin['candidate_set_job']}
+    keys = {'canonical_artifact_id','canonical_artifact_name','outer_container_bytes','outer_api_sha256',
+            'inner_zip','inner_zip_bytes','inner_zip_sha256','receipt_bytes','receipt_sha256',
+            'checksum_bytes','checksum_sha256','expanded_bytes','expiry_utc','job'}
+    for profile, row in pin['profiles'].items():
+        need(isinstance(row, dict) and set(row) == keys, 'Exact canonical profile pin fields required')
+        positive(row['canonical_artifact_id'], 'canonical artifact ID', 2**63-1); positive(row['job'], 'producer job', 2**63-1)
+        need(row['canonical_artifact_id'] not in artifact_ids and row['job'] not in jobs, 'Aliased canonical artifact/job')
+        artifact_ids.add(row['canonical_artifact_id']); jobs.add(row['job'])
+        need(row['canonical_artifact_name'] == 'release-candidate-windows-x64-' + profile
+             and row['inner_zip'] == 'vse-' + pin['version'] + '-windows-x64-' + profile.removeprefix('paddle-') + '.zip',
+             'Canonical name/version/profile mismatch')
+        for key in ('outer_container_bytes','inner_zip_bytes','expanded_bytes'): positive(row[key], key)
+        positive(row['receipt_bytes'], 'receipt bytes', 2*1024**2); positive(row['checksum_bytes'], 'checksum bytes', 4096)
+        for key in ('outer_api_sha256','inner_zip_sha256','receipt_sha256','checksum_sha256'): hash_text(row[key])
+        expiry_text(row['expiry_utc'])
+    return pin
+
+
+def configured_pin_bytes():
+    try: raw = base64.b64decode(APPLICATION_PINS_B64, validate=True)
+    except (ValueError, TypeError) as error: raise RuntimeError('Invalid embedded input binding') from error
+    need(digest(raw) == hash_text(APPLICATION_PINS_SHA256), 'Embedded input binding SHA mismatch')
+    return raw
+
+
+def expected_pins():
+    return validate_input_pins(json_bytes(configured_pin_bytes()))
+
+
+def binding_identity(pin, profile):
+    validate_input_pins(pin); need(profile in PROFILES, 'Unknown bound profile')
+    return {'repository': pin['repository'], 'commit': pin['commit'], 'version': pin['version'],
+            'run_id': pin['run_id'], 'run_attempt': pin['run_attempt'], 'candidate_set_job': pin['candidate_set_job'],
+            'pins_sha256': APPLICATION_PINS_SHA256, 'canonical': pin['profiles'][profile],
+            'project_notice': pin['project_notice']}
+
+
+def verify_project_notice(root, pin):
+    expected = pin['project_notice']; path = root / expected['source']
+    manifest = read_json(root / 'native/ocr/vc-runtime-manifest.json')
+    need(manifest.get('schema') == 2, 'Current no-DOCX manifest required')
+    rows = manifest.get('files', [])
+    need(isinstance(rows, list) and all(isinstance(row, dict) for row in rows)
+         and not any(str(row.get('name','')).casefold().endswith('.docx') for row in rows),
+         'Active DOCX inputs are forbidden')
+    matching = [row for row in rows if row.get('name') == expected['name']]
+    need(len(matching) == 1 and matching[0].get('source_file') == 'vc-runtime-NOTICE.txt'
+         and matching[0].get('bytes') == expected['bytes'] and matching[0].get('sha256') == expected['sha256'],
+         'Project notice differs from explicit input contract')
+    need(file_record(path) == {key: expected[key] for key in ('bytes','sha256')}, 'Committed project notice bytes changed')
+    review = manifest.get('licensing_review', {})
+    need(review.get('status') == 'applicable-terms-not-independently-verified'
+         and review.get('final_publication_authorized') is False
+         and review.get('fixed_historical_DOCX_download_required') is False,
+         'Project attribution must not impersonate verified rights or publication approval')
+    return {'scope': 'committed-project-attribution-not-license-agreement', **expected,
+            'licensing_review': review, 'network_used': False}
 
 
 def plain(path, directory=False):
@@ -248,8 +339,14 @@ def validate_compile(record, *, expected_exe=None):
 
 
 def validate_context(context):
-    need(context.get('schema') == 1 and context.get('source_commit') == SOURCE_COMMIT
-         and context.get('profile') in ('paddle-cuda11.8','paddle-cuda12.6'), 'Wrong producer source context')
+    pin = expected_pins(); profile = context.get('profile')
+    need(context.get('schema') == 1 and profile in PROFILES
+         and context.get('source_commit') == pin['commit'] and context.get('source_version') == pin['version']
+         and context.get('application_identity') == binding_identity(pin, profile), 'Wrong producer source context')
+    row = pin['profiles'][profile]
+    for name, expected in (('archive_bytes', row['inner_zip_bytes']), ('expanded_bytes', row['expanded_bytes'])):
+        if name in context: need(type(context[name]) is int and context[name] == expected, 'Conflicting producer size binding')
+    if 'inventory_entries' in context: positive(context['inventory_entries'], 'inventory entries', 1000000)
     for name in ('source_zip_sha256','original_exe_sha256','handoff_sha256','embedded_header_sha256',
                  'generator_identity_sha256','source_closure_sha256','source_manifest_sha256','original_build_record_sha256'):
         hash_text(context.get(name))
@@ -257,14 +354,16 @@ def validate_context(context):
 
 
 def verify_source_inputs(root, context):
+    validate_context(context)
     helper = load_exact(root / 'native/windows-restorer/source_bundle.py', 'source_bundle')
     manifest = helper.verify_extracted_sources(root)
     original_path = root / 'evidence/original-build-record.json'
     original = read_json(original_path)
     need(sha(root / 'source-manifest.json') == context['source_manifest_sha256']
          and sha(original_path) == context['original_build_record_sha256'], 'Source manifest/build-record identity mismatch')
-    need(manifest['original_exe_sha256'] == original['exe_sha256'] == context['original_exe_sha256'], 'Original EXE identity mismatch')
-    need(original.get('git', {}).get('commit') == SOURCE_COMMIT and original['git'].get('dirty') is False
+    need(manifest['original_exe_sha256'] == original['exe_sha256'] == context['original_exe_sha256']
+         and manifest.get('git') == original.get('git'), 'Original EXE/source Git identity mismatch')
+    need(original.get('git', {}).get('commit') == expected_pins()['commit'] and original['git'].get('dirty') is False
          and original.get('git_after_build') == original['git'], 'Unclean or foreign original source')
     need(sha(root / 'generated/bundle_metadata.hpp') == original['embedded_header_sha256'] == context['embedded_header_sha256'], 'Fixed-header identity mismatch')
     need(digest(canonical(original['generator_dependencies'])) == context['generator_identity_sha256']
@@ -272,6 +371,30 @@ def verify_source_inputs(root, context):
     for name, expected in original['sources'].items():
         safe_name(name); need(sha(root / name) == expected, 'Used source differs from producer')
     validate_compile(original, expected_exe=context['original_exe_sha256'])
+    pin = expected_pins(); verify_project_notice(root, pin)
+    notice = pin['project_notice']
+    required_notices = {'Microsoft-Visual-Cpp-runtime-NOTICE.txt':'native/ocr/vc-runtime-NOTICE.txt',
+        'Apache-2.0.txt':'LICENSE', 'THIRD_PARTY_NOTICES.txt':'native/windows-restorer/THIRD_PARTY_NOTICES.txt',
+        'zlib-LICENSE.txt':'native/windows-restorer/third_party/zlib-1.3.2/LICENSE'}
+    notice_root = plain(root / 'notices', True)
+    need({path.name for path in notice_root.iterdir()} == set(required_notices)
+         and set(original.get('notices', {})) == set(required_notices), 'Complete four-notice closure required')
+    for name, source in required_notices.items():
+        need(sha(notice_root / name) == original['notices'][name] == sha(root / source), 'Delivered notice differs from exact source')
+    need(file_record(root / 'notices' / notice['name']) == {key:notice[key] for key in ('bytes','sha256')}, 'Delivered project notice changed')
+    transport_path = root / 'evidence/transport-manifest.json'
+    need(sha(transport_path) == original.get('archive_transport_manifest_sha256'), 'Original transport metadata hash mismatch')
+    document = read_json(transport_path); transport = document['archive']
+    row = pin['profiles'][context['profile']]
+    need(transport.get('name') == row['inner_zip'] and transport.get('sha256') == row['inner_zip_sha256']
+         and transport.get('size') == row['inner_zip_bytes'] and transport.get('uncompressed_bytes') == row['expanded_bytes']
+         and transport.get('identity', {}).get('commit') == pin['commit']
+         and transport.get('identity', {}).get('version') == pin['version']
+         and transport.get('identity', {}).get('build_profile') == context['profile'], 'Source transport differs from final application binding')
+    for label in ('receipt', 'checksum'):
+        need(document.get(label, {}).get('name') == row['inner_zip'] + ('.acceptance.json' if label == 'receipt' else '.sha256')
+             and document.get(label, {}).get('sha256') == row[label + '_sha256']
+             and document.get(label, {}).get('size') == row[label + '_bytes'], 'Source transport sidecar binding changed')
     return {'result': 'passed', 'source_manifest_sha256': sha(root / 'source-manifest.json'),
             'original_build_record_sha256': sha(original_path), 'embedded_header_sha256': context['embedded_header_sha256'],
             'source_closure_sha256': context['source_closure_sha256'], 'generator_identity_sha256': context['generator_identity_sha256']}

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Use the real unchanged exact8f validators, not a recreated permissive gate."""
+"""Use the real unchanged final-source validators, not a recreated permissive gate."""
 import copy
 import json
 import os
@@ -8,18 +8,18 @@ import tempfile
 import unittest
 from unittest import mock
 
-from test_distribution import d, s, context, source_report, compile_record, H
+from test_distribution import d, s, context, source_report, compile_record, H, fixture_pins, ConfiguredCase
 
 
-class ExactGateContract(unittest.TestCase):
+class ExactGateContract(ConfiguredCase):
     @classmethod
     def setUpClass(cls):
         root=Path(os.environ.get('VSE_REVIEW_SOURCE','application-source')).absolute()
         if not (root/'native/windows-restorer/release_gate.py').is_file():
-            raise RuntimeError('Set VSE_REVIEW_SOURCE to the reviewed exact8f small source tree; no network fallback')
+            raise RuntimeError('Set VSE_REVIEW_SOURCE to the reviewed final-source small source tree; no network fallback')
         cls.gate=d.gate_at(root);cls.source=root
     def handoff(self):
-        return {'exe_sha256':H,'source_zip_sha256':H,'archive':{'sha256':H,'identity':{'commit':s.SOURCE_COMMIT}}}
+        return {'exe_sha256':H,'source_zip_sha256':H,'archive':{'sha256':H,'identity':{'commit':fixture_pins()['commit'],'version':fixture_pins()['version'],'build_profile':'paddle-cuda11.8'}}}
     def consumer(self,runner):
         return {'schema':1,'scope':'same-exe-final-zip-server-restore','result':'passed','runner':runner,
             'native_os':{'runner':runner,'build':s.RUNNERS[runner],'product_type':3},'exe_sha256':H,
@@ -32,7 +32,7 @@ class ExactGateContract(unittest.TestCase):
                 'entries':1,'inventory_sha256':H},
             'launcher_raw_inventory':{'a':{'bytes':1,'sha256':H}},
             'raw_logs':{name:{'bytes':1,'sha256':H} for name in ('restore.stdout.log','restore.stderr.log','launcher.log')},
-            'launcher':{'result':'passed','commit':s.SOURCE_COMMIT,'archive_extraction_used':False,'gpu_inference_verified':False,
+            'launcher':{'result':'passed','commit':fixture_pins()['commit'],'archive_extraction_used':False,'gpu_inference_verified':False,
                 'application_source_after':{'result':'passed'},'post_run_errors':[],
                 'scenarios':[{'scenario':name,'result':'passed','returncode':0,'audit':{'passed':True,'errors':[]}}
                     for name in ('clean-host-path','contaminated-host-environment')]}}
@@ -60,7 +60,7 @@ class ExactGateContract(unittest.TestCase):
             with self.assertRaises(RuntimeError):self.gate.read_bound_report(path,pin['sha256'])
     def test_original_build_schema_with_foreign_global_build_module(self):
         record=compile_record();record.update(schema=2,result='built-not-client-certified',client_restore_verified=False,
-            gpu_inference_verified=False,git={'commit':s.SOURCE_COMMIT,'dirty':False},git_after_build={'commit':s.SOURCE_COMMIT,'dirty':False})
+            gpu_inference_verified=False,git={'commit':fixture_pins()['commit'],'dirty':False},git_after_build={'commit':fixture_pins()['commit'],'dirty':False})
         foreign=mock.Mock(spec=['assert_distributable_record']);foreign.assert_distributable_record.side_effect=AssertionError('Foreign build invoked')
         with mock.patch.dict('sys.modules',{'build':foreign}):self.gate.validate_build(record)
         foreign.assert_distributable_record.assert_not_called()
@@ -81,7 +81,7 @@ class ExactGateContract(unittest.TestCase):
     def test_collection_plan_all_eight_actual_jobs_bind_independent_hashes(self):
         needs={}
         for short,profile in (('cu118','paddle-cuda11.8'),('cu126','paddle-cuda12.6')):
-            ctx=context();ctx['profile']=profile
+            ctx=context(profile)
             needs['produce-'+short]={'result':'success','outputs':{'context':json.dumps(ctx),'handoff_sha256':H,
                 'index_sha256':H,'source_artifact_id':'11','delivery_artifact_id':'12','raw_artifact_id':'13','delivery_bytes':'1234'}}
             needs['rebuild-'+short]={'result':'success','outputs':{'report_sha256':H,'report_artifact_id':'14','raw_artifact_id':'15'}}
