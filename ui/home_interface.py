@@ -176,16 +176,44 @@ class HomeInterface(QWidget):
         if capture is not None:
             capture.release()
 
+    def _ensure_preview_capture(self):
+        """Lazily reopen the selected preview, without resetting its slider or selections."""
+        self._require_gui_thread()
+        if self._closing or not self.video_path:
+            return None
+        capture = self.video_cap
+        if capture is not None:
+            try:
+                if capture.isOpened():
+                    return capture
+            except Exception:
+                self._release_preview()
+                raise
+            self._release_preview()
+        capture = cv2.VideoCapture(self.video_path)
+        try:
+            if not capture.isOpened():
+                return None
+            self.video_cap = capture
+            return capture
+        finally:
+            if self.video_cap is not capture:
+                capture.release()
+
     @Slot(int)
     def slider_changed(self, value):
         self._require_gui_thread()
-        capture = self.video_cap
-        if not self._closing and capture is not None and capture.isOpened():
-            capture.set(cv2.CAP_PROP_POS_FRAMES, value)
-            ret, frame = capture.read()
-            if ret:
-                # 更新预览图像
-                self.update_preview(frame)
+        capture = self._ensure_preview_capture()
+        if capture is not None:
+            try:
+                capture.set(cv2.CAP_PROP_POS_FRAMES, value)
+                ret, frame = capture.read()
+                if ret:
+                    # 更新预览图像
+                    self.update_preview(frame)
+            except Exception:
+                self._release_preview()
+                raise
 
     def ab_sections_changed(self, ab_sections):
         get_current_task_index = self.task_list_component.get_current_task_index()
@@ -253,6 +281,7 @@ class HomeInterface(QWidget):
             # 如果还有任务，选中第一个
             self.task_list_component.select_task(0)
         else:
+            self.video_path = None
             self._release_preview()
 
     def update_preview(self, frame):
@@ -650,7 +679,8 @@ class HomeInterface(QWidget):
         if self._closing:
             return False
         self._release_preview()
-        self.video_path = video_path
+        # Only a successfully decoded source may be reopened by a later seek.
+        self.video_path = None
         capture = cv2.VideoCapture(video_path)
         try:
             if not capture.isOpened():
@@ -662,7 +692,6 @@ class HomeInterface(QWidget):
             self.frame_height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
             self.frame_width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
             self.fps = capture.get(cv2.CAP_PROP_FPS)
-            self.video_cap = capture
             self.update_preview(frame)
             # The first decoded frame is already displayed. Do not cause
             # implicit seeks from range/value changes during replacement.
@@ -670,6 +699,9 @@ class HomeInterface(QWidget):
                 self.video_slider.setMaximum(self.frame_count)
                 self.video_slider.setValue(1)
             self.video_display_component.set_dragger_enabled(True)
+            # Publish ownership/path only after all preview initialization succeeds.
+            self.video_cap = capture
+            self.video_path = video_path
             return True
         finally:
             if self.video_cap is not capture:

@@ -224,6 +224,66 @@ class HomePreviewLifecycleTests(ThemeTestCase):
         self.assertEqual(job.task.progress, 100)
         self.assertTrue(all(thread == self.app.thread() for cap in self.captures for _, _, thread in cap.calls))
 
+    def test_seek_after_completion_reopens_preview_without_reselecting_task(self):
+        widget, worker = self.widget()
+        job = self.start(widget, worker)
+        old_capture = widget.video_cap
+        self.finish(widget, worker, job)
+        widget._start_next_task()
+        self.assertFalse(widget.running_task)
+        self.assertIsNone(widget.video_cap)
+        selected = widget.task_list_component.get_current_task_index()
+        selections = list(widget.video_display_component.selection_rects)
+        sections = list(widget.video_display_component.ab_sections)
+        with patch.object(widget, 'load_video', side_effect=AssertionError('seek must not reload the task')), \
+             patch.object(widget, 'update_preview', wraps=widget.update_preview) as paint:
+            widget.video_slider.setValue(24)
+            reopened = widget.video_cap
+            self.assertIsNotNone(reopened)
+            self.assertIsNot(reopened, old_capture)
+            paint.assert_called_once()
+            self.assertIn('set', [call[0] for call in reopened.calls])
+            count = len(self.captures)
+            widget.video_slider.setValue(31)
+            self.assertIs(widget.video_cap, reopened)
+            self.assertEqual(len(self.captures), count)
+        self.assertEqual(widget.video_slider.value(), 31)
+        self.assertEqual(widget.task_list_component.get_current_task_index(), selected)
+        self.assertEqual(widget.video_display_component.selection_rects, selections)
+        self.assertEqual(widget.video_display_component.ab_sections, sections)
+        self.assertEqual(job.task.status, TaskStatus.COMPLETED)
+        self.assertEqual(old_capture.release_count, 1)
+
+    def test_post_completion_seek_uses_selected_video_not_finished_job_video(self):
+        widget, worker = self.widget(('first.mp4', 'other.mp4'))
+        job = self.start(widget, worker)
+        widget.task_list_component.select_task(1)
+        selected_path = widget.video_path
+        self.assertNotEqual(selected_path, job.video_path)
+        self.finish(widget, worker, job)
+        widget._release_preview()
+        widget.video_slider.setValue(22)
+        self.assertIsNotNone(widget.video_cap)
+        self.assertEqual(widget.video_cap.path, selected_path)
+        self.assertEqual(widget.task_list_component.get_current_task_index(), 1)
+
+    def test_failed_lazy_reopen_releases_only_failed_capture_and_can_retry(self):
+        widget, worker = self.widget()
+        job = self.start(widget, worker)
+        self.finish(widget, worker, job)
+        failed = RecordingCapture(self, widget.video_path)
+        self.captures.append(failed)
+        with patch('ui.home_interface.cv2.VideoCapture', return_value=failed), \
+             patch.object(failed, 'isOpened', return_value=False), \
+             patch.object(widget, 'update_preview') as paint:
+            widget.video_slider.setValue(18)
+            self.assertIsNone(widget.video_cap)
+            self.assertEqual(failed.release_count, 1)
+            paint.assert_not_called()
+        widget.video_slider.setValue(19)
+        self.assertIsNotNone(widget.video_cap)
+        self.assertIsNot(widget.video_cap, failed)
+
     def test_terminal_progress_is_not_task_completion_and_duplicate_run_is_ignored(self):
         widget, worker = self.widget()
         job = self.start(widget, worker)
@@ -341,6 +401,10 @@ class HomePreviewLifecycleTests(ThemeTestCase):
         self.assertFalse(widget.running_task)
         self.assertEqual(widget.task_list_component.get_all_tasks(), [])
         self.assertEqual(capture.release_count, 1)
+        count = len(self.captures)
+        widget.slider_changed(12)
+        self.assertEqual(len(self.captures), count)
+        self.assertIsNone(widget.video_path)
 
     def test_reimport_same_path_does_not_adopt_old_task_or_release_new_preview(self):
         widget, worker = self.widget()
@@ -369,6 +433,9 @@ class HomePreviewLifecycleTests(ThemeTestCase):
         self.assertFalse(widget.running_task)
         self.assertIsNone(widget.video_cap)
         self.assertFalse(widget._next_task_timer.isActive())
+        count = len(self.captures)
+        widget.slider_changed(12)
+        self.assertEqual(len(self.captures), count)
 
     def test_shutdown_terminates_actual_owned_child_before_widget_deletion(self):
         widget, worker = self.widget()
@@ -411,6 +478,10 @@ class HomePreviewLifecycleTests(ThemeTestCase):
         self.assertIsNone(widget.video_cap)
         self.assertEqual(cap.release_count, 1)
         self.assertNotIn('set', [row[0] for row in cap.calls])
+        self.assertIsNone(widget.video_path)
+        count = len(self.captures)
+        widget.slider_changed(12)
+        self.assertEqual(len(self.captures), count)
 
     def run_process_pipeline(self, *, child_error=False, missing_finish=False,
                              delivery_error=False, nonzero_exit=False,
@@ -598,6 +669,16 @@ class HomePreviewLifecycleTests(ThemeTestCase):
                 widget._start_next_task()
                 self.assertEqual(job.task.status, TaskStatus.COMPLETED)
                 self.assertIsNone(widget.video_cap)
+                # Completion still releases the worker-time preview, but manual
+                # seeking must decode real, different frames without reselecting.
+                with patch.object(widget, 'update_preview', wraps=widget.update_preview) as paint:
+                    widget.video_slider.setValue(15)
+                    self.assertIsNotNone(widget.video_cap)
+                    bright = float(paint.call_args.args[0].mean())
+                    widget.video_slider.setValue(4)
+                    dark = float(paint.call_args.args[0].mean())
+                    self.assertGreater(bright, dark + 50)
+                self.assertEqual(job.task.status, TaskStatus.COMPLETED)
             self.assertTrue(any(name == 'set' for cap in self.captures for name, _, _ in cap.calls))
 
 
