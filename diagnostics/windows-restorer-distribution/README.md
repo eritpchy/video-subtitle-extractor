@@ -1,10 +1,10 @@
-# Final C45 CUDA same-byte restorer validation
+# Exact 2720 CUDA same-byte restorer validation
 
-Application target: `c45c0b03d3eef548caa69b8453e2aa80376098e9`, version **2.3.1**.
-Original main run **40722779064 / attempt 2** completed with all 22 required jobs successful;
-only three duplicate producers intentionally skipped. Candidate-set job **123262269181**
-validated all seven new canonical artifacts. Standard CI **40722711009 / attempt 2** was 6/6 successful.
-Driver patch base: `5df336d5af27e09ab1bdbf89f0afe4afb294c073` on the separate diagnostic branch.
+Application target: `2720ab309cdbce3c63bc9a7e2748930f3c1cafec`, version **2.3.1**.
+Original main run **40834467106 / attempt 1** completed with all 22 required jobs successful;
+only three duplicate producers intentionally skipped. Candidate-set job **123330516490**
+validated all seven new canonical artifacts. Standard CI **40834375090 / attempt 1** was 6/6 successful.
+Driver patch base: `d9141a2fcd610d4706e7d03e42424a30bd1181b3` on the separate diagnostic branch.
 No application source, existing published asset, tag, default branch or permission is changed.
 This driver does not supply redistribution authorization or claim that its nine Server jobs have
 passed. The actual diagnostic run, original reports and strict collector are the execution evidence.
@@ -14,8 +14,8 @@ passed. The actual diagnostic run, original reports and strict collector are the
 `pins.json` schema2 declares the repository, exact application SHA/version, successful main run,
 actual attempt, actual candidate-set job, both canonical producer jobs, artifact IDs/names,
 outer size/digest/expiry, original inner ZIP and checksum/receipt size/SHA, expansion and exact
-committed project-notice identity. The checked-in pins now bind the actual successful C45 attempt 2, canonical artifact
-**12873156512** (CUDA 11.8) and **12872860788** (CUDA 12.6), expiring **2026-10-30 03:41 UTC**.
+committed project-notice identity. The checked-in pins now bind the actual successful 2720 attempt 1, canonical artifact
+**12882245121** (CUDA 11.8) and **12881438248** (CUDA 12.6), expiring **2026-10-30 07:17:19 UTC**.
 No old attempt 1, 8f, 306 or 2.3.0 bytes are substituted. Incomplete or changed future inputs
 remain rejected before network, platform/toolchain activity or work-directory creation.
 
@@ -44,7 +44,7 @@ EXE/parts/source/report artifacts belong to this driver's own exact run/attempt.
 
 The old `acquire_notices` HTTP function is removed. No Microsoft DOCX or equivalent cached copy
 is read. The driver validates only the **committed project attribution**, byte-for-byte against
-its explicit pin and schema2 application manifest; the production C45 gate uses its existing
+its explicit pin and schema2 application manifest; the production 2720 gate uses its existing
 default notice input. The source companion verifier preserves exactly four required project,
 Apache and zlib notices. Project attribution is not a Microsoft license agreement. Applicable
 terms remain `applicable-terms-not-independently-verified`, publication authority false.
@@ -81,7 +81,7 @@ Use a real canonical task-owned temporary directory on macOS: its default `/var`
 correctly rejected by unchanged plain-ancestor checks. Do not weaken the production check.
 
 ```
-TMPDIR=/absolute/task-owned/real-temp VSE_REVIEW_SOURCE=/absolute/exact-C45/source \
+TMPDIR=/absolute/task-owned/real-temp VSE_REVIEW_SOURCE=/absolute/exact-2720/source \
   PYTHONDONTWRITEBYTECODE=1 python -B -m unittest discover \
   -s diagnostics/windows-restorer-distribution/tests -v
 python -B diagnostics/windows-restorer-distribution/sync_binding.py --check
@@ -100,9 +100,9 @@ and all nine native Server jobs before any distribution claim. No release is cre
 
 Real-source tests obtain their expected commit/version from the reviewed checked-in pins,
 never from the checkout under test. A clean arbitrary HEAD is explicitly rejected. A separate
-fixed-C45 audit rehashes raw commit/tree/blob Git objects and checks all 55 delivered source
-files against membership in tree `db057bf979c2e9c64a0df3ae1131ef3c0d7f60a4`, anchored by commit
-`c45c0b03d3eef548caa69b8453e2aa80376098e9`; a self-consistent SHA256 inventory alone is not proof.
+fixed-2720 audit rehashes raw commit/tree/blob Git objects and checks all 55 delivered source
+files against membership in tree `6b2a4591b4613eb45fdd641f55f5053217519cd1`, anchored by commit
+`2720ab309cdbce3c63bc9a7e2748930f3c1cafec`; a self-consistent SHA256 inventory alone is not proof.
 The import contract scans every `Import` alias and every `ImportFrom`, rejects relative or
 non-stdlib imports, and includes negative fixtures for both previously omitted forms.
 
@@ -137,3 +137,22 @@ SHA, materially changed source, CRLF ZIP members, missing members, foreign HEAD 
 corrupted raw objects fail. These offline contracts are not Windows compilation proof.
 New native execution is required for the new diagnostic commit; original C45 application
 CI and old diagnostic evidence remain separate. Rebuilt EXEs need not be bit-identical.
+
+
+## Exact2720 identity and timeout evidence boundary
+
+This binding update changes only pins, their synchronized bootstrap/checkout anchors, and this
+README. All nine-job driver logic, literal Git/LF checks, original seven legacy workflows,
+production build.py, fixed ZIP bytes and 60-second original OS-capture behavior remain unchanged.
+The application commit2720 includes the reviewed Defender parent capture fix. Native identity
+proposal dee8c1a is not injected into these packages or checkouts and is not certified here.
+
+The separate d914 run40834517723 succeeded on both Servers. Its original PowerShell controls
+took48.453s/34.781s and later marked controls23.516s/22.797s; this did not reproduce the original
+60-second timeout or identify which old statement hung. Neither warm/cold state nor a causal
+root-cause resolution is claimed. Any new timeout remains an actual failure; no retry, budget
+increase, synthesized identity or fallback is introduced. Old40819426925 remains6success/3failure.
+
+The nine jobs must consume this new exact2720 pin set. No C45 receipt, old producer EXE,
+source-only reconstruction or diagnostic source overlay can stand in for a2720 delivered EXE.
+GPU hardware and final local GUI acceptance remain outside these CPU-only Server jobs.
