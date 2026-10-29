@@ -9,7 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 import zipfile
@@ -474,7 +474,7 @@ class LauncherSourceAfterTests(unittest.TestCase):
             def fixture_environment(path, contaminated, inherited):
                 path.mkdir(); return inherited, {'cwd': str(path)}
             portable = SimpleNamespace(SCENARIOS=tuple(sorted(gate.SCENARIOS)), fixture_environment=fixture_environment,
-                write_json=gate.write_json, verify_payload=lambda *a: None, audit_environment=lambda *a: None,
+                write_json=gate.write_json, verify_payload=lambda *a: None, audit_environment=lambda *a, **kw: None,
                 audit_windows_executables=lambda *a: None)
             paddle = SimpleNamespace(GOLDEN_SHA256=gate.sha(golden), FIXTURE_MANIFEST_SHA256=gate.sha(pin))
             command = SimpleNamespace(launcher_command=lambda *a: ['SYNTHETIC-NOT-EXECUTABLE'])
@@ -502,5 +502,70 @@ class LauncherSourceAfterTests(unittest.TestCase):
             self.assertEqual({row['check'] for row in report['post_run_errors']}, {'fixtures-after', 'application-source-after'})
             self.assertEqual(report['application_source_after']['checks']['golden-after'], 'passed')
 
+
+
+class LauncherParentSecurityCaptureTests(unittest.TestCase):
+    """Mocked call-order/failed-parent capture only; not real Server certification."""
+
+    def run_fixture(self, capture_failure=False):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            baseline = root / 'source'
+            fixtures = baseline / 'native/ocr/tests/evidence'
+            fixtures.mkdir(parents=True)
+            (fixtures / 'fixture-manifest.json').write_bytes(b'{}')
+            (fixtures / 'fixture.bin').write_bytes(b'mock')
+            golden = fixtures.parent / 'goldens/smoke.json'
+            golden.parent.mkdir()
+            golden.write_bytes(b'{}')
+            payload = root / 'payload'
+            payload.mkdir()
+            (payload / 'bundle-manifest.json').write_text(json.dumps({'commit': 'c' * 40, 'platform': 'windows', 'arch': 'x64', 'ocr_backend': 'paddle', 'runtime_python': 'runtime/python.exe'}))
+            events = []
+
+            def write_json(path, value):
+                path.write_text(json.dumps(value))
+
+            def fixture_environment(path, contaminated, inherited):
+                path.mkdir()
+                return (inherited, {'cwd': str(path)})
+
+            def capture(*args, **kwargs):
+                events.append(('capture', kwargs.get('capture_windows_security')))
+                if capture_failure:
+                    raise RuntimeError('MOCK pre-workload collection failed')
+            portable = SimpleNamespace(SCENARIOS=('clean-host-path', 'contaminated-host-environment'), fixture_environment=fixture_environment, write_json=write_json, verify_payload=lambda *a: None, audit_environment=capture, audit_windows_executables=lambda *a: None)
+            paddle = SimpleNamespace(GOLDEN_SHA256=hashlib.sha256(golden.read_bytes()).hexdigest(), FIXTURE_MANIFEST_SHA256=hashlib.sha256(b'{}').hexdigest())
+            package = ModuleType('scripts')
+            package.__path__ = []
+            modules = {'scripts': package, 'scripts.verify_portable_environment': portable, 'scripts.check_paddle_models': paddle, 'scripts.accept_release_archive': SimpleNamespace(), 'scripts.portable_python': SimpleNamespace(launcher_command=lambda *a: ['MOCK_NOT_EXECUTABLE'])}
+            package.verify_portable_environment = portable
+            package.check_paddle_models = paddle
+            package.accept_release_archive = modules['scripts.accept_release_archive']
+
+            def git(argv, **kwargs):
+                return 'c' * 40 + '\n' if argv[-1] == 'HEAD' else ''
+
+            def child(argv, **kwargs):
+                events.append(('child', None))
+                raise subprocess.CalledProcessError(9, argv)
+            original_path = sys.path[:]
+            try:
+                with patch.dict(sys.modules, modules), patch.object(launcher_audit, 'audit_source_hashes', return_value={'mock': '0' * 64}), patch.object(launcher_audit.subprocess, 'check_output', side_effect=git), patch.object(launcher_audit.subprocess, 'run', side_effect=child):
+                    with self.assertRaisesRegex(RuntimeError, 'One or more restored-launcher scenarios failed'):
+                        launcher_audit.main(['--application-source', str(baseline), '--application-commit', 'c' * 40, '--root', str(payload), '--output', str(root / 'output'), '--runner', 'windows-2022'])
+            finally:
+                sys.path[:] = original_path
+            report = json.loads((root / 'output/restored-launcher-report.json').read_bytes())
+            self.assertEqual(report['result'], 'failed')
+            self.assertEqual(len(report['scenarios']), 2)
+            self.assertEqual(report['post_run_errors'], [])
+            return events
+
+    def test_trusted_parent_requests_capture_before_each_launcher(self):
+        self.assertEqual(self.run_fixture(), [('capture', True), ('child', None), ('capture', True), ('child', None)])
+
+    def test_pre_capture_failure_cannot_start_either_launcher_or_pass(self):
+        self.assertEqual(self.run_fixture(True), [('capture', True), ('capture', True)])
 
 if __name__ == '__main__': unittest.main()

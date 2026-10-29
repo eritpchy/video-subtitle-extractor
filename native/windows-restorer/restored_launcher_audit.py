@@ -107,7 +107,7 @@ def main(argv=None):
                 portable.write_json(evidence / 'fixture.json', fixture)
                 portable.verify_payload(root, manifest)
                 audit = evidence / 'dependency-isolation'
-                portable.audit_environment(root, audit)
+                portable.audit_environment(root, audit, capture_windows_security=True)
                 portable.audit_windows_executables(root, root / manifest['runtime_python'], audit)
                 command = launcher_command(root, 'windows', ['--verify', '--results-dir', str(evidence),
                     '--runtime-audit-dir', str(audit), '--paddle-model-fixtures', str(fixtures)])
